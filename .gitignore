@@ -4,3 +4,5 @@ coverage
 .pack
 *.log
 .DS_Store
+build
+.stryker-tmp
