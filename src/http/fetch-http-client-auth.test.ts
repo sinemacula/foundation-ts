@@ -496,3 +496,62 @@ describe('FetchHttpClient - default fetchFn', () => {
         expect(result).toStrictEqual({ global: true });
     });
 });
+
+// ---------------------------------------------------------------------------
+// RN runtime fallbacks
+// ---------------------------------------------------------------------------
+
+describe('FetchHttpClient - runtime fallbacks', () => {
+    it('treats a non-object fetch rejection as a network failure', async () => {
+        const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue('boom');
+        const client = makeClient(fetchFn);
+
+        const error = await client.get('/items').catch(error => error);
+
+        expect(error).toBeInstanceOf(NetworkError);
+    });
+
+    it('treats a null fetch rejection as a network failure', async () => {
+        const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(null);
+        const client = makeClient(fetchFn);
+
+        const error = await client.get('/items').catch(error => error);
+
+        expect(error).toBeInstanceOf(NetworkError);
+    });
+
+    it('skips the timeout signal when AbortSignal.timeout is unavailable', async () => {
+        const original = AbortSignal.timeout;
+
+        (AbortSignal as unknown as { timeout: typeof original | undefined }).timeout = undefined;
+
+        try {
+            const fetchFn = makeFetch(async () => jsonResponse({}));
+            const client = makeClient(fetchFn, { timeout: 5000 });
+
+            await client.get('/items');
+
+            expect(lastInit(fetchFn).signal).toBeNull();
+        } finally {
+            (AbortSignal as unknown as { timeout: typeof original }).timeout = original;
+        }
+    });
+
+    it('falls back to the caller signal when AbortSignal.any is unavailable', async () => {
+        const original = AbortSignal.any;
+
+        (AbortSignal as unknown as { any: typeof original | undefined }).any = undefined;
+
+        try {
+            const fetchFn = makeFetch(async () => jsonResponse({}));
+            const client = makeClient(fetchFn, { timeout: 5000 });
+            const controller = new AbortController();
+
+            await client.get('/items', { signal: controller.signal }).catch(() => undefined);
+
+            expect(lastInit(fetchFn).signal).toBe(controller.signal);
+        } finally {
+            (AbortSignal as unknown as { any: typeof original }).any = original;
+        }
+    });
+});

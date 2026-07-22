@@ -482,7 +482,11 @@ export class FetchHttpClient implements HttpClient {
             return timeoutSignal;
         }
 
-        return timeoutSignal === null ? callerSignal : AbortSignal.any([callerSignal, timeoutSignal]);
+        if (timeoutSignal === null || typeof AbortSignal.any !== 'function') {
+            return callerSignal;
+        }
+
+        return AbortSignal.any([callerSignal, timeoutSignal]);
     }
 
     /**
@@ -492,7 +496,11 @@ export class FetchHttpClient implements HttpClient {
      * timeout is configured
      */
     #buildTimeoutSignal(): AbortSignal | null {
-        return this.#timeout === null ? null : AbortSignal.timeout(this.#timeout);
+        if (this.#timeout === null || typeof AbortSignal.timeout !== 'function') {
+            return null;
+        }
+
+        return AbortSignal.timeout(this.#timeout);
     }
 
     /**
@@ -545,10 +553,10 @@ function isUploadBody(body: unknown): body is FormData | Blob {
  * a genuine transport failure.
  *
  * @param error - the value fetch rejected with
- * @returns true when the error is a DOMException named AbortError
+ * @returns true when the error is named AbortError
  */
 function isAbortError(error: unknown): boolean {
-    return error instanceof DOMException && error.name === 'AbortError';
+    return typeof error === 'object' && error !== null && (error as { readonly name?: unknown }).name === 'AbortError';
 }
 
 /**
