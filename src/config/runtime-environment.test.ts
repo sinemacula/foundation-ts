@@ -48,56 +48,56 @@ describe('fetchRuntimeEnvironment', () => {
                 ]),
             ),
         );
-        const result = await fetchRuntimeEnvironment(stub, URL);
+        const result = await fetchRuntimeEnvironment(URL, stub);
 
         expect(result).toStrictEqual(wire([['API_URL', 'https://api.example.com']]));
     });
 
     it('returns an empty record for a non-ok response', async () => {
         const stub = vi.fn().mockResolvedValue(jsonResponse({}, 404));
-        const result = await fetchRuntimeEnvironment(stub, URL);
+        const result = await fetchRuntimeEnvironment(URL, stub);
 
         expect(result).toStrictEqual({});
     });
 
     it('returns an empty record when fetch throws', async () => {
         const stub = vi.fn().mockRejectedValue(new Error('network error'));
-        const result = await fetchRuntimeEnvironment(stub, URL);
+        const result = await fetchRuntimeEnvironment(URL, stub);
 
         expect(result).toStrictEqual({});
     });
 
     it('returns an empty record when the payload is null', async () => {
         const stub = vi.fn().mockResolvedValue(jsonResponse(null));
-        const result = await fetchRuntimeEnvironment(stub, URL);
+        const result = await fetchRuntimeEnvironment(URL, stub);
 
         expect(result).toStrictEqual({});
     });
 
     it('returns an empty record when the payload is an array', async () => {
         const stub = vi.fn().mockResolvedValue(jsonResponse(['a', 'b']));
-        const result = await fetchRuntimeEnvironment(stub, URL);
+        const result = await fetchRuntimeEnvironment(URL, stub);
 
         expect(result).toStrictEqual({});
     });
 
     it('returns an empty record when the payload is a primitive string', async () => {
         const stub = vi.fn().mockResolvedValue(jsonResponse('just a string'));
-        const result = await fetchRuntimeEnvironment(stub, URL);
+        const result = await fetchRuntimeEnvironment(URL, stub);
 
         expect(result).toStrictEqual({});
     });
 
     it('returns an empty record when the payload is a number', async () => {
         const stub = vi.fn().mockResolvedValue(jsonResponse(123));
-        const result = await fetchRuntimeEnvironment(stub, URL);
+        const result = await fetchRuntimeEnvironment(URL, stub);
 
         expect(result).toStrictEqual({});
     });
 
     it('passes the given url to the fetch function', async () => {
         const stub = vi.fn().mockResolvedValue(jsonResponse(wire([['KEY', 'val']])));
-        await fetchRuntimeEnvironment(stub, '/custom/runtime-env.json');
+        await fetchRuntimeEnvironment('/custom/runtime-env.json', stub);
 
         expect(stub).toHaveBeenCalledWith('/custom/runtime-env.json', expect.objectContaining({ cache: 'no-store' }));
     });
@@ -107,7 +107,7 @@ describe('fetchRuntimeEnvironment', () => {
 
         vi.stubGlobal('fetch', globalStub);
 
-        const result = await fetchRuntimeEnvironment(undefined, URL);
+        const result = await fetchRuntimeEnvironment(URL);
 
         expect(result).toStrictEqual(wire([['RUNTIME', 'yes']]));
         expect(globalStub).toHaveBeenCalled();

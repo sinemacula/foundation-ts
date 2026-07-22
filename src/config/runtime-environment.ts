@@ -14,13 +14,13 @@
 /**
  * Fetch and normalise the runtime environment document.
  *
- * @param fetchFn - the fetch implementation to use
  * @param url - the document location
+ * @param fetchFn - the fetch implementation to use
  * @returns the string-valued entries of the document, or an empty record
  */
 export async function fetchRuntimeEnvironment(
-    fetchFn: typeof fetch = (input, init) => globalThis.fetch(input, init),
     url: string,
+    fetchFn: typeof fetch = (input, init) => globalThis.fetch(input, init),
 ): Promise<Record<string, string>> {
     try {
         const response = await fetchFn(url, { cache: 'no-store', headers: { accept: 'application/json' } });

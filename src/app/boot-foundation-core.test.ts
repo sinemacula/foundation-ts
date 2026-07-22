@@ -130,9 +130,10 @@ describe('bootFoundationCore', () => {
     });
 
     it('passes the fetched runtime document into createEnvironment', async () => {
+        const runtimeDocument = Object.fromEntries([['API_URL', 'https://runtime.example.com']]);
         const fetchFn = vi
             .fn()
-            .mockResolvedValue(new Response(JSON.stringify({ API_URL: 'https://runtime.example.com' }), { status: 200 }));
+            .mockResolvedValue(new Response(JSON.stringify(runtimeDocument), { status: 200 }));
         const createEnvironment = vi.fn().mockReturnValue(environmentOf());
 
         await bootFoundationCore(
@@ -148,7 +149,7 @@ describe('bootFoundationCore', () => {
             '/runtime-env.json',
         );
 
-        expect(createEnvironment).toHaveBeenCalledWith({ API_URL: 'https://runtime.example.com' });
+        expect(createEnvironment).toHaveBeenCalledWith(runtimeDocument);
     });
 
     it('invokes the registration bridge once, after installs, with the repository and environment', async () => {

@@ -13,16 +13,16 @@
  * Route identity - one configurable source feeding the guards, the session-loss
  * redirect, and the redirect sanitiser's loop guard.
  */
-export interface SessionRoutes<TLocation> {
+export interface SessionRoutes<L> {
     /** Where unauthenticated visitors are sent. */
-    readonly login: TLocation;
+    readonly login: L;
 
     /** The login-path prefix rejected by the redirect sanitiser as a loop guard. Applications renaming the login path set `login` and `loginPath` together. */
     readonly loginPath: string;
 
     /** Where authenticated visitors leaving guest-only routes are sent. */
-    readonly home: TLocation;
+    readonly home: L;
 
     /** Where authenticated-but-unauthorised visitors are sent. */
-    readonly forbidden: TLocation;
+    readonly forbidden: L;
 }

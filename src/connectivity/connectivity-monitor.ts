@@ -23,10 +23,14 @@ export interface ConnectivityMonitor {
     /** The current connectivity state. */
     readonly online: boolean;
 
-    /** Begin observing connectivity changes. A no-op when already started. */
+    /**
+     * Begin observing connectivity changes. A no-op when already started.
+     */
     start(): void;
 
-    /** Stop observing and detach listeners. A no-op when not started. */
+    /**
+     * Stop observing and detach listeners. A no-op when not started.
+     */
     stop(): void;
 
     /**

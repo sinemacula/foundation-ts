@@ -114,11 +114,7 @@ export interface FoundationCoreOptions<T extends FoundationConfig> {
         readonly client?: (tools: WireHttpClientTools<T>) => HttpClient;
     };
 
-    /**
-     * The platform's module-registration step. Invoked once, after every core
-     * service above is installed and before the HTTP client is built, so module
-     * register hooks may read the core accessors and contribute interceptors.
-     */
+    /** The platform's module-registration step. Invoked once, after every core service above is installed and before the HTTP client is built, so module register hooks may read the core accessors and contribute interceptors. */
     readonly collectHttpContributions: (registration: FoundationCoreRegistration<T>) => ModuleHttpContributions;
 
     /** Phase observer; the kernel threads its own boot recorder through. */
@@ -163,7 +159,7 @@ export async function bootFoundationCore<T extends FoundationConfig>(
 ): Promise<FoundationCore<T>> {
     options.onPhase?.('runtime-environment');
 
-    const runtime = await fetchRuntimeEnvironment(platform.fetchFn, runtimeUrl);
+    const runtime = await fetchRuntimeEnvironment(runtimeUrl, platform.fetchFn);
 
     options.onPhase?.('configuration');
 

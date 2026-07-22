@@ -556,7 +556,7 @@ function isUploadBody(body: unknown): body is FormData | Blob {
  * @returns true when the error is named AbortError
  */
 function isAbortError(error: unknown): boolean {
-    return typeof error === 'object' && error !== null && (error as { readonly name?: unknown }).name === 'AbortError';
+    return typeof error === 'object' && error !== null && (error as Record<string, unknown>)['name'] === 'AbortError';
 }
 
 /**

@@ -1,11 +1,11 @@
 /**
  * Colour-scheme state machine.
  *
- * Resolves the active scheme from a stored preference (or the OS when `system`),
- * applies it through the platform applier, and tracks OS changes while the
- * preference is `system`. The OS source and the applier are injected ports, so
- * the state machine is framework- and DOM-free (matchMedia + DOM stamping on
- * web, Appearance + a native applier on mobile).
+ * Resolves the active scheme from a stored preference (or the OS when
+ * `system`), applies it through the platform applier, and tracks OS changes
+ * while the preference is `system`. The OS source and the applier are injected
+ * ports, so the state machine is framework- and DOM-free (matchMedia + DOM
+ * stamping on web, Appearance + a native applier on mobile).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,7 +21,9 @@ const DEFAULT_PREFERENCE: ColorSchemePreference = 'system';
  * to OS-scheme changes.
  */
 export interface SystemColorSchemeSource {
-    /** Whether the OS currently prefers a dark scheme. */
+    /**
+     * Whether the OS currently prefers a dark scheme.
+     */
     prefersDark(): boolean;
 
     /**
