@@ -1,0 +1,55 @@
+{
+    "name": "@sinemacula/foundation",
+    "version": "0.0.0",
+    "description": "Platform-agnostic TypeScript foundation: the framework-free ports and logic (http, config, storage, query, realtime, authorization, logging, i18n) shared by Sine Macula's web and mobile kernels.",
+    "license": "Apache-2.0",
+    "author": "Ben Carey <bdmc@sinemacula.co.uk>",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/sinemacula/foundation-ts.git"
+    },
+    "homepage": "https://github.com/sinemacula/foundation-ts#readme",
+    "bugs": {
+        "url": "https://github.com/sinemacula/foundation-ts/issues"
+    },
+    "keywords": ["sine macula", "foundation", "kernel", "typescript", "framework-agnostic", "ports"],
+    "type": "module",
+    "engines": {
+        "node": ">=22"
+    },
+    "packageManager": "npm@11.11.0",
+    "exports": {
+        "./*": "./src/*.ts"
+    },
+    "files": ["dist", "README.md", "LICENSE"],
+    "publishConfig": {
+        "access": "public",
+        "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+        "build:dist": "node scripts/build.mjs",
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:coverage": "vitest run --coverage",
+        "test:mutation": "stryker run",
+        "check": "qlty check",
+        "fmt": "qlty fmt",
+        "smells": "qlty smells",
+        "deadcode": "knip",
+        "check:pkg": "rm -rf .pack && mkdir -p .pack && npm pack --pack-destination .pack --silent && publint .pack/*.tgz && attw .pack/*.tgz"
+    },
+    "devDependencies": {
+        "@arethetypeswrong/cli": "^0.18.5",
+        "@sinemacula/coding-standards": "^1.13.0",
+        "@stryker-mutator/core": "^9.6.1",
+        "@stryker-mutator/vitest-runner": "^9.6.1",
+        "@types/node": "^25.9.3",
+        "@vitest/coverage-v8": "^4.1.8",
+        "knip": "^6.16.1",
+        "mkdist": "^2.4.1",
+        "publint": "^0.3.21",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8"
+    }
+}
