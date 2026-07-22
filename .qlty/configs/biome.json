@@ -1,0 +1,30 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.0.0/schema.json",
+    "root": true,
+    "extends": ["./../sources/https---github-com-sinemacula-coding-standards/v1.17.0/js/biome.json"],
+    "files": {
+        "ignoreUnknown": true,
+        "includes": [
+            "**",
+            "!**/node_modules/**",
+            "!**/.qlty/**",
+            "!**/dist/**",
+            "!**/build/**",
+            "!**/coverage/**",
+            "!**/*.vue"
+        ]
+    },
+    "overrides": [
+        {
+            "includes": ["src/**"],
+            "linter": {
+                "rules": {
+                    "performance": {
+                        "noBarrelFile": "warn",
+                        "noReExportAll": "warn"
+                    }
+                }
+            }
+        }
+    ]
+}

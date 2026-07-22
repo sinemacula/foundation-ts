@@ -1,0 +1,126 @@
+# Reference: https://qlty.sh/d/qlty-toml
+#
+# Code-quality configuration for both the Qlty CLI and Qlty Cloud. Lint and
+# format rules come from the shared sinemacula/coding-standards source; this
+# file wires that source in and selects the plugins relevant to a TypeScript
+# repository.
+config_version = "0"
+
+exclude_patterns = [
+    "*_min.*",
+    "*-min.*",
+    "*.min.*",
+    "**/*.d.ts",
+    "**/build/**",
+    "**/coverage/**",
+    "**/dist/**",
+    "**/node_modules/**",
+    "**/vendor/**",
+    ".sinemacula/**",
+]
+
+test_patterns = [
+    "**/test/**",
+    "**/spec/**",
+    "**/*.test.*",
+    "**/*.spec.*",
+    "**/*_test.*",
+    "**/*_spec.*",
+    "**/test_*.*",
+    "**/spec_*.*",
+]
+
+[smells]
+mode = "comment"
+
+[[source]]
+name = "default"
+default = true
+
+[[source]]
+name = "sinemacula"
+repository = "https://github.com/sinemacula/coding-standards"
+tag = "v1.17.0"
+
+[runtimes.enabled]
+node = "24.18.0"
+
+[[plugin]]
+name = "markdownlint"
+mode = "comment"
+
+[[plugin]]
+name = "yamllint"
+
+[[plugin]]
+name = "shellcheck"
+
+[[plugin]]
+name = "actionlint"
+
+[[plugin]]
+name = "editorconfig-checker"
+
+[[plugin]]
+name = "shfmt"
+mode = "comment"
+
+[[plugin]]
+name = "osv-scanner"
+
+[[plugin]]
+name = "trivy"
+drivers = [
+    "config",
+    "fs-vuln",
+]
+
+[[plugin]]
+name = "trufflehog"
+
+# config_files keeps ${config_file} a single path (qlty else also globs a root
+# biome.json); --config-path stops Biome v2 walking .qlty/sources and aborting.
+[plugins.definitions.biome]
+config_files = [".qlty/configs/biome.json"]
+
+[plugins.definitions.biome.drivers.lint]
+script = "biome lint --reporter=json ${config_script} ${target}"
+config_script = "--config-path .qlty/configs"
+
+[plugins.definitions.biome.drivers.format]
+script = "biome format --write ${config_script} ${target}"
+config_script = "--config-path .qlty/configs"
+output = "rewrite"
+batch = true
+cache_results = true
+suggested = "targets"
+
+[[plugin]]
+name = "biome"
+version = "2.3.15"
+mode = "comment"
+
+# ESLint runs the shared @sinemacula/coding-standards flat config alongside
+# Biome, adding the structural custom rules Biome cannot express. Both the
+# config and its tooling live under .qlty so the repo root stays clean;
+# package_filters carries the shared config and its peers into the eslint
+# sandbox, which otherwise installs only eslint/jest/prettier.
+[plugins.definitions.eslint]
+config_files = [".qlty/configs/eslint.config.mjs"]
+
+# Type-aware linting needs the repository's own dependencies present when the
+# analysis runs from a bare checkout.
+[plugins.definitions.eslint.drivers.lint]
+prepare_script = "npm install"
+
+[[plugin]]
+name = "eslint"
+mode = "comment"
+package_file = ".qlty/configs/eslint/package.json"
+package_filters = ["eslint", "typescript", "typescript-eslint", "@typescript-eslint", "eslint-plugin-jsdoc", "eslint-plugin-check-file", "@sinemacula/coding-standards"]
+
+# The eslint config lives under .qlty; do not lint .qlty with eslint (it would
+# otherwise flag its own config file).
+[[exclude]]
+plugins = ["eslint"]
+file_patterns = [".qlty/**"]
