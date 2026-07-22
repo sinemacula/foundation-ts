@@ -16,7 +16,7 @@ import { CancelledError, HttpError } from './http-error';
 // ---------------------------------------------------------------------------
 
 /** Explicit overload signature so mock.calls carries a typed tuple, not []. */
-type FetchArgs = [input: RequestInfo | URL, init?: RequestInit];
+type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 
 // ---------------------------------------------------------------------------
 // Helpers
