@@ -111,7 +111,7 @@ config_files = [".qlty/configs/eslint.config.mjs"]
 # Type-aware linting needs the repository's own dependencies present when the
 # analysis runs from a bare checkout.
 [plugins.definitions.eslint.drivers.lint]
-prepare_script = "npm install"
+prepare_script = "npm ci"
 
 [[plugin]]
 name = "eslint"
