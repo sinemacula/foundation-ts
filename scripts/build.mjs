@@ -26,7 +26,10 @@ const { writtenFiles } = await mkdist({
     cleanDist: true,
     format: 'esm',
     ext: 'js',
-    pattern: ['**/*.ts', '!**/*.test.ts', '!**/test-support/**'],
+    // Unlike the web kernel, test-support is NOT excluded here: the realtime
+    // connection contract is a published dev-support entry, and it is the only
+    // test-support content in this package.
+    pattern: ['**/*.ts', '!**/*.test.ts'],
     declaration: true,
     addRelativeDeclarationExtensions: true,
 });
