@@ -84,7 +84,9 @@
         "registry": "https://registry.npmjs.org/"
     },
     "scripts": {
+        "build": "node scripts/build.mjs",
         "build:dist": "node scripts/build.mjs",
+        "mutation:scope": "node scripts/mutation-scope.mjs",
         "typecheck": "tsc --noEmit",
         "test": "vitest run",
         "test:watch": "vitest",

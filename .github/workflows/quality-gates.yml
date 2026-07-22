@@ -1,0 +1,49 @@
+# ==============================================================================
+# QUALITY GATES
+# ==============================================================================
+name: Quality Gates
+
+# ==============================================================================
+# TRIGGERS
+# ==============================================================================
+on:
+    push:
+        branches: [ master ]
+    pull_request:
+        types: [ opened, synchronize, reopened, ready_for_review ]
+    schedule:
+        -   cron: 0 3 * * 1
+    workflow_dispatch:
+
+# ==============================================================================
+# CONCURRENCY
+# ==============================================================================
+concurrency:
+    group: quality-gates-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+# ==============================================================================
+# PERMISSIONS
+# ==============================================================================
+permissions:
+    contents: read
+
+# ==============================================================================
+# DEFAULTS
+# ==============================================================================
+defaults:
+    run:
+        shell: bash
+
+jobs:
+
+    # ==========================================================================
+    # JOB: GATES
+    # ==========================================================================
+    # Knip and mutation (scoped on PRs, full on schedule) from the shared
+    # reusable workflow. This package ships no bundle, so the size budget is
+    # off.
+    gates:
+        uses: sinemacula/.github/.github/workflows/node-quality-gates.yml@v1.6.1
+        with:
+            run-size: false

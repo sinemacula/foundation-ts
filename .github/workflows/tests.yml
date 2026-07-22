@@ -1,0 +1,37 @@
+# ==============================================================================
+# TESTS
+# ==============================================================================
+name: Tests
+
+# ==============================================================================
+# TRIGGERS
+# ==============================================================================
+on:
+    push:
+        branches: [ master ]
+    pull_request:
+        types: [ opened, synchronize, reopened, ready_for_review ]
+    workflow_dispatch:
+
+# ==============================================================================
+# CONCURRENCY
+# ==============================================================================
+concurrency:
+    group: tests-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+jobs:
+
+    # ==========================================================================
+    # JOB: TESTS
+    # ==========================================================================
+    # Typecheck, unit tests at 100% coverage across the Node matrix, and the
+    # build - all from the shared reusable workflow. This package has no
+    # browser surface, so the e2e job is off.
+    tests:
+        uses: sinemacula/.github/.github/workflows/node-tests.yml@v1.6.1
+        permissions:
+            contents: read
+            id-token: write
+        with:
+            run-e2e: false
