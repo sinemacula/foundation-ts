@@ -1,0 +1,55 @@
+{
+    "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+    "extends": ["github>sinemacula/coding-standards"],
+    "description": [
+        "Local override on top of the shared preset. Dependabot owns security remediation (its automated security-fix PRs stay on), so Renovate cedes vulnerability PRs and handles routine version currency only - the two tools never open a PR for the same fix.",
+        "General updates are scoped to this repo's own manifest so the qlty ESLint tool sandbox keeps taking its versions from the standard alone.",
+        "Non-major updates automerge once the required checks pass; a short stability window (minimumReleaseAge) holds every update so a broken or yanked release is never merged unattended. Majors and peer-range changes stay behind Dependency Dashboard approval so a human reads the changelog."
+    ],
+    "vulnerabilityAlerts": {
+        "enabled": false
+    },
+    "minimumReleaseAge": "3 days",
+    "packageRules": [
+        {
+            "description": "Re-enable general dependency updates that the shared preset's catch-all disables. Scoped to this repo's own manifest so the qlty tool sandbox keeps taking its versions from the standard alone.",
+            "matchFileNames": ["package.json"],
+            "matchDepTypes": ["dependencies", "devDependencies", "peerDependencies"],
+            "enabled": true
+        },
+        {
+            "description": "Default catch-all: one grouped non-major PR, automerged when the required checks pass.",
+            "matchFileNames": ["package.json"],
+            "matchDepTypes": ["dependencies", "devDependencies"],
+            "matchUpdateTypes": ["minor", "patch"],
+            "groupName": "dependencies (non-major)",
+            "automerge": true
+        },
+        {
+            "description": "Build and test tooling moves together, automerged when the required checks pass.",
+            "matchFileNames": ["package.json"],
+            "matchDepTypes": ["devDependencies"],
+            "matchPackageNames": ["vitest", "@vitest/**", "typescript", "knip", "mkdist", "publint", "@stryker-mutator/**", "@arethetypeswrong/cli", "@types/node"],
+            "matchUpdateTypes": ["minor", "patch"],
+            "groupName": "build and test tooling",
+            "automerge": true
+        },
+        {
+            "description": "Peer ranges are the published contract: widen rather than replace, and never open a PR without approval.",
+            "matchFileNames": ["package.json"],
+            "matchDepTypes": ["peerDependencies"],
+            "groupName": "peer dependency ranges",
+            "rangeStrategy": "widen",
+            "dependencyDashboardApproval": true,
+            "automerge": false
+        },
+        {
+            "description": "Majors are reviewed one at a time, behind dashboard approval.",
+            "matchFileNames": ["package.json"],
+            "matchDepTypes": ["dependencies", "devDependencies"],
+            "matchUpdateTypes": ["major"],
+            "dependencyDashboardApproval": true,
+            "automerge": false
+        }
+    ]
+}
