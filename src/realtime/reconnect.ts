@@ -1,10 +1,10 @@
 /**
  * Shared reconnect sequencing for the realtime transport adapters.
  *
- * Both the EventSource and WebSocket adapters reconnect with the same rule: run
- * the optional beforeReconnect hook first, and treat a disconnect that lands
- * while the hook is pending as authoritative once it settles. That shared rule
- * lives here so the two adapters cannot drift.
+ * Every realtime transport adapter reconnects with the same rule: run the
+ * optional beforeReconnect hook first, and treat a disconnect that lands while
+ * the hook is pending as authoritative once it settles. That shared rule lives
+ * here so the adapters cannot drift.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

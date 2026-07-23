@@ -1,83 +1,64 @@
 /**
- * Unit tests for filter-expression type contracts.
+ * Compile-time contract tests for the filter-expression types.
  *
- * This file validates that the exported types accept and reject values as
- * intended. Runtime assertions are minimal because the types are pure
- * structural declarations; the real coverage lives in api-query.test.ts.
+ * The exported types are pure structural declarations, so their contract is
+ * assignability - enforced here through type-level assertions the typecheck
+ * gate fails on drift. Runtime behaviour over these shapes is covered in
+ * api-query.test.ts.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expectTypeOf, it } from 'vitest';
 
 import type { FilterOperators, FilterScalar, FilterTree } from './filter-expression';
 
 describe('FilterScalar', () => {
-    it('accepts a string', () => {
-        const value: FilterScalar = 'hello';
-
-        expect(typeof value).toBe('string');
-    });
-
-    it('accepts a number', () => {
-        const value: FilterScalar = 42;
-
-        expect(typeof value).toBe('number');
-    });
-
-    it('accepts a boolean', () => {
-        const value: FilterScalar = true;
-
-        expect(typeof value).toBe('boolean');
+    it('accepts strings, numbers and booleans, and rejects objects', () => {
+        expectTypeOf<string>().toExtend<FilterScalar>();
+        expectTypeOf<number>().toExtend<FilterScalar>();
+        expectTypeOf<boolean>().toExtend<FilterScalar>();
+        expectTypeOf<{ nested: true }>().not.toExtend<FilterScalar>();
     });
 });
 
 describe('FilterOperators', () => {
-    it('accepts a fully-populated operator map', () => {
-        const ops: FilterOperators = {
+    it('accepts fully-populated and partial operator maps', () => {
+        expectTypeOf<{
             // biome-ignore-start lint/style/useNamingConvention: toolkit keys
-            $eq: 'Alice',
-            $neq: 'Bob',
-            $gt: 18,
-            $lt: 65,
-            $ge: 18,
-            $le: 65,
-            $like: 'ali',
-            $in: ['a', 'b'],
-            $between: [1, 10],
-            $contains: 'x',
-            $null: true,
-            $notNull: true,
+            $eq: string;
+            $neq: string;
+            $gt: number;
+            $lt: number;
+            $ge: number;
+            $le: number;
+            $like: string;
+            $in: string[];
+            $between: [number, number];
+            $contains: string;
+            $null: true;
+            $notNull: true;
             // biome-ignore-end lint/style/useNamingConvention: toolkit keys
-        };
-
-        expect(ops.$eq).toBe('Alice');
-        expect(ops.$in).toEqual(['a', 'b']);
-        expect(ops.$between).toEqual([1, 10]);
-        expect(ops.$null).toBe(true);
-        expect(ops.$notNull).toBe(true);
+        }>().toExtend<FilterOperators>();
+        // biome-ignore lint/style/useNamingConvention: toolkit keys
+        expectTypeOf<{ $ge: number }>().toExtend<FilterOperators>();
     });
 
-    it('accepts a partial operator map', () => {
+    it('rejects unknown operator keys', () => {
         // biome-ignore lint/style/useNamingConvention: toolkit keys
-        const ops: FilterOperators = { $ge: 18 };
-
-        expect(ops.$ge).toBe(18);
-        expect(ops.$le).toBeUndefined();
+        expectTypeOf<{ $regex: string }>().not.toExtend<FilterOperators>();
     });
 });
 
 describe('FilterTree', () => {
-    it('accepts an arbitrary record of unknown values', () => {
-        const tree: FilterTree = {
-            name: 'Alice',
+    it('accepts field conditions, operator maps and group keys', () => {
+        expectTypeOf<{
+            name: string;
             // biome-ignore-start lint/style/useNamingConvention: toolkit keys
-            age: { $ge: 18 },
-            $and: { status: 'active' },
+            age: { $ge: number };
+            $and: { status: string };
             // biome-ignore-end lint/style/useNamingConvention: toolkit keys
-        };
-
-        expect(tree['name']).toBe('Alice');
+        }>().toExtend<FilterTree>();
     });
 });

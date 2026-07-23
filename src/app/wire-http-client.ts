@@ -3,8 +3,8 @@
  *
  * Builds the application HTTP client from the frozen configuration, the
  * resolved fetch seam, preset-level interceptors, and the module registry's
- * register-phase contributions, then installs it into the kernel http holder.
- * The response-error handler resolves in precedence order: an explicit override
+ * register-phase contributions, then installs it into the base http holder. The
+ * response-error handler resolves in precedence order: an explicit override
  * wins; otherwise a configured toast key arms the default handler, which skips
  * validation failures and 401s, raises the application's toast, and captures
  * the error with request context; otherwise unexpected failures are captured
@@ -26,9 +26,9 @@ import type { FoundationConfig } from './foundation-config';
 /**
  * The resolved construction inputs handed to a client-factory override.
  */
-export interface WireHttpClientTools<C extends FoundationConfig> {
+export interface WireHttpClientTools<T extends FoundationConfig> {
     /** The frozen application configuration. */
-    readonly config: Readonly<C>;
+    readonly config: Readonly<T>;
 
     /** The resolved fetch seam. */
     readonly fetchFn: typeof fetch;
@@ -46,9 +46,9 @@ export interface WireHttpClientTools<C extends FoundationConfig> {
 /**
  * Inputs for {@link wireHttpClient}.
  */
-export interface WireHttpClientOptions<C extends FoundationConfig> {
+export interface WireHttpClientOptions<T extends FoundationConfig> {
     /** The frozen application configuration. */
-    readonly config: Readonly<C>;
+    readonly config: Readonly<T>;
 
     /** The resolved fetch seam. */
     readonly fetchFn: typeof fetch;
@@ -66,7 +66,7 @@ export interface WireHttpClientOptions<C extends FoundationConfig> {
     readonly unexpectedErrorToastKey?: string;
 
     /** Full adapter override; receives the resolved construction inputs. */
-    readonly client?: (tools: WireHttpClientTools<C>) => HttpClient;
+    readonly client?: (tools: WireHttpClientTools<T>) => HttpClient;
 }
 
 /**
@@ -75,8 +75,8 @@ export interface WireHttpClientOptions<C extends FoundationConfig> {
  * @param options - configuration, seams, module contributions, and overrides
  * @returns the installed HTTP client
  */
-export function wireHttpClient<C extends FoundationConfig>(options: WireHttpClientOptions<C>): HttpClient {
-    const tools: WireHttpClientTools<C> = {
+export function wireHttpClient<T extends FoundationConfig>(options: WireHttpClientOptions<T>): HttpClient {
+    const tools: WireHttpClientTools<T> = {
         config: options.config,
         fetchFn: options.fetchFn,
         interceptors: [...(options.interceptors ?? []), ...options.contributions.requestInterceptors],
@@ -97,7 +97,7 @@ export function wireHttpClient<C extends FoundationConfig>(options: WireHttpClie
  * @param tools - the resolved construction inputs
  * @returns the configured client
  */
-function buildDefaultClient<C extends FoundationConfig>(tools: WireHttpClientTools<C>): HttpClient {
+function buildDefaultClient<T extends FoundationConfig>(tools: WireHttpClientTools<T>): HttpClient {
     return new FetchHttpClient({
         baseUrl: tools.config.api.baseUrl,
         timeout: tools.config.api.timeout,
@@ -115,7 +115,7 @@ function buildDefaultClient<C extends FoundationConfig>(tools: WireHttpClientToo
  * @param options - the wiring inputs carrying the override, key, and handlers
  * @returns the composed response-error handler
  */
-function composeResponseErrorHandler<C extends FoundationConfig>(options: WireHttpClientOptions<C>): ResponseErrorHandler {
+function composeResponseErrorHandler<T extends FoundationConfig>(options: WireHttpClientOptions<T>): ResponseErrorHandler {
     const preset = options.onResponseError ?? createDefaultResponseErrorHandler(options.unexpectedErrorToastKey);
     const moduleHandlers = options.contributions.responseErrorHandlers;
 

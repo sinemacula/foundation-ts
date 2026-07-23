@@ -26,11 +26,9 @@ export class NetworkError extends Error {
  * The request was deliberately cancelled - the caller's `AbortSignal` fired, or
  * the effective signal (which may compose a caller signal with a configured
  * timeout) reports aborted - rather than the transport genuinely failing. UIs
- * generally suppress error handling for this type entirely; it composes with
- * {@link useResource}, which already swallows a run's own signal-abort
- * rejection instead of surfacing it as `error`. Unlike {@link NetworkError},
- * this is never passed to the global response-error handler and is never
- * retried.
+ * generally suppress error handling for this type entirely, since the
+ * cancellation was their own doing. Unlike {@link NetworkError}, this is never
+ * passed to the global response-error handler and is never retried.
  */
 export class CancelledError extends Error {
     constructor(message: string, options?: ErrorOptions) {

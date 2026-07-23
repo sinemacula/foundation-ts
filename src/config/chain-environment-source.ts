@@ -1,8 +1,8 @@
 /**
  * Environment source that consults an ordered chain of sources.
  *
- * The first source that defines a key wins. The bootstrap chains the runtime
- * environment document ahead of Vite's build variables, so a deployed value
+ * The first source that defines a key wins. Kernels typically chain the runtime
+ * environment document ahead of their build-time variables, so a deployed value
  * always beats a local development default.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

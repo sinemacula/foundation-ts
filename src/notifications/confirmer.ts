@@ -2,8 +2,8 @@
  * Confirmation-dialog port.
  *
  * The imperative surface the kernel uses to ask for confirmation. The reactive
- * active-request state + host rendering are a web concern and stay in the web
- * adapter.
+ * active-request state + host rendering are a platform concern and stay in each
+ * platform's adapter.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

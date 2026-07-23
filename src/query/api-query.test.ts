@@ -69,6 +69,14 @@ describe('ApiQuery', () => {
 
             expect(result).toEqual({ age: 30 });
         });
+
+        it('replaces an existing scalar equality value with an operator map', () => {
+            const base = ApiQuery.create().where('name', 'ali');
+            const result = parsedFilters(base.where('name', '$like', 'alice'));
+
+            // biome-ignore lint/style/useNamingConvention: toolkit keys
+            expect(result).toEqual({ name: { $like: 'alice' } });
+        });
     });
 
     // -------------------------------------------------------------------------
@@ -451,6 +459,16 @@ describe('ApiQuery', () => {
             );
         });
 
+        it('replaces a scalar collision on the group key rather than merging into it', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .where('$and', 'stray')
+                    .andWhere(q => q.where('status', 'active')),
+            );
+
+            expect(result).toEqual(wire([['$and', wire([['status', 'active']])]]));
+        });
+
         it('merges repeated andWhere calls into a single $and object', () => {
             const result = parsedFilters(
                 ApiQuery.create()
@@ -709,6 +727,14 @@ describe('ApiQuery', () => {
             const params = ApiQuery.create().averageFor('account', 'transaction', ['amount']).toQueryParameters();
 
             expect(params['averages[account][transaction]']).toBe('amount');
+        });
+
+        it('joins multiple averaged fields with commas', () => {
+            const params = ApiQuery.create()
+                .averageFor('account', 'transaction', ['amount', 'fee'])
+                .toQueryParameters();
+
+            expect(params['averages[account][transaction]']).toBe('amount,fee');
         });
     });
 

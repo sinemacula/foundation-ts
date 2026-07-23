@@ -54,6 +54,19 @@ describe('createBearerTokenInterceptor', () => {
         expect(original).not.toHaveProperty('authorization');
     });
 
+    it('attaches the token when only unrelated headers are present', async () => {
+        const interceptor = createBearerTokenInterceptor({ getAccessToken: () => 'tok-abc' });
+        const request = makeRequest(wire([['x-request-id', 'abc']]));
+        const result = await interceptor(request);
+
+        expect(result.headers).toMatchObject(
+            wire([
+                ['authorization', 'Bearer tok-abc'],
+                ['x-request-id', 'abc'],
+            ]),
+        );
+    });
+
     it('returns the same reference when the request already has an Authorization header', () => {
         const interceptor = createBearerTokenInterceptor({ getAccessToken: () => 'tok-abc' });
         const request = makeRequest(wire([['Authorization', 'Bearer existing']]));

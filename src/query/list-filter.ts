@@ -25,9 +25,9 @@ import type { FilterScalar } from './filter-expression';
  * in a {@link ListQueryDefinition}. Screen developers never implement this
  * interface directly.
  *
- * @typeParam Val - the plain value type the screen passes in
+ * @typeParam Value - the plain value type the screen passes in
  */
-export interface ListFilter<Val> {
+export interface ListFilter<Value> {
     /**
      * Apply a concrete value to a query, returning the updated query.
      *
@@ -35,7 +35,7 @@ export interface ListFilter<Val> {
      * @param value - the concrete filter value chosen by the screen
      * @returns the updated query with the filter applied
      */
-    apply(query: ApiQuery, value: Val): ApiQuery;
+    apply(query: ApiQuery, value: Value): ApiQuery;
 }
 
 /**
@@ -244,9 +244,9 @@ export const filter = Object.freeze({
      * @param apply - a function that applies the filter to the query
      * @returns a {@link ListFilter} delegating directly to the provided
      * function
-     * @typeParam Val - the plain value type the screen passes in
+     * @typeParam Value - the plain value type the screen passes in
      */
-    custom<Val>(apply: (query: ApiQuery, value: Val) => ApiQuery): ListFilter<Val> {
+    custom<Value>(apply: (query: ApiQuery, value: Value) => ApiQuery): ListFilter<Value> {
         return { apply };
     },
 });

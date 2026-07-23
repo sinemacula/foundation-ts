@@ -98,40 +98,44 @@ describe('FetchHttpClient - verbs', () => {
         expect(lastInit(fetchFn).method).toBe('GET');
     });
 
-    it('POST sends a POST request', async () => {
+    it('POST sends a POST request and resolves the parsed body', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ id: 1 }));
         const client = makeClient(fetchFn);
 
-        await client.post('/users', { name: 'Alice' });
+        const result = await client.post('/users', { name: 'Alice' });
 
         expect(lastInit(fetchFn).method).toBe('POST');
+        expect(result).toEqual({ id: 1 });
     });
 
-    it('PUT sends a PUT request', async () => {
-        const fetchFn = makeFetch(async () => emptyResponse(200));
+    it('PUT sends a PUT request and resolves the parsed body', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({ id: 1, name: 'Bob' }));
         const client = makeClient(fetchFn);
 
-        await client.put('/users/1', { name: 'Bob' });
+        const result = await client.put('/users/1', { name: 'Bob' });
 
         expect(lastInit(fetchFn).method).toBe('PUT');
+        expect(result).toEqual({ id: 1, name: 'Bob' });
     });
 
-    it('PATCH sends a PATCH request', async () => {
-        const fetchFn = makeFetch(async () => emptyResponse(200));
+    it('PATCH sends a PATCH request and resolves the parsed body', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({ id: 1, active: false }));
         const client = makeClient(fetchFn);
 
-        await client.patch('/users/1', { active: false });
+        const result = await client.patch('/users/1', { active: false });
 
         expect(lastInit(fetchFn).method).toBe('PATCH');
+        expect(result).toEqual({ id: 1, active: false });
     });
 
-    it('DELETE sends a DELETE request', async () => {
-        const fetchFn = makeFetch(async () => emptyResponse(204));
+    it('DELETE sends a DELETE request and resolves the parsed body', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({ deleted: true }));
         const client = makeClient(fetchFn);
 
-        await client.delete('/users/1');
+        const result = await client.delete('/users/1');
 
         expect(lastInit(fetchFn).method).toBe('DELETE');
+        expect(result).toEqual({ deleted: true });
     });
 });
 
@@ -174,6 +178,24 @@ describe('FetchHttpClient - URL construction', () => {
         await client.get('///items');
 
         expect(lastUrl(fetchFn)).toBe('https://api.example.com/items');
+    });
+
+    it('trims multiple trailing slashes from baseUrl', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = new FetchHttpClient({ baseUrl: 'https://api.example.com//', fetchFn });
+
+        await client.get('/items');
+
+        expect(lastUrl(fetchFn)).toBe('https://api.example.com/items');
+    });
+
+    it('preserves interior slashes in the path', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn);
+
+        await client.get('users/1/orders');
+
+        expect(lastUrl(fetchFn)).toBe('https://api.example.com/users/1/orders');
     });
 });
 
@@ -249,6 +271,18 @@ describe('FetchHttpClient - body and content-type', () => {
         await client.post('/users', { name: 'Alice' });
 
         expect(lastHeaders(fetchFn)['content-type']).toBe('application/json');
+    });
+
+    it('still adds the JSON content-type when only unrelated headers are set', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({ id: 1 }));
+        const client = makeClient(fetchFn);
+
+        await client.post('/upload', { data: 1 }, { headers: { 'x-request-id': 'abc' } });
+
+        const headers = lastHeaders(fetchFn);
+
+        expect(headers['content-type']).toBe('application/json');
+        expect(headers['x-request-id']).toBe('abc');
     });
 
     it('does not override Content-Type when caller sets it (title-case)', async () => {

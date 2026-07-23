@@ -93,8 +93,8 @@ describe('FetchHttpClient - success response parsing', () => {
     });
 
     it('returns the raw string when the content-type header is absent (null from headers.get)', async () => {
-        // A Blob with an empty MIME type causes happy-dom to return null from
-        // headers.get('content-type'), exercising the ?? fallback branch.
+        // A Blob with an empty MIME type produces a Response whose headers
+        // carry no content-type, exercising the ?? fallback branch.
         const fetchFn = makeFetch(async () => new Response(new Blob(['raw body'], { type: '' }), { status: 200 }));
         const client = makeClient(fetchFn);
 
@@ -312,6 +312,15 @@ describe('FetchHttpClient - download', () => {
 
         expect(result).toBeInstanceOf(Blob);
         expect(await result.text()).toBe('file bytes');
+    });
+
+    it('dispatches downloads as GET requests', async () => {
+        const fetchFn = makeFetch(async () => new Response(new Blob(['file bytes']), { status: 200 }));
+        const client = makeClient(fetchFn);
+
+        await client.download('/files/1');
+
+        expect(fetchFn.mock.calls.at(-1)?.[1]?.method).toBe('GET');
     });
 
     it('maps a non-ok response to HttpError', async () => {

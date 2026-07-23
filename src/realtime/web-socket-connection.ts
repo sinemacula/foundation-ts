@@ -1,8 +1,8 @@
 /**
  * WebSocket adapter for the {@link RealtimeConnection} port.
  *
- * Wraps the browser's native {@link WebSocket} API. Reconnects automatically on
- * non-client-initiated closes using the provided backoff strategy. Incoming
+ * Wraps the platform's global {@link WebSocket} API. Reconnects automatically
+ * on non-client-initiated closes using the provided backoff strategy. Incoming
  * text frames are dispatched to 'message' subscribers; frames that parse as a
  * JSON envelope `{ event: string, data: unknown }` are additionally dispatched
  * to subscribers for that specific event name.
@@ -242,7 +242,11 @@ export class WebSocketConnection implements RealtimeConnection {
         }
 
         for (const handler of handlers) {
-            handler(message);
+            try {
+                handler(message);
+            } catch {
+                // A misbehaving subscriber must never starve the others.
+            }
         }
     }
 
@@ -311,7 +315,11 @@ export class WebSocketConnection implements RealtimeConnection {
         this.#state = next;
 
         for (const handler of this.#stateHandlers) {
-            handler(next);
+            try {
+                handler(next);
+            } catch {
+                // A misbehaving subscriber must never starve the others.
+            }
         }
     }
 }
@@ -319,8 +327,10 @@ export class WebSocketConnection implements RealtimeConnection {
 /**
  * Default WebSocket factory used when no override is provided.
  *
- * Spreads `readonly string[]` protocols into a mutable copy so the DOM
- * `WebSocket` constructor, which requires `string[]`, accepts the value.
+ * Omits the protocols argument entirely when none were given - some platform
+ * constructors treat an explicit `undefined` differently from an absent
+ * argument. The readonly-to-mutable cast satisfies the DOM constructor typing;
+ * the constructor never mutates the array.
  *
  * @param url - the WebSocket endpoint URL
  * @param protocols - optional subprotocol(s)
@@ -331,11 +341,7 @@ function defaultWebSocketFactory(url: string, protocols?: string | readonly stri
         return new WebSocket(url);
     }
 
-    if (typeof protocols === 'string') {
-        return new WebSocket(url, protocols);
-    }
-
-    return new WebSocket(url, protocols as string[]);
+    return new WebSocket(url, protocols as string | string[]);
 }
 
 /**

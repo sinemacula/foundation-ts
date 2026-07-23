@@ -112,6 +112,26 @@ function makeWsContractHarness(): RealtimeContractHarness {
     };
 }
 
+/**
+ * Replace the global WebSocket with a recorder capturing constructor calls.
+ *
+ * @returns the argument list of every construction, in order
+ */
+function stubGlobalWebSocket(): unknown[][] {
+    const calls: unknown[][] = [];
+
+    vi.stubGlobal(
+        'WebSocket',
+        class {
+            constructor(...args: unknown[]) {
+                calls.push(args);
+            }
+        },
+    );
+
+    return calls;
+}
+
 describeRealtimeContract(makeWsContractHarness());
 
 describe('WebSocketConnection', () => {
@@ -120,6 +140,7 @@ describe('WebSocketConnection', () => {
     });
 
     afterEach(() => {
+        vi.unstubAllGlobals();
         vi.useRealTimers();
     });
 
@@ -136,29 +157,31 @@ describe('WebSocketConnection', () => {
             expect(socket?.protocols).toBe('v1');
         });
 
-        it('exercises the default WebSocket factory with no protocols', () => {
-            // happy-dom provides a WebSocket stub so connect() does not throw;
-            // this covers the protocols === undefined branch in the default
-            // factory.
+        it('passes just the url to the platform WebSocket when no protocols are set', () => {
+            const calls = stubGlobalWebSocket();
             const conn = new WebSocketConnection({ url: 'ws://localhost' });
 
-            expect(() => conn.connect()).not.toThrow();
+            conn.connect();
+
+            expect(calls).toEqual([['ws://localhost']]);
         });
 
-        it('exercises the default WebSocket factory with a string protocol', () => {
-            // Covers the typeof protocols === 'string' branch in the default
-            // factory.
+        it('passes a string protocol through to the platform WebSocket', () => {
+            const calls = stubGlobalWebSocket();
             const conn = new WebSocketConnection({ url: 'ws://localhost', protocols: 'v1' });
 
-            expect(() => conn.connect()).not.toThrow();
+            conn.connect();
+
+            expect(calls).toEqual([['ws://localhost', 'v1']]);
         });
 
-        it('exercises the default WebSocket factory with an array of protocols', () => {
-            // Covers the readonly string[] -> string[] cast branch in the
-            // default factory.
+        it('passes a protocols array through to the platform WebSocket', () => {
+            const calls = stubGlobalWebSocket();
             const conn = new WebSocketConnection({ url: 'ws://localhost', protocols: ['v1', 'v2'] });
 
-            expect(() => conn.connect()).not.toThrow();
+            conn.connect();
+
+            expect(calls).toEqual([['ws://localhost', ['v1', 'v2']]]);
         });
     });
 
@@ -189,6 +212,42 @@ describe('WebSocketConnection', () => {
             sockets.at(0)?.emitMessage('data');
 
             expect(events).toEqual(['message']);
+        });
+
+        it('keeps delivering to remaining subscribers when one throws', () => {
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
+
+            const received: string[] = [];
+            const updates: string[] = [];
+
+            conn.on('message', () => {
+                throw new Error('subscriber exploded');
+            });
+            conn.on('message', msg => received.push(msg.data));
+            conn.on('update', msg => updates.push(msg.data));
+            conn.connect();
+            sockets.at(0)?.emitOpen();
+            sockets.at(0)?.emitMessage(JSON.stringify({ event: 'update', data: 'payload' }));
+
+            expect(received).toEqual([JSON.stringify({ event: 'update', data: 'payload' })]);
+            expect(updates).toEqual(['payload']);
+        });
+
+        it('keeps notifying remaining state subscribers when one throws', () => {
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
+
+            const states: string[] = [];
+
+            conn.onStateChange(() => {
+                throw new Error('subscriber exploded');
+            });
+            conn.onStateChange(state => states.push(state));
+            conn.connect();
+            sockets.at(0)?.emitOpen();
+
+            expect(states).toEqual(['connecting', 'open']);
         });
 
         it('delivers an envelope frame to both message and named-event subscribers', () => {

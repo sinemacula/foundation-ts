@@ -178,6 +178,39 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
         expect(result).toStrictEqual({ retried: true });
     });
 
+    it.each([
+        ['post', (client: FetchHttpClient) => client.post<{ retried: boolean }>('/secure', { a: 1 })],
+        ['put', (client: FetchHttpClient) => client.put<{ retried: boolean }>('/secure', { a: 1 })],
+        ['patch', (client: FetchHttpClient) => client.patch<{ retried: boolean }>('/secure', { a: 1 })],
+        ['delete', (client: FetchHttpClient) => client.delete<{ retried: boolean }>('/secure')],
+    ] as const)('retries a %s once through the handler and resolves the parsed body', async (_verb, invoke) => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockResolvedValueOnce(new Response('', { status: 401 }))
+            .mockResolvedValueOnce(jsonResponse({ retried: true }));
+        const onUnauthorized = vi.fn().mockResolvedValue(true);
+        const client = makeClient(fetchFn, { onUnauthorized });
+
+        const result = await invoke(client);
+
+        expect(fetchFn).toHaveBeenCalledTimes(2);
+        expect(onUnauthorized).toHaveBeenCalledTimes(1);
+        expect(result).toStrictEqual({ retried: true });
+    });
+
+    it('does not invoke the handler for a non-401 error status', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockResolvedValue(new Response('{}', { status: 500 }));
+        const onUnauthorized = vi.fn().mockResolvedValue(true);
+        const client = makeClient(fetchFn, { onUnauthorized });
+
+        await expect(client.get('/secure')).rejects.toBeInstanceOf(HttpError);
+
+        expect(onUnauthorized).not.toHaveBeenCalled();
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
+
     it('throws HttpError(401) and does not retry when onUnauthorized returns false', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
@@ -310,13 +343,18 @@ describe('FetchHttpClient - download interceptors and 401 handling', () => {
 // ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - network failure', () => {
-    it('throws NetworkError when fetch rejects', async () => {
+    it('throws NetworkError naming the failed request when fetch rejects', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockRejectedValue(new TypeError('Failed to fetch'));
         const client = makeClient(fetchFn);
 
-        await expect(client.get('/items')).rejects.toBeInstanceOf(NetworkError);
+        const error = await client.get('/items').catch(error => error);
+
+        expect(error).toBeInstanceOf(NetworkError);
+        expect((error as NetworkError).message).toBe(
+            'GET https://api.example.com/items failed without a response.',
+        );
     });
 
     it('sets the cause on NetworkError', async () => {
@@ -364,14 +402,15 @@ describe('FetchHttpClient - network failure', () => {
 
 describe('FetchHttpClient - cancellation', () => {
     it('throws CancelledError when the fetch rejection is an AbortError, even without a caller signal', async () => {
-        const fetchFn = vi
-            .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
+        const cause = new DOMException('The operation was aborted.', 'AbortError');
+        const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(cause);
         const client = makeClient(fetchFn);
 
         const error = await client.get('/items').catch(error => error);
 
         expect(error).toBeInstanceOf(CancelledError);
+        expect((error as CancelledError).message).toBe('GET https://api.example.com/items was cancelled.');
+        expect((error as CancelledError).cause).toBe(cause);
     });
 
     it('throws CancelledError when the caller aborts, even without an AbortError-named rejection', async () => {

@@ -17,7 +17,7 @@
     "thresholds": {
         "high": 95,
         "low": 90,
-        "break": 90
+        "break": 95
     },
     "reporters": ["clear-text", "progress", "html"],
     "htmlReporter": {

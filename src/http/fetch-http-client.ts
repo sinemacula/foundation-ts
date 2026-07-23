@@ -42,7 +42,7 @@ export interface FetchHttpClientRetryOptions {
     /** Number of retries attempted after the first try. Defaults to 2. */
     readonly attempts?: number;
 
-    /** Delay strategy between attempts. Defaults to a new {@link ExponentialBackoff}; that class predates this use for realtime reconnect scheduling and may move to a shared support module once both use sites are extracted from this package. */
+    /** Delay strategy between attempts. Defaults to a new {@link ExponentialBackoff}, shared with the realtime reconnect scheduling. */
     readonly backoff?: ExponentialBackoff;
 }
 
@@ -171,7 +171,7 @@ export class FetchHttpClient implements HttpClient {
      * headers, interceptors, and retry policy
      */
     constructor(options: FetchHttpClientOptions) {
-        this.#baseUrl = options.baseUrl.replace(/\/+$/u, '');
+        this.#baseUrl = trimTrailingSlashes(options.baseUrl);
         this.#fetchFn = options.fetchFn ?? ((input, init) => globalThis.fetch(input, init));
         this.#timeout = options.timeout ?? null;
         this.#defaultHeaders = options.defaultHeaders ?? {};
@@ -453,8 +453,9 @@ export class FetchHttpClient implements HttpClient {
         };
 
         if (isUploadBody(request.body)) {
-            // The browser sets the multipart boundary or Blob content-type
-            // itself; overriding it here would strip that information.
+            // The fetch implementation sets the multipart boundary or Blob
+            // content-type itself; overriding it here would strip that
+            // information.
             init.body = request.body;
         } else if (request.body !== undefined) {
             if (!hasHeader(headers, 'content-type')) {
@@ -517,7 +518,9 @@ export class FetchHttpClient implements HttpClient {
 
         for (const [key, value] of Object.entries(query ?? {})) {
             if (value !== undefined) {
-                parameters.set(key, String(value));
+                // append, not set: keys are unique by construction, and some
+                // minimal URLSearchParams implementations ship append only.
+                parameters.append(key, String(value));
             }
         }
 
@@ -546,6 +549,25 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
  */
 function isUploadBody(body: unknown): body is FormData | Blob {
     return body instanceof FormData || body instanceof Blob;
+}
+
+/**
+ * Trim trailing slashes with a linear scan.
+ *
+ * A `+`-then-anchor regex backtracks polynomially on slash runs, so the trim
+ * walks the string instead.
+ *
+ * @param value - the string to trim
+ * @returns the value without trailing slashes
+ */
+function trimTrailingSlashes(value: string): string {
+    let end = value.length;
+
+    while (end > 0 && value[end - 1] === '/') {
+        end -= 1;
+    }
+
+    return value.slice(0, end);
 }
 
 /**
