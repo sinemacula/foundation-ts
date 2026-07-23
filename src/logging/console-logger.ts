@@ -1,9 +1,9 @@
 /**
  * Console logger adapter.
  *
- * Writes log entries to the console for use during development. Not
- * intended for production - swap in a real provider adapter via the Logger port
- * when deploying.
+ * Writes log entries to the console for use during development. Not intended
+ * for production - swap in a real provider adapter via the Logger port when
+ * deploying.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -19,8 +19,8 @@ const LEVEL_ORDER: Readonly<Record<LogLevel, number>> = {
 };
 
 /**
- * A logger that writes to the console, dropping entries below a
- * configured minimum level.
+ * A logger that writes to the console, dropping entries below a configured
+ * minimum level.
  *
  * `console.log` and `console.debug` are disallowed by lint tooling, so both
  * `debug` and `info` write via `console.info`; `warn` and `error` write via

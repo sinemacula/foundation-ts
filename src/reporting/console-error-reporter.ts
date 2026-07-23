@@ -1,8 +1,8 @@
 /**
  * Console error reporter adapter.
  *
- * Writes errors and messages to the console for use during development.
- * Not intended for production - swap in a real provider adapter via the
+ * Writes errors and messages to the console for use during development. Not
+ * intended for production - swap in a real provider adapter via the
  * ErrorReporter port when deploying.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

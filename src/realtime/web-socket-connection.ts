@@ -1,8 +1,8 @@
 /**
  * WebSocket adapter for the {@link RealtimeConnection} port.
  *
- * Wraps the platform's global {@link WebSocket} API. Reconnects automatically on
- * non-client-initiated closes using the provided backoff strategy. Incoming
+ * Wraps the platform's global {@link WebSocket} API. Reconnects automatically
+ * on non-client-initiated closes using the provided backoff strategy. Incoming
  * text frames are dispatched to 'message' subscribers; frames that parse as a
  * JSON envelope `{ event: string, data: unknown }` are additionally dispatched
  * to subscribers for that specific event name.

@@ -1,9 +1,9 @@
 /**
  * Environment source that consults an ordered chain of sources.
  *
- * The first source that defines a key wins. Kernels typically chain the
- * runtime environment document ahead of their build-time variables, so a
- * deployed value always beats a local development default.
+ * The first source that defines a key wins. Kernels typically chain the runtime
+ * environment document ahead of their build-time variables, so a deployed value
+ * always beats a local development default.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

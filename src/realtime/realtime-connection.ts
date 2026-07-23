@@ -3,8 +3,8 @@
  *
  * Server push is a separate concern from request/response. This port sits
  * BESIDE {@link HttpClient}, not on top of it - it models a persistent,
- * server-initiated stream rather than a one-shot request. The WebSocket
- * adapter lives here and each platform may add its own stream adapters; tests
+ * server-initiated stream rather than a one-shot request. The WebSocket adapter
+ * lives here and each platform may add its own stream adapters; tests
  * substitute an in-memory fake.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

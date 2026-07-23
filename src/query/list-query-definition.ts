@@ -38,8 +38,8 @@ export interface SortDefault {
  * The frozen declaration of a resource list's query capabilities.
  *
  * Created by {@link defineListQuery} and consumed by the platform list-query
- * bindings. Every field is optional so simple lists need only declare what
- * they use.
+ * bindings. Every field is optional so simple lists need only declare what they
+ * use.
  *
  * @typeParam Filters - a record mapping screen-vocabulary filter names to their
  * typed {@link ListFilter} implementations
