@@ -11,7 +11,7 @@ import { NullAnalyticsTracker } from '../analytics/null-analytics-tracker';
 import { Environment } from '../config/environment';
 import { ObjectEnvironmentSource } from '../config/object-environment-source';
 import { StaticFeatureFlags } from '../feature-flags/static-feature-flags';
-import type { HttpClient } from '../http/http-client';
+import type { HttpClient, HttpRequest, RequestInterceptor } from '../http/http-client';
 import type { ModuleHttpContributions } from '../http/module-http-contributions';
 import { NullLogger } from '../logging/null-logger';
 import type { Confirmer } from '../notifications/confirmer';
@@ -82,6 +82,61 @@ function createHttpClientStub(): HttpClient {
 /** A fetch stub resolving an empty runtime document. */
 function createFetchStub(): typeof fetch {
     return vi.fn().mockResolvedValue(new Response(JSON.stringify({}), { status: 200 })) as unknown as typeof fetch;
+}
+
+/** A fetch stub plus the urls and inits it captured. */
+interface SequencedFetch {
+    /** The fetch seam handed to the boot. */
+    readonly fetchFn: typeof fetch;
+
+    /** Every requested url, in order. */
+    readonly urls: string[];
+
+    /** Every request init, in order. */
+    readonly inits: (RequestInit | undefined)[];
+}
+
+/**
+ * Build a fetch stub that serves the runtime document first, then the given API
+ * responses in order.
+ *
+ * @param apiResponses - response factories for the calls after the runtime
+ * fetch
+ * @returns the stub and its captured calls
+ */
+function createSequencedFetch(...apiResponses: ReadonlyArray<() => Response>): SequencedFetch {
+    const urls: string[] = [];
+    const inits: (RequestInit | undefined)[] = [];
+
+    const fetchFn: typeof fetch = (input, init) => {
+        urls.push(String(input));
+        inits.push(init);
+
+        if (urls.length === 1) {
+            return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+        }
+
+        const factory = apiResponses[urls.length - 2];
+
+        return Promise.resolve(factory === undefined ? new Response('{}', { status: 200 }) : factory());
+    };
+
+    return { fetchFn, urls, inits };
+}
+
+/** Build a Toaster that records every error message it is asked to raise. */
+function createRecordingToaster(): Toaster & { readonly errors: string[] } {
+    const errors: string[] = [];
+
+    return {
+        errors,
+        error: message => {
+            errors.push(message);
+
+            return 'id';
+        },
+        information: () => 'id',
+    };
 }
 
 const environmentOf = (): Environment => new Environment(new ObjectEnvironmentSource({}));
@@ -237,5 +292,86 @@ describe('bootFoundationCore', () => {
         expect(core.observability.analytics).toBe(tracker);
         expect(core.observability.logger).toBe(log);
         expect(core.http).toBe(client);
+    });
+
+    describe('http option threading into the default client', () => {
+        /**
+         * Boot the core over a sequenced fetch with the given http options and
+         * default collaborators everywhere else.
+         *
+         * @param fetch - the sequenced fetch stub
+         * @param http - the http options under test
+         * @param toaster - the toaster to install
+         * @returns the booted core
+         */
+        function bootWithHttp(
+            fetch: SequencedFetch,
+            http: {
+                interceptors?: readonly RequestInterceptor[];
+                onResponseError?: (error: unknown, request: HttpRequest) => void;
+                unexpectedErrorToastKey?: string;
+            },
+            toaster: Toaster = createToasterStub(),
+        ): ReturnType<typeof bootFoundationCore<FoundationConfig>> {
+            return bootFoundationCore(
+                {
+                    createEnvironment: () => environmentOf(),
+                    define: () => createConfig(),
+                    storage: new MemoryStorage(),
+                    toasts: toaster,
+                    confirm: createConfirmerStub(),
+                    http,
+                    collectHttpContributions: () => createContributions(),
+                },
+                { fetchFn: fetch.fetchFn },
+                '/runtime-env.json',
+            );
+        }
+
+        it('runs the preset interceptors on requests through the built client', async () => {
+            const stamp: RequestInterceptor = request => ({
+                ...request,
+                headers: { ...request.headers, 'x-preset': 'stamped' },
+            });
+            const fetch = createSequencedFetch();
+
+            const core = await bootWithHttp(fetch, { interceptors: [stamp] });
+
+            await core.http.get('items');
+
+            expect(fetch.urls).toStrictEqual(['/runtime-env.json', 'https://api.example.com/items']);
+            expect((fetch.inits[1]?.headers as Record<string, string>)['x-preset']).toBe('stamped');
+        });
+
+        it('routes response errors to the supplied handler', async () => {
+            const failures: Array<{ error: unknown; request: HttpRequest }> = [];
+            const fetch = createSequencedFetch(() => new Response('{}', { status: 500 }));
+
+            const core = await bootWithHttp(fetch, {
+                onResponseError: (error, request) => {
+                    failures.push({ error, request });
+                },
+            });
+
+            await core.http.get('boom').catch(() => undefined);
+
+            expect(failures).toHaveLength(1);
+            expect(failures[0]?.request.url).toBe('https://api.example.com/boom');
+        });
+
+        it('arms the default handler with the unexpected-error toast key', async () => {
+            const toaster = createRecordingToaster();
+            const fetch = createSequencedFetch(() => new Response('{}', { status: 500 }));
+
+            const core = await bootWithHttp(
+                fetch,
+                { unexpectedErrorToastKey: 'app.errors.unexpected' },
+                toaster,
+            );
+
+            await core.http.get('boom').catch(() => undefined);
+
+            expect(toaster.errors).toStrictEqual(['app.errors.unexpected']);
+        });
     });
 });
