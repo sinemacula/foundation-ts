@@ -112,6 +112,26 @@ function makeWsContractHarness(): RealtimeContractHarness {
     };
 }
 
+/**
+ * Replace the global WebSocket with a recorder capturing constructor calls.
+ *
+ * @returns the argument list of every construction, in order
+ */
+function stubGlobalWebSocket(): unknown[][] {
+    const calls: unknown[][] = [];
+
+    vi.stubGlobal(
+        'WebSocket',
+        class {
+            constructor(...args: unknown[]) {
+                calls.push(args);
+            }
+        },
+    );
+
+    return calls;
+}
+
 describeRealtimeContract(makeWsContractHarness());
 
 describe('WebSocketConnection', () => {
@@ -120,6 +140,7 @@ describe('WebSocketConnection', () => {
     });
 
     afterEach(() => {
+        vi.unstubAllGlobals();
         vi.useRealTimers();
     });
 
@@ -136,29 +157,31 @@ describe('WebSocketConnection', () => {
             expect(socket?.protocols).toBe('v1');
         });
 
-        it('exercises the default WebSocket factory with no protocols', () => {
-            // happy-dom provides a WebSocket stub so connect() does not throw;
-            // this covers the protocols === undefined branch in the default
-            // factory.
+        it('passes just the url to the platform WebSocket when no protocols are set', () => {
+            const calls = stubGlobalWebSocket();
             const conn = new WebSocketConnection({ url: 'ws://localhost' });
 
-            expect(() => conn.connect()).not.toThrow();
+            conn.connect();
+
+            expect(calls).toEqual([['ws://localhost']]);
         });
 
-        it('exercises the default WebSocket factory with a string protocol', () => {
-            // Covers the typeof protocols === 'string' branch in the default
-            // factory.
+        it('passes a string protocol through to the platform WebSocket', () => {
+            const calls = stubGlobalWebSocket();
             const conn = new WebSocketConnection({ url: 'ws://localhost', protocols: 'v1' });
 
-            expect(() => conn.connect()).not.toThrow();
+            conn.connect();
+
+            expect(calls).toEqual([['ws://localhost', 'v1']]);
         });
 
-        it('exercises the default WebSocket factory with an array of protocols', () => {
-            // Covers the readonly string[] -> string[] cast branch in the
-            // default factory.
+        it('passes a protocols array through to the platform WebSocket', () => {
+            const calls = stubGlobalWebSocket();
             const conn = new WebSocketConnection({ url: 'ws://localhost', protocols: ['v1', 'v2'] });
 
-            expect(() => conn.connect()).not.toThrow();
+            conn.connect();
+
+            expect(calls).toEqual([['ws://localhost', ['v1', 'v2']]]);
         });
     });
 
