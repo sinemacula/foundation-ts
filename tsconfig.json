@@ -1,0 +1,10 @@
+{
+    "extends": "@sinemacula/coding-standards/js/tsconfig.base.json",
+    "compilerOptions": {
+        "lib": ["ES2023"],
+        "types": ["node"],
+        "noEmit": true
+    },
+    "include": ["src", "vitest.config.ts", "knip.ts"],
+    "exclude": ["node_modules", "dist", "coverage"]
+}

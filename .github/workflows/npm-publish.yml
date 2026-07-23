@@ -1,0 +1,83 @@
+# ==============================================================================
+# NPM PUBLISH
+# ==============================================================================
+# Publishes the package to npm when release-please pushes a `v*` tag. The tag is
+# created with a GitHub App token (see release.yml `use-app-token`) so this
+# workflow is triggered; the automatic token would not fire it.
+#
+# Authentication is OIDC trusted publishing - no npm token. The `prepack`
+# lifecycle compiles `dist/` and points the published `exports` at it, so no
+# build step is needed here beyond installing dependencies.
+# ==============================================================================
+name: npm-publish
+
+# ==============================================================================
+# TRIGGERS
+# ==============================================================================
+on:
+    push:
+        tags:
+            -   v*
+    workflow_dispatch:
+
+# ==============================================================================
+# CONCURRENCY
+# ==============================================================================
+concurrency:
+    group: npm-publish-${{ github.ref }}
+    cancel-in-progress: false
+
+# ==============================================================================
+# PERMISSIONS
+# ==============================================================================
+permissions:
+    contents: read
+    id-token: write
+
+# ==============================================================================
+# DEFAULTS
+# ==============================================================================
+defaults:
+    run:
+        shell: bash
+
+jobs:
+
+    # ==========================================================================
+    # JOB: PUBLISH TO NPM
+    # ==========================================================================
+    publish:
+        name: Publish to npm
+        runs-on: ubuntu-latest
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v7
+                with:
+                    persist-credentials: false
+
+            -   name: Setup Node.js
+                uses: actions/setup-node@v7
+                with:
+                    node-version: '24'
+                    registry-url: https://registry.npmjs.org/
+                    cache: npm
+
+            -   name: Install dependencies
+                run: npm ci
+
+            -   name: Verify tag matches package.json version
+                run: |
+                    TAG_VERSION="${GITHUB_REF_NAME#v}"
+                    PKG_VERSION="$(node -p 'require("./package.json").version')"
+                    if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+                        echo "Tag $GITHUB_REF_NAME (=> $TAG_VERSION) does not match package.json version $PKG_VERSION" >&2
+                        exit 1
+                    fi
+                    echo "Publishing $PKG_VERSION"
+
+            -   name: Show packed file list (dry run)
+                run: npm pack --dry-run
+
+            -   name: Publish
+                run: npm publish --provenance --access public

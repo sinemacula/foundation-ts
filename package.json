@@ -1,0 +1,129 @@
+{
+    "name": "@sinemacula/foundation",
+    "version": "0.0.0",
+    "description": "Platform-agnostic TypeScript foundation: the framework-free ports and logic (http, config, storage, query, realtime, authorization, logging, i18n) shared by Sine Macula's web and mobile kernels.",
+    "license": "Apache-2.0",
+    "author": "Ben Carey <bdmc@sinemacula.co.uk>",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/sinemacula/foundation-ts.git"
+    },
+    "homepage": "https://github.com/sinemacula/foundation-ts#readme",
+    "bugs": {
+        "url": "https://github.com/sinemacula/foundation-ts/issues"
+    },
+    "keywords": ["sine macula", "foundation", "kernel", "typescript", "framework-agnostic", "ports"],
+    "type": "module",
+    "engines": {
+        "node": ">=22"
+    },
+    "packageManager": "npm@11.11.0",
+    "exports": {
+        "./analytics/analytics-tracker": "./src/analytics/analytics-tracker.ts",
+        "./analytics/install-page-tracking": "./src/analytics/install-page-tracking.ts",
+        "./analytics/null-analytics-tracker": "./src/analytics/null-analytics-tracker.ts",
+        "./app/boot-foundation-core": "./src/app/boot-foundation-core.ts",
+        "./app/foundation-boot-error": "./src/app/foundation-boot-error.ts",
+        "./app/foundation-config": "./src/app/foundation-config.ts",
+        "./app/services": "./src/app/services.ts",
+        "./app/wire-http-client": "./src/app/wire-http-client.ts",
+        "./app/wire-observability": "./src/app/wire-observability.ts",
+        "./authorization/permission-set": "./src/authorization/permission-set.ts",
+        "./config/chain-environment-source": "./src/config/chain-environment-source.ts",
+        "./config/config-repository": "./src/config/config-repository.ts",
+        "./config/environment": "./src/config/environment.ts",
+        "./config/object-environment-source": "./src/config/object-environment-source.ts",
+        "./config/prefixed-environment-source": "./src/config/prefixed-environment-source.ts",
+        "./connectivity/connectivity-monitor": "./src/connectivity/connectivity-monitor.ts",
+        "./feature-flags/feature-flags": "./src/feature-flags/feature-flags.ts",
+        "./feature-flags/static-feature-flags": "./src/feature-flags/static-feature-flags.ts",
+        "./http/bearer-token-interceptor": "./src/http/bearer-token-interceptor.ts",
+        "./http/http-client": "./src/http/http-client.ts",
+        "./http/http-error": "./src/http/http-error.ts",
+        "./http/module-http-contributions": "./src/http/module-http-contributions.ts",
+        "./http/token-refresh-coordinator": "./src/http/token-refresh-coordinator.ts",
+        "./i18n/i18n-error": "./src/i18n/i18n-error.ts",
+        "./i18n/locale-service": "./src/i18n/locale-service.ts",
+        "./logging/logger": "./src/logging/logger.ts",
+        "./logging/null-logger": "./src/logging/null-logger.ts",
+        "./notifications/confirmer": "./src/notifications/confirmer.ts",
+        "./notifications/toaster": "./src/notifications/toaster.ts",
+        "./query/api-query": "./src/query/api-query.ts",
+        "./query/envelope": "./src/query/envelope.ts",
+        "./query/list-filter": "./src/query/list-filter.ts",
+        "./query/list-query-definition": "./src/query/list-query-definition.ts",
+        "./query/query-error": "./src/query/query-error.ts",
+        "./query/resource-client": "./src/query/resource-client.ts",
+        "./realtime/exponential-backoff": "./src/realtime/exponential-backoff.ts",
+        "./realtime/realtime-connection": "./src/realtime/realtime-connection.ts",
+        "./realtime/reconnect": "./src/realtime/reconnect.ts",
+        "./realtime/test-support/realtime-connection-contract": "./src/realtime/test-support/realtime-connection-contract.ts",
+        "./reporting/breadcrumb-trail": "./src/reporting/breadcrumb-trail.ts",
+        "./reporting/error-reporter": "./src/reporting/error-reporter.ts",
+        "./reporting/null-error-reporter": "./src/reporting/null-error-reporter.ts",
+        "./router/middleware": "./src/router/middleware.ts",
+        "./session/default-session-api": "./src/session/default-session-api.ts",
+        "./session/redirect": "./src/session/redirect.ts",
+        "./session/session-api": "./src/session/session-api.ts",
+        "./session/session-core": "./src/session/session-core.ts",
+        "./session/session-routes": "./src/session/session-routes.ts",
+        "./session/session-state": "./src/session/session-state.ts",
+        "./session/session-storage-keys": "./src/session/session-storage-keys.ts",
+        "./session/session-tokens": "./src/session/session-tokens.ts",
+        "./session/session-user": "./src/session/session-user.ts",
+        "./storage/key-value-storage": "./src/storage/key-value-storage.ts",
+        "./storage/memory-storage": "./src/storage/memory-storage.ts",
+        "./support/is-record": "./src/support/is-record.ts",
+        "./support/service-holder": "./src/support/service-holder.ts",
+        "./theme/color-scheme": "./src/theme/color-scheme.ts",
+        "./theme/color-scheme-service": "./src/theme/color-scheme-service.ts"
+    },
+    "files": ["dist", "README.md", "LICENSE"],
+    "publishConfig": {
+        "access": "public",
+        "registry": "https://registry.npmjs.org/"
+    },
+    "scripts": {
+        "build": "node scripts/build.mjs",
+        "build:dist": "node scripts/build.mjs",
+        "mutation:scope": "node scripts/mutation-scope.mjs",
+        "typecheck": "tsc --noEmit",
+        "test": "vitest run",
+        "test:watch": "vitest",
+        "test:coverage": "vitest run --coverage",
+        "test:mutation": "stryker run",
+        "check": "qlty check",
+        "fmt": "qlty fmt",
+        "smells": "qlty smells",
+        "deadcode": "knip",
+        "check:pkg": "rm -rf .pack && mkdir -p .pack && npm pack --pack-destination .pack --silent && publint .pack/*.tgz && attw .pack/*.tgz --profile esm-only",
+        "prepack": "node scripts/build.mjs && node scripts/pack-exports.mjs dist",
+        "postpack": "node scripts/pack-exports.mjs src"
+    },
+    "devDependencies": {
+        "@arethetypeswrong/cli": "^0.18.5",
+        "@sinemacula/coding-standards": "^1.17.0",
+        "@stryker-mutator/core": "^9.6.1",
+        "@stryker-mutator/vitest-runner": "^9.6.1",
+        "@types/node": "^25.9.3",
+        "@vitest/coverage-v8": "^4.1.8",
+        "knip": "^6.16.1",
+        "mkdist": "^2.4.1",
+        "publint": "^0.3.21",
+        "typescript": "^6.0.3",
+        "vitest": "^4.1.8"
+    },
+    "overrides": {
+        "brace-expansion": "^5.0.7",
+        "fast-uri": "^3.1.3",
+        "qs": "6.15.2"
+    },
+    "peerDependencies": {
+        "vitest": ">=3"
+    },
+    "peerDependenciesMeta": {
+        "vitest": {
+            "optional": true
+        }
+    }
+}
