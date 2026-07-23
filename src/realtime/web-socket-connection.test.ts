@@ -191,6 +191,42 @@ describe('WebSocketConnection', () => {
             expect(events).toEqual(['message']);
         });
 
+        it('keeps delivering to remaining subscribers when one throws', () => {
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
+
+            const received: string[] = [];
+            const updates: string[] = [];
+
+            conn.on('message', () => {
+                throw new Error('subscriber exploded');
+            });
+            conn.on('message', msg => received.push(msg.data));
+            conn.on('update', msg => updates.push(msg.data));
+            conn.connect();
+            sockets.at(0)?.emitOpen();
+            sockets.at(0)?.emitMessage(JSON.stringify({ event: 'update', data: 'payload' }));
+
+            expect(received).toEqual([JSON.stringify({ event: 'update', data: 'payload' })]);
+            expect(updates).toEqual(['payload']);
+        });
+
+        it('keeps notifying remaining state subscribers when one throws', () => {
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
+
+            const states: string[] = [];
+
+            conn.onStateChange(() => {
+                throw new Error('subscriber exploded');
+            });
+            conn.onStateChange(state => states.push(state));
+            conn.connect();
+            sockets.at(0)?.emitOpen();
+
+            expect(states).toEqual(['connecting', 'open']);
+        });
+
         it('delivers an envelope frame to both message and named-event subscribers', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });

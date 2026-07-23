@@ -518,7 +518,9 @@ export class FetchHttpClient implements HttpClient {
 
         for (const [key, value] of Object.entries(query ?? {})) {
             if (value !== undefined) {
-                parameters.set(key, String(value));
+                // append, not set: keys are unique by construction, and some
+                // minimal URLSearchParams implementations ship append only.
+                parameters.append(key, String(value));
             }
         }
 

@@ -558,7 +558,9 @@ export class ApiQuery {
         const search = new URLSearchParams();
 
         for (const [key, value] of Object.entries(params)) {
-            search.set(key, String(value));
+            // append, not set: keys are unique by construction, and some
+            // minimal URLSearchParams implementations ship append only.
+            search.append(key, String(value));
         }
 
         return search.toString();

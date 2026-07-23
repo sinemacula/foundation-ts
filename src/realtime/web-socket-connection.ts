@@ -242,7 +242,11 @@ export class WebSocketConnection implements RealtimeConnection {
         }
 
         for (const handler of handlers) {
-            handler(message);
+            try {
+                handler(message);
+            } catch {
+                // A misbehaving subscriber must never starve the others.
+            }
         }
     }
 
@@ -311,7 +315,11 @@ export class WebSocketConnection implements RealtimeConnection {
         this.#state = next;
 
         for (const handler of this.#stateHandlers) {
-            handler(next);
+            try {
+                handler(next);
+            } catch {
+                // A misbehaving subscriber must never starve the others.
+            }
         }
     }
 }
