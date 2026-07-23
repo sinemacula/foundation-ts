@@ -3,7 +3,7 @@
  *
  * Builds the application HTTP client from the frozen configuration, the
  * resolved fetch seam, preset-level interceptors, and the module registry's
- * register-phase contributions, then installs it into the kernel http holder.
+ * register-phase contributions, then installs it into the base http holder.
  * The response-error handler resolves in precedence order: an explicit override
  * wins; otherwise a configured toast key arms the default handler, which skips
  * validation failures and 401s, raises the application's toast, and captures

@@ -1,7 +1,7 @@
 /**
  * Console analytics tracker adapter.
  *
- * Writes every analytics call to the browser console via `console.info` for use
+ * Writes every analytics call to the console via `console.info` for use
  * during development. Not intended for production - swap in a real provider
  * adapter via the AnalyticsTracker port when deploying.
  *

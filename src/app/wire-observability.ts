@@ -2,7 +2,7 @@
  * Observability wiring unit for the bootstrap preset.
  *
  * Resolves the error reporter, analytics tracker, and logger from the
- * application's optional factories, installs each instance into its kernel
+ * application's optional factories, installs each instance into its base
  * service holder, and creates the breadcrumb trail. Without a factory the local
  * environment gets console adapters and every other environment gets the null
  * adapters. The instances and trail are returned so the orchestrator can wire

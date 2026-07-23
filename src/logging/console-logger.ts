@@ -1,7 +1,7 @@
 /**
  * Console logger adapter.
  *
- * Writes log entries to the browser console for use during development. Not
+ * Writes log entries to the console for use during development. Not
  * intended for production - swap in a real provider adapter via the Logger port
  * when deploying.
  *
@@ -19,7 +19,7 @@ const LEVEL_ORDER: Readonly<Record<LogLevel, number>> = {
 };
 
 /**
- * A logger that writes to the browser console, dropping entries below a
+ * A logger that writes to the console, dropping entries below a
  * configured minimum level.
  *
  * `console.log` and `console.debug` are disallowed by lint tooling, so both

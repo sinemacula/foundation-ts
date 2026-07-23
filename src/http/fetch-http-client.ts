@@ -42,7 +42,7 @@ export interface FetchHttpClientRetryOptions {
     /** Number of retries attempted after the first try. Defaults to 2. */
     readonly attempts?: number;
 
-    /** Delay strategy between attempts. Defaults to a new {@link ExponentialBackoff}; that class predates this use for realtime reconnect scheduling and may move to a shared support module once both use sites are extracted from this package. */
+    /** Delay strategy between attempts. Defaults to a new {@link ExponentialBackoff}, shared with the realtime reconnect scheduling. */
     readonly backoff?: ExponentialBackoff;
 }
 
@@ -453,8 +453,9 @@ export class FetchHttpClient implements HttpClient {
         };
 
         if (isUploadBody(request.body)) {
-            // The browser sets the multipart boundary or Blob content-type
-            // itself; overriding it here would strip that information.
+            // The fetch implementation sets the multipart boundary or Blob
+            // content-type itself; overriding it here would strip that
+            // information.
             init.body = request.body;
         } else if (request.body !== undefined) {
             if (!hasHeader(headers, 'content-type')) {
