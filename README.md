@@ -18,26 +18,26 @@ services on top. Everything platform-specific arrives through an injected port.
 
 ## What lives here
 
-| Area                 | What it provides                                                                                                 | Port / contract           |
-|----------------------|------------------------------------------------------------------------------------------------------------------|---------------------------|
-| `src/analytics/`     | Records product events through a swappable tracker (console + no-op adapters), plus route page tracking          | `AnalyticsTracker`        |
-| `src/app/`           | The boot core: `bootFoundationCore` runs the agnostic phases, plus the service registry and base wiring          | `bootFoundationCore`      |
-| `src/authorization/` | Evaluates flat permission grants with wildcard-prefix matching                                                   | `PermissionSet` (no port) |
-| `src/config/`        | Reads typed configuration from environment sources, fetches the runtime document and freezes the repository      | `EnvironmentSource`       |
-| `src/connectivity/`  | The connectivity-observation contract each platform adapts                                                       | `ConnectivityMonitor`     |
-| `src/feature-flags/` | Resolves feature flags through a swappable provider (static adapter included)                                    | `FeatureFlags`            |
-| `src/http/`          | HTTP client: a fetch adapter behind a port, a typed error hierarchy, and bearer-token attach + refresh-and-retry | `HttpClient`              |
-| `src/i18n/`          | Locale detection, persistence and negotiation, free of any rendering library                                     | `LocaleService`           |
-| `src/logging/`       | A minimal logging port with console and no-op adapters                                                           | `Logger`                  |
-| `src/notifications/` | The toast and confirm-dialog ports each platform's notification services implement                               | `Toaster` / `Confirmer`   |
-| `src/query/`         | Resource queries: the `ApiQuery` builder, a typed filter DSL, envelope mapping and `ResourceClient`              | `ResourceClient`          |
-| `src/realtime/`      | Live connections behind a port: WebSocket and EventSource adapters sharing exponential-backoff reconnect         | `RealtimeConnection`      |
-| `src/reporting/`     | Error reporting through a swappable reporter and a breadcrumb trail                                              | `ErrorReporter`           |
-| `src/router/`        | The navigation middleware contract and pipeline, generic over each platform's route and location types           | `RouteMiddleware`         |
-| `src/session/`       | The session core: lifecycle transitions, storage keys, redirect sanitising and a default `/auth` gateway         | `SessionApi`              |
-| `src/storage/`       | A synchronous key-value storage port with in-memory and key-namespacing adapters                                 | `KeyValueStorage`         |
-| `src/support/`       | Shared primitives: service holders, deep freeze and record guards                                                | -                         |
-| `src/theme/`         | Colour-scheme state: preference resolution and the OS-source and applier ports                                   | `ColorSchemeService`      |
+| Area                 | What it provides                                                                                                   | Port / contract           |
+|----------------------|--------------------------------------------------------------------------------------------------------------------|---------------------------|
+| `src/analytics/`     | Records product events through a swappable tracker (console + no-op adapters), plus route page tracking            | `AnalyticsTracker`        |
+| `src/app/`           | The boot core: `bootFoundationCore` runs the agnostic phases, plus the service registry and base wiring            | `bootFoundationCore`      |
+| `src/authorization/` | Evaluates flat permission grants with wildcard-prefix matching                                                     | `PermissionSet` (no port) |
+| `src/config/`        | Reads typed configuration from environment sources, fetches the runtime document and freezes the repository        | `EnvironmentSource`       |
+| `src/connectivity/`  | The connectivity-observation contract each platform adapts                                                         | `ConnectivityMonitor`     |
+| `src/feature-flags/` | Resolves feature flags through a swappable provider (static adapter included)                                      | `FeatureFlags`            |
+| `src/http/`          | HTTP client: a fetch adapter behind a port, a typed error hierarchy, and bearer-token attach + refresh-and-retry   | `HttpClient`              |
+| `src/i18n/`          | Locale detection, persistence and negotiation, free of any rendering library                                       | `LocaleService`           |
+| `src/logging/`       | A minimal logging port with console and no-op adapters                                                             | `Logger`                  |
+| `src/notifications/` | The toast and confirm-dialog ports each platform's notification services implement                                 | `Toaster` / `Confirmer`   |
+| `src/query/`         | Resource queries: the `ApiQuery` builder, a typed filter DSL, envelope mapping and `ResourceClient`                | `ResourceClient`          |
+| `src/realtime/`      | Live connections behind a port: a WebSocket adapter plus the exponential-backoff reconnect platform adapters share | `RealtimeConnection`      |
+| `src/reporting/`     | Error reporting through a swappable reporter and a breadcrumb trail                                                | `ErrorReporter`           |
+| `src/router/`        | The navigation middleware contract and pipeline, generic over each platform's route and location types             | `RouteMiddleware`         |
+| `src/session/`       | The session core: lifecycle transitions, storage keys, redirect sanitising and a default `/auth` gateway           | `SessionApi`              |
+| `src/storage/`       | A synchronous key-value storage port with in-memory and key-namespacing adapters                                   | `KeyValueStorage`         |
+| `src/support/`       | Shared primitives: service holders, deep freeze and record guards                                                  | -                         |
+| `src/theme/`         | Colour-scheme state: preference resolution and the OS-source and applier ports                                     | `ColorSchemeService`      |
 
 ## Installation
 
