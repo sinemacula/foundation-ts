@@ -28,18 +28,18 @@ import type { FoundationConfig } from './foundation-config';
 /**
  * Inputs for {@link wireObservability}.
  */
-export interface WireObservabilityOptions<C extends FoundationConfig> {
+export interface WireObservabilityOptions<T extends FoundationConfig> {
     /** The frozen application configuration. */
-    readonly config: Readonly<C>;
+    readonly config: Readonly<T>;
 
     /** Error-reporter factory; wins over the environment default. */
-    readonly reporter?: (settings: Readonly<C>) => ErrorReporter;
+    readonly reporter?: (settings: Readonly<T>) => ErrorReporter;
 
     /** Analytics-tracker factory; wins over the environment default. */
-    readonly analytics?: (settings: Readonly<C>) => AnalyticsTracker;
+    readonly analytics?: (settings: Readonly<T>) => AnalyticsTracker;
 
     /** Logger factory; wins over the environment default. */
-    readonly logger?: (settings: Readonly<C>) => Logger;
+    readonly logger?: (settings: Readonly<T>) => Logger;
 }
 
 /**
@@ -65,7 +65,7 @@ export interface WiredObservability {
  * @param options - the frozen configuration and optional adapter factories
  * @returns the installed instances plus the breadcrumb trail
  */
-export function wireObservability<C extends FoundationConfig>(options: WireObservabilityOptions<C>): WiredObservability {
+export function wireObservability<T extends FoundationConfig>(options: WireObservabilityOptions<T>): WiredObservability {
     const isLocal = options.config.app.environment === 'local';
 
     const reporter: ErrorReporter =
