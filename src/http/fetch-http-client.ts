@@ -171,7 +171,7 @@ export class FetchHttpClient implements HttpClient {
      * headers, interceptors, and retry policy
      */
     constructor(options: FetchHttpClientOptions) {
-        this.#baseUrl = options.baseUrl.replace(/\/+$/u, '');
+        this.#baseUrl = trimTrailingSlashes(options.baseUrl);
         this.#fetchFn = options.fetchFn ?? ((input, init) => globalThis.fetch(input, init));
         this.#timeout = options.timeout ?? null;
         this.#defaultHeaders = options.defaultHeaders ?? {};
@@ -549,6 +549,25 @@ function hasHeader(headers: Record<string, string>, name: string): boolean {
  */
 function isUploadBody(body: unknown): body is FormData | Blob {
     return body instanceof FormData || body instanceof Blob;
+}
+
+/**
+ * Trim trailing slashes with a linear scan.
+ *
+ * A `+`-then-anchor regex backtracks polynomially on slash runs, so the trim
+ * walks the string instead.
+ *
+ * @param value - the string to trim
+ * @returns the value without trailing slashes
+ */
+function trimTrailingSlashes(value: string): string {
+    let end = value.length;
+
+    while (end > 0 && value[end - 1] === '/') {
+        end -= 1;
+    }
+
+    return value.slice(0, end);
 }
 
 /**

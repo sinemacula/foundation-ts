@@ -133,12 +133,21 @@ export class ResourceClient<Value> {
 /**
  * Join a resource path and id without producing a double slash.
  *
+ * The trailing trim walks the string rather than using a `+`-then-anchor regex,
+ * which backtracks polynomially on slash runs.
+ *
  * @param path - the resource's base path
  * @param id - the resource identifier
  * @returns the joined path
  */
 function joinPath(path: string, id: string): string {
-    return `${path.replace(/\/+$/u, '')}/${id.replace(/^\/+/u, '')}`;
+    let end = path.length;
+
+    while (end > 0 && path[end - 1] === '/') {
+        end -= 1;
+    }
+
+    return `${path.slice(0, end)}/${id.replace(/^\/+/u, '')}`;
 }
 
 /**
