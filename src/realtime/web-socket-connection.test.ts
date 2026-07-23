@@ -49,8 +49,8 @@ class FakeWebSocket {
     }
 
     emitClose(): void {
-        // Not the DOM CloseEvent: that global only exists from node 23, and
-        // the connection's close handler never reads the event anyway.
+        // Not the DOM CloseEvent: that global only exists from node 23, and the
+        // connection's close handler never reads the event anyway.
         this.onclose?.(new Event('close') as CloseEvent);
     }
 }
