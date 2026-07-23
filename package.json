@@ -114,7 +114,7 @@
         "knip": "^6.16.1",
         "mkdist": "^2.4.1",
         "publint": "^0.3.21",
-        "typescript": "^6.0.3",
+        "typescript": "^7.0.0",
         "vitest": "^4.1.8"
     },
     "overrides": {
