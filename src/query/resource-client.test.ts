@@ -239,6 +239,24 @@ describe('ResourceClient', () => {
             expect(client.calls.at(0)?.path).toBe('widgets/w1');
         });
 
+        it('trims runs of slashes at the join without touching interior path slashes', async () => {
+            const { client, resource } = createResource('v1/widgets//');
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await resource.show('//w1');
+
+            expect(client.calls.at(0)?.path).toBe('v1/widgets/w1');
+        });
+
+        it('preserves interior slashes in a nested id', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await resource.show('w1/notes');
+
+            expect(client.calls.at(0)?.path).toBe('widgets/w1/notes');
+        });
+
         it('merges an ApiQuery into the request options', async () => {
             const { client, resource } = createResource();
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));

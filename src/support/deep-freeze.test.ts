@@ -86,4 +86,13 @@ describe('deepFreeze', () => {
         expect(Object.isFrozen(level2)).toBe(true);
         expect(Object.isFrozen(level3)).toBe(true);
     });
+
+    it('skips already-frozen branches without descending into them', () => {
+        const child = { a: 1 };
+        const root = Object.freeze({ child });
+
+        deepFreeze(root);
+
+        expect(Object.isFrozen(child)).toBe(false);
+    });
 });

@@ -40,6 +40,12 @@ describe('LocaleService', () => {
             expect(service.detect(['fr-FR'])).toBe('en-GB');
         });
 
+        it('prefers an exact region match over an earlier same-language locale', () => {
+            const { service } = makeService({ initialStored: 'en-gb', enabledLocales: ['en-US', 'en-GB'] });
+
+            expect(service.detect([])).toBe('en-GB');
+        });
+
         it('falls through to candidates when the stored value matches nothing', () => {
             const { service } = makeService({
                 enabledLocales: ['en-GB', 'fr-FR'],

@@ -279,6 +279,34 @@ describe('session core', () => {
             expect(storage.get(EXPIRES_AT_KEY)).toBeNull();
         });
 
+        it('removes rather than writes the absent refresh token and expiry keys', async () => {
+            fake.queueSession(tokens({ refreshToken: null, expiresAtEpochMs: null }));
+            fake.queueUser(user());
+
+            const removed: string[] = [];
+            const written: string[] = [];
+            const base = context();
+            const recording = {
+                ...base,
+                storage: {
+                    get: (key: string) => storage.get(key),
+                    set: (key: string, value: string) => {
+                        written.push(key);
+                        storage.set(key, value);
+                    },
+                    remove: (key: string) => {
+                        removed.push(key);
+                        storage.remove(key);
+                    },
+                },
+            };
+
+            await loginWithCredentials(emptyState(), recording, { email: 'alice@example.com', password: 'secret' });
+
+            expect(removed).toStrictEqual([REFRESH_TOKEN_KEY, EXPIRES_AT_KEY]);
+            expect(written).toStrictEqual([ACCESS_TOKEN_KEY]);
+        });
+
         it('removes the persisted refresh token when the session has none', async () => {
             storage.set(REFRESH_TOKEN_KEY, 'old-refresh');
             fake.queueSession(tokens({ refreshToken: null }));
@@ -466,6 +494,19 @@ describe('session core', () => {
 
             await expect(rehydrateSessionUser(state, context())).resolves.toBeUndefined();
             expect(state.user).toBeNull();
+        });
+
+        it('retries the fetch on a later call after a swallowed failure', async () => {
+            fake.queueUser(new Error('network failure'));
+            fake.queueUser(user());
+
+            const state = { ...emptyState(), accessToken: 'tok' };
+
+            await rehydrateSessionUser(state, context());
+            await rehydrateSessionUser(state, context());
+
+            expect(fake.calls).toStrictEqual(['currentUser', 'currentUser']);
+            expect(state.user?.email).toBe('alice@example.com');
         });
 
         it('shares one request across concurrent rehydrations of the same state', async () => {

@@ -53,11 +53,22 @@ describe('fetchRuntimeEnvironment', () => {
         expect(result).toStrictEqual(wire([['API_URL', 'https://api.example.com']]));
     });
 
-    it('returns an empty record for a non-ok response', async () => {
-        const stub = vi.fn().mockResolvedValue(jsonResponse({}, 404));
+    it('returns an empty record for a non-ok response even when its body parses', async () => {
+        const stub = vi.fn().mockResolvedValue(jsonResponse(wire([['API_URL', 'https://stale.example.com']]), 404));
         const result = await fetchRuntimeEnvironment(URL, stub);
 
         expect(result).toStrictEqual({});
+    });
+
+    it('requests the document uncached, accepting JSON', async () => {
+        const stub = vi.fn().mockResolvedValue(jsonResponse({}));
+
+        await fetchRuntimeEnvironment(URL, stub);
+
+        expect(stub).toHaveBeenCalledWith(URL, {
+            cache: 'no-store',
+            headers: { accept: 'application/json' },
+        });
     });
 
     it('returns an empty record when fetch throws', async () => {

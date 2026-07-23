@@ -22,6 +22,24 @@ describe('PermissionSet', () => {
         expect(permissions.allows('users.edit')).toBe(false);
     });
 
+    it('never treats a non-wildcard dot entry as a prefix', () => {
+        const permissions = new PermissionSet(['reports.view']);
+
+        expect(permissions.allows('reports.viewer')).toBe(false);
+    });
+
+    it('never treats a non-wildcard colon entry as a prefix', () => {
+        const permissions = new PermissionSet(['act:read']);
+
+        expect(permissions.allows('act:reader')).toBe(false);
+    });
+
+    it('does not misread a permission starting with the word null', () => {
+        const permissions = new PermissionSet(['reports.view']);
+
+        expect(permissions.allows('nullify.records')).toBe(false);
+    });
+
     it('is case-sensitive', () => {
         const permissions = new PermissionSet(['users.view']);
 
