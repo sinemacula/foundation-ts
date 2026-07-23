@@ -124,11 +124,16 @@ describe('FetchHttpClient - transient retry', () => {
         expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
     });
 
-    it('does not retry a POST even when retry is configured', async () => {
+    it.each([
+        ['POST', (client: FetchHttpClient) => client.post('/items', {})],
+        ['PUT', (client: FetchHttpClient) => client.put('/items', {})],
+        ['PATCH', (client: FetchHttpClient) => client.patch('/items', {})],
+        ['DELETE', (client: FetchHttpClient) => client.delete('/items')],
+    ] as const)('does not retry a %s even when retry is configured', async (_verb, invoke) => {
         const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockResolvedValue(jsonResponse({}, 503));
         const client = makeClient(fetchFn, { retry: { attempts: 2, backoff: fixedBackoff(10) } });
 
-        await expect(client.post('/items', {})).rejects.toBeInstanceOf(HttpError);
+        await expect(invoke(client)).rejects.toBeInstanceOf(HttpError);
 
         expect(fetchFn).toHaveBeenCalledTimes(1);
     });

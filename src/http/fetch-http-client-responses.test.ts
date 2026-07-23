@@ -314,6 +314,15 @@ describe('FetchHttpClient - download', () => {
         expect(await result.text()).toBe('file bytes');
     });
 
+    it('dispatches downloads as GET requests', async () => {
+        const fetchFn = makeFetch(async () => new Response(new Blob(['file bytes']), { status: 200 }));
+        const client = makeClient(fetchFn);
+
+        await client.download('/files/1');
+
+        expect(fetchFn.mock.calls.at(-1)?.[1]?.method).toBe('GET');
+    });
+
     it('maps a non-ok response to HttpError', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ message: 'not found' }, 404));
         const client = makeClient(fetchFn);
