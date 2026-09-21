@@ -40,7 +40,7 @@ default = true
 [[source]]
 name = "sinemacula"
 repository = "https://github.com/sinemacula/coding-standards"
-tag = "v1.23.0"
+tag = "v1.23.2"
 
 [runtimes.enabled]
 node = "24.18.0"
@@ -117,7 +117,7 @@ prepare_script = "npm ci"
 name = "eslint"
 mode = "comment"
 package_file = ".qlty/configs/eslint/package.json"
-package_filters = ["eslint", "typescript", "typescript-eslint", "@typescript-eslint", "eslint-plugin-jsdoc", "eslint-plugin-check-file", "@sinemacula/coding-standards"]
+package_filters = ["eslint", "typescript", "typescript-eslint", "@typescript-eslint", "eslint-plugin-jsdoc", "eslint-plugin-check-file", "yaml-eslint-parser", "@sinemacula/coding-standards"]
 
 # The eslint config lives under .qlty; do not lint .qlty with eslint (it would
 # otherwise flag its own config file).
