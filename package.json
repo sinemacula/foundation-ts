@@ -1,6 +1,6 @@
 {
     "name": "@sinemacula/foundation",
-    "version": "0.0.0",
+    "version": "1.0.0",
     "description": "Platform-agnostic TypeScript foundation: the framework-free ports and logic (http, config, storage, query, realtime, authorization, logging, i18n) shared by Sine Macula's web and mobile kernels.",
     "license": "Apache-2.0",
     "author": "Ben Carey <bdmc@sinemacula.co.uk>",
@@ -12,7 +12,14 @@
     "bugs": {
         "url": "https://github.com/sinemacula/foundation-ts/issues"
     },
-    "keywords": ["sine macula", "foundation", "kernel", "typescript", "framework-agnostic", "ports"],
+    "keywords": [
+        "sine macula",
+        "foundation",
+        "kernel",
+        "typescript",
+        "framework-agnostic",
+        "ports"
+    ],
     "type": "module",
     "engines": {
         "node": ">=22"
@@ -82,7 +89,11 @@
         "./theme/color-scheme": "./src/theme/color-scheme.ts",
         "./theme/color-scheme-service": "./src/theme/color-scheme-service.ts"
     },
-    "files": ["dist", "README.md", "LICENSE"],
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
     "publishConfig": {
         "access": "public",
         "registry": "https://registry.npmjs.org/"
