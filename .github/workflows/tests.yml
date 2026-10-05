@@ -29,7 +29,7 @@ jobs:
     # build - all from the shared reusable workflow. This package has no
     # browser surface, so the e2e job is off.
     tests:
-        uses: sinemacula/.github/.github/workflows/node-tests.yml@v1.6.1
+        uses: sinemacula/.github/.github/workflows/node-tests.yml@v1.9.1
         permissions:
             contents: read
             id-token: write
