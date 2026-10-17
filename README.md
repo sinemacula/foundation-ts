@@ -1,4 +1,6 @@
-# Foundation
+<h1 align="center">Foundation</h1>
+
+<div align="center">
 
 [![Latest Stable Version](https://img.shields.io/npm/v/@sinemacula/foundation.svg)](https://www.npmjs.com/package/@sinemacula/foundation)
 [![Build Status](https://github.com/sinemacula/foundation-ts/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/sinemacula/foundation-ts/actions/workflows/tests.yml)
@@ -6,6 +8,8 @@
 [![Maintainability](https://qlty.sh/gh/sinemacula/projects/foundation-ts/maintainability.svg)](https://qlty.sh/gh/sinemacula/projects/foundation-ts)
 [![Code Coverage](https://qlty.sh/gh/sinemacula/projects/foundation-ts/coverage.svg)](https://qlty.sh/gh/sinemacula/projects/foundation-ts)
 [![Total Downloads](https://img.shields.io/npm/dt/@sinemacula/foundation.svg)](https://www.npmjs.com/package/@sinemacula/foundation)
+
+</div>
 
 `@sinemacula/foundation` is the platform-agnostic foundation on which Sine Macula application kernels are
 built. It provides the framework-free logic every client needs - configuration, HTTP, sessions, queries,
