@@ -3,11 +3,13 @@
 <div align="center">
 
 [![Latest Stable Version](https://img.shields.io/npm/v/@sinemacula/foundation.svg)](https://www.npmjs.com/package/@sinemacula/foundation)
+[![Node Version](https://img.shields.io/node/v/@sinemacula/foundation.svg)](https://www.npmjs.com/package/@sinemacula/foundation)
 [![Build Status](https://github.com/sinemacula/foundation-ts/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/sinemacula/foundation-ts/actions/workflows/tests.yml)
 [![Quality Gates](https://github.com/sinemacula/foundation-ts/actions/workflows/quality-gates.yml/badge.svg?branch=master)](https://github.com/sinemacula/foundation-ts/actions/workflows/quality-gates.yml)
 [![Maintainability](https://qlty.sh/gh/sinemacula/projects/foundation-ts/maintainability.svg)](https://qlty.sh/gh/sinemacula/projects/foundation-ts)
 [![Code Coverage](https://qlty.sh/gh/sinemacula/projects/foundation-ts/coverage.svg)](https://qlty.sh/gh/sinemacula/projects/foundation-ts)
 [![Total Downloads](https://img.shields.io/npm/dt/@sinemacula/foundation.svg)](https://www.npmjs.com/package/@sinemacula/foundation)
+[![License](https://img.shields.io/github/license/sinemacula/foundation-ts.svg)](LICENSE)
 
 </div>
 
