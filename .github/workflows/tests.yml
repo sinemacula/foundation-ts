@@ -30,8 +30,10 @@ jobs:
     # browser surface, so the e2e job is off.
     tests:
         uses: sinemacula/.github/.github/workflows/node-tests.yml@v1.13.0
+        # Shared workflows from v2 ask for packages: read, which callers grant.
         permissions:
             contents: read
             id-token: write
+            packages: read
         with:
             run-e2e: false

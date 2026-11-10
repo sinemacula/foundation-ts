@@ -47,5 +47,9 @@ jobs:
     # off.
     gates:
         uses: sinemacula/.github/.github/workflows/node-quality-gates.yml@v1.13.0
+        # Shared workflows from v2 ask for packages: read, which callers grant.
+        permissions:
+            contents: read
+            packages: read
         with:
             run-size: false
