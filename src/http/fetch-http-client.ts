@@ -361,6 +361,7 @@ export class FetchHttpClient implements HttpClient {
             url: this.#buildUrl(path, options?.query),
             headers: withDefaultAccept({ ...this.#defaultHeaders, ...options?.headers }, parse),
             body,
+            ...(options?.credentials === undefined ? {} : { credentials: options.credentials }),
         });
 
         context.request = request;
@@ -613,6 +614,10 @@ function buildRequestInit(request: HttpRequest, signal: AbortSignal | null): Req
         headers,
         signal,
     };
+
+    if (request.credentials !== undefined) {
+        init.credentials = request.credentials;
+    }
 
     if (isUploadBody(request.body)) {
         // The fetch implementation sets the multipart boundary or Blob

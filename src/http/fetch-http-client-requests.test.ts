@@ -9,6 +9,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { FetchHttpClient } from './fetch-http-client';
+import type { HttpRequest } from './http-client';
 
 // ---------------------------------------------------------------------------
 // Stub type
@@ -489,5 +490,70 @@ describe('FetchHttpClient - accept header', () => {
         await client.get('/items');
 
         expect(seen).toStrictEqual([{ accept: 'application/json' }]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Credentials
+// ---------------------------------------------------------------------------
+
+describe('FetchHttpClient - credentials', () => {
+    it.each([
+        'omit',
+        'same-origin',
+        'include',
+    ] as const)('sends the %s credentials mode to fetch', async credentials => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn);
+
+        await client.post('/session', {}, { credentials });
+
+        expect(lastInit(fetchFn).credentials).toBe(credentials);
+    });
+
+    it('leaves the credentials mode to the platform when the request sets none', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn);
+
+        await client.get('/items');
+
+        expect(lastInit(fetchFn)).not.toHaveProperty('credentials');
+    });
+
+    it('carries the credentials mode on the request interceptors resolve', async () => {
+        const seen: HttpRequest[] = [];
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn, {
+            requestInterceptors: [
+                request => {
+                    seen.push(request);
+
+                    return { ...request, credentials: 'omit' };
+                },
+            ],
+        });
+
+        await client.get('/items', { credentials: 'include' });
+
+        expect(seen.map(request => request.credentials)).toStrictEqual(['include']);
+        expect(lastInit(fetchFn).credentials).toBe('omit');
+    });
+
+    it('leaves the credentials mode off the resolved request when the request sets none', async () => {
+        const seen: HttpRequest[] = [];
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn, {
+            requestInterceptors: [
+                request => {
+                    seen.push(request);
+
+                    return request;
+                },
+            ],
+        });
+
+        await client.get('/items');
+
+        expect(seen[0]).not.toHaveProperty('credentials');
     });
 });
