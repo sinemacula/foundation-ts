@@ -12,10 +12,28 @@ import type { NavigationHooks, RouteTarget } from './install-page-tracking';
 import { installPageTracking } from './install-page-tracking';
 import { BreadcrumbTrail } from '../reporting/breadcrumb-trail';
 
-function makeTracker(): AnalyticsTracker & {
-    pageCalls: Array<{ name: string; properties: Readonly<Record<string, unknown>> | undefined }>;
-} {
-    const pageCalls: Array<{ name: string; properties: Readonly<Record<string, unknown>> | undefined }> = [];
+/** One recorded page() invocation. */
+interface PageCall {
+    /** The page name tracked. */
+    readonly name: string;
+
+    /** The properties tracked with it. */
+    readonly properties: Readonly<Record<string, unknown>> | undefined;
+}
+
+/** An analytics tracker that records every page() call. */
+interface StubTracker extends AnalyticsTracker {
+    /** Every page() invocation, in order. */
+    readonly pageCalls: PageCall[];
+}
+
+/**
+ * Build a tracker that records page calls.
+ *
+ * @returns the stub tracker
+ */
+function makeTracker(): StubTracker {
+    const pageCalls: PageCall[] = [];
 
     return {
         pageCalls,
@@ -28,11 +46,24 @@ function makeTracker(): AnalyticsTracker & {
     };
 }
 
-function makeHooks(): {
-    hooks: NavigationHooks;
-    navigate: (to: RouteTarget, from: RouteTarget) => void;
-    teardownCount: () => number;
-} {
+/** Navigation hooks plus controls to drive and inspect them. */
+interface HooksFixture {
+    /** The hooks handed to the tracking install. */
+    readonly hooks: NavigationHooks;
+
+    /** Simulate a completed navigation. */
+    readonly navigate: (to: RouteTarget, from: RouteTarget) => void;
+
+    /** How many times the after-each registration was torn down. */
+    readonly teardownCount: () => number;
+}
+
+/**
+ * Build navigation hooks the test drives by hand.
+ *
+ * @returns the hooks and their controls
+ */
+function makeHooks(): HooksFixture {
     let handler: ((to: RouteTarget, from: RouteTarget) => void) | null = null;
     let teardowns = 0;
 

@@ -13,10 +13,8 @@ import type { EnvironmentSource } from './environment';
 /**
  * Build a `Record<string, string>` from an array of `[key, value]` pairs.
  *
- * Wraps `Object.fromEntries` so callers can write wire-field names as plain
- * string literals inside array elements rather than as object-literal keys -
- * keeping non-camelCase environment keys out of any position that Biome's
- * naming-convention or literal-keys rules inspect.
+ * Keeps non-camelCase environment keys out of object-literal key positions so
+ * naming-convention lint rules never see them.
  *
  * @param entries - key-value pairs for the record
  * @returns a plain `Record<string, string>`
@@ -25,10 +23,21 @@ function wire(entries: ReadonlyArray<readonly [string, string]>): Record<string,
     return Object.fromEntries(entries);
 }
 
+/**
+ * Build an environment source backed by a fixed record.
+ *
+ * @param values - the values the source serves
+ * @returns the environment source
+ */
 function sourceFrom(values: Record<string, string>): EnvironmentSource {
     return { get: (key: string) => values[key] };
 }
 
+/**
+ * Build an environment source that defines no keys.
+ *
+ * @returns the environment source
+ */
 function emptySource(): EnvironmentSource {
     return { get: () => undefined };
 }

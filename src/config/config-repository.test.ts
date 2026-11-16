@@ -105,14 +105,14 @@ describe('ConfigRepository', () => {
     describe('deep immutability', () => {
         it('deeply freezes nested objects so mutations are silently ignored in non-strict contexts', () => {
             const config = new ConfigRepository({ nested: { value: 42 } });
-            const all = config.all() as { nested: { value: number } };
+            const all = config.all();
 
             expect(Object.isFrozen(all.nested)).toBe(true);
         });
 
         it('deeply freezes array values inside the configuration', () => {
             const config = new ConfigRepository({ items: [1, 2, 3] });
-            const all = config.all() as { items: number[] };
+            const all = config.all();
 
             expect(Object.isFrozen(all.items)).toBe(true);
         });
