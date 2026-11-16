@@ -18,6 +18,12 @@ import type { FoundationConfig } from './foundation-config';
 import type { WireHttpClientOptions, WireHttpClientTools } from './wire-http-client';
 import { wireHttpClient } from './wire-http-client';
 
+/** The body of a successful stub response. */
+interface OkBody {
+    /** Whether the request succeeded. */
+    readonly ok: boolean;
+}
+
 /**
  * Build a minimal contract-satisfying configuration fixture.
  *
@@ -58,14 +64,29 @@ function createRequest(overrides: Partial<HttpRequest> = {}): HttpRequest {
 
 /** Build an HTTP client stand-in that fails loudly if any method is invoked. */
 function createHttpClientStub(): HttpClient {
+    /**
+     * Reject every call, since the stub must never be used.
+     *
+     * @returns a rejected promise
+     */
     const fail = (): Promise<never> => Promise.reject(new Error('not implemented'));
 
     return { get: fail, post: fail, put: fail, patch: fail, delete: fail, download: fail };
 }
 
+/** One recorded captureError invocation. */
+interface CapturedError {
+    /** The captured error. */
+    readonly error: unknown;
+
+    /** The context the error was captured with. */
+    readonly context: Readonly<Record<string, unknown>> | undefined;
+}
+
 /** An error reporter recording every captureError invocation. */
 interface RecordingReporter extends ErrorReporter {
-    readonly captured: { error: unknown; context: Readonly<Record<string, unknown>> | undefined }[];
+    /** Every captured error, in capture order. */
+    readonly captured: CapturedError[];
 }
 
 /** Build an error reporter that records captured errors with their context. */
@@ -86,8 +107,13 @@ function createRecordingReporter(): RecordingReporter {
  * A fetch fake recording every call and replaying queued responses in order.
  */
 interface FetchStub {
+    /** The fetch seam to hand to the client. */
     readonly fetchFn: typeof fetch;
+
+    /** The URL of every call, in call order. */
     readonly urls: string[];
+
+    /** The init of every call, in call order. */
     readonly inits: (RequestInit | undefined)[];
 }
 
@@ -102,6 +128,13 @@ function createFetchStub(...responses: ReadonlyArray<() => Response>): FetchStub
     const urls: string[] = [];
     const inits: (RequestInit | undefined)[] = [];
 
+    /**
+     * Record the call and replay the next queued response.
+     *
+     * @param input - the request URL
+     * @param init - the request init
+     * @returns the queued response, or an empty 200 once exhausted
+     */
     const fetchFn: typeof fetch = (input, init) => {
         urls.push(String(input));
         inits.push(init);
@@ -162,14 +195,23 @@ function captureTools(overrides: CaptureOverrides = {}): WireHttpClientTools<Fou
     return captured;
 }
 
+/** One raised toast. */
 interface RecordedToast {
+    /** The toast variant. */
     readonly variant: string;
 
+    /** The toast message key. */
     readonly message: string;
 }
 
+/** A Toaster that records raised toasts. */
+interface RecordingToaster extends Toaster {
+    /** Every raised toast, in order. */
+    readonly recorded: RecordedToast[];
+}
+
 /** A Toaster that records raised toasts for assertion. */
-function createRecordingToaster(): Toaster & { readonly recorded: RecordedToast[] } {
+function createRecordingToaster(): RecordingToaster {
     const recorded: RecordedToast[] = [];
 
     return {
@@ -212,7 +254,7 @@ describe('wireHttpClient', () => {
                 contributions: createContributions(),
             });
 
-            const result = await client.get<{ ok: boolean }>('ping');
+            const result = await client.get<OkBody>('ping');
 
             expect(result).toEqual({ ok: true });
             expect(stub.urls).toEqual(['https://api.example.com/ping']);
@@ -221,11 +263,25 @@ describe('wireHttpClient', () => {
 
         it('runs preset interceptors before module interceptors', async () => {
             const log: string[] = [];
+
+            /**
+             * Tag the request as seen by the preset.
+             *
+             * @param request - the outgoing request
+             * @returns the tagged request
+             */
             const preset: RequestInterceptor = request => {
                 log.push('preset');
 
                 return { ...request, headers: { ...request.headers, 'x-chain': 'preset' } };
             };
+
+            /**
+             * Append the module tag to the preset tag.
+             *
+             * @param request - the outgoing request
+             * @returns the tagged request
+             */
             const moduleInterceptor: RequestInterceptor = request => {
                 log.push('module');
 
@@ -263,7 +319,7 @@ describe('wireHttpClient', () => {
                 }),
             });
 
-            const result = await client.get<{ ok: boolean }>('secure');
+            const result = await client.get<OkBody>('secure');
 
             expect(result).toEqual({ ok: true });
             expect(refreshes).toBe(1);
@@ -328,8 +384,28 @@ describe('wireHttpClient', () => {
 
         it('threads the merged construction inputs to the factory', () => {
             const config = createConfig();
+
+            /**
+             * Pass the request through unchanged.
+             *
+             * @param request - the outgoing request
+             * @returns the same request
+             */
             const presetInterceptor: RequestInterceptor = request => request;
+
+            /**
+             * Pass the request through unchanged.
+             *
+             * @param request - the outgoing request
+             * @returns the same request
+             */
             const moduleInterceptor: RequestInterceptor = request => request;
+
+            /**
+             * Report a successful refresh.
+             *
+             * @returns true
+             */
             const onUnauthorized: UnauthorizedHandler = () => Promise.resolve(true);
 
             const tools = captureTools({
@@ -465,6 +541,78 @@ describe('wireHttpClient', () => {
             expect(log).toEqual(['module']);
             expect(reporter.captured).toHaveLength(0);
         });
+
+        it('runs every handler and captures each failure when handlers throw', () => {
+            const reporter = createRecordingReporter();
+
+            installReporting(reporter);
+
+            const log: string[] = [];
+            const presetFailure = new Error('override exploded');
+            const moduleFailure = new Error('module exploded');
+            const tools = captureTools({
+                onResponseError: () => {
+                    log.push('override');
+
+                    throw presetFailure;
+                },
+                contributions: createContributions({
+                    responseErrorHandlers: [
+                        () => {
+                            log.push('module-a');
+
+                            throw moduleFailure;
+                        },
+                        () => {
+                            log.push('module-b');
+                        },
+                    ],
+                }),
+            });
+
+            tools.onResponseError(new Error('boom'), createRequest({ url: 'https://api.example.com/items#top' }));
+
+            expect(log).toEqual(['override', 'module-a', 'module-b']);
+            expect(reporter.captured).toEqual([
+                {
+                    error: presetFailure,
+                    context: {
+                        source: 'http-response-error-handler',
+                        method: 'GET',
+                        url: 'https://api.example.com/items',
+                    },
+                },
+                {
+                    error: moduleFailure,
+                    context: {
+                        source: 'http-response-error-handler',
+                        method: 'GET',
+                        url: 'https://api.example.com/items',
+                    },
+                },
+            ]);
+        });
+
+        it('drops a handler failure without throwing when the reporter is unavailable', () => {
+            const log: string[] = [];
+            const tools = captureTools({
+                onResponseError: () => {
+                    throw new Error('override exploded');
+                },
+                contributions: createContributions({
+                    responseErrorHandlers: [
+                        () => {
+                            log.push('module');
+                        },
+                    ],
+                }),
+            });
+
+            expect(() => {
+                tools.onResponseError(new Error('boom'), createRequest());
+            }).not.toThrow();
+            expect(log).toEqual(['module']);
+        });
     });
 
     describe('default response-error handler', () => {
@@ -587,12 +735,57 @@ describe('wireHttpClient', () => {
             expect(reporter.captured).toHaveLength(1);
         });
 
+        it('strips the query string and fragment from the reported URL', () => {
+            const reporter = createRecordingReporter();
+
+            installReporting(reporter);
+
+            const error = new HttpError(500, 'Server error.');
+            const tools = captureTools();
+
+            tools.onResponseError(error, createRequest({ url: 'https://api.example.com/reset?token=secret#done' }));
+
+            expect(reporter.captured).toEqual([
+                { error, context: { source: 'http', method: 'GET', url: 'https://api.example.com/reset' } },
+            ]);
+        });
+
+        it('still captures the failure when the toast service throws, and captures the toast failure too', () => {
+            const reporter = createRecordingReporter();
+            const toastFailure = new Error('toaster exploded');
+
+            installReporting(reporter);
+            installToasts({
+                error: () => {
+                    throw toastFailure;
+                },
+                information: () => 'id',
+            });
+
+            const error = new HttpError(500, 'Server error.');
+            const tools = captureTools({ unexpectedErrorToastKey: 'app.errors.unexpected' });
+
+            tools.onResponseError(error, createRequest({ url: 'https://api.example.com/items?page=2' }));
+
+            expect(reporter.captured).toEqual([
+                {
+                    error: toastFailure,
+                    context: {
+                        source: 'http-response-error-handler',
+                        method: 'GET',
+                        url: 'https://api.example.com/items',
+                    },
+                },
+                { error, context: { source: 'http', method: 'GET', url: 'https://api.example.com/items' } },
+            ]);
+        });
+
         it('reads the toast and reporting services lazily on each invocation', () => {
             const tools = captureTools({ unexpectedErrorToastKey: 'app.errors.unexpected' });
 
-            expect(() => tools.onResponseError(new HttpError(500, 'Server error.'), createRequest())).toThrow(
-                'toast service accessed before initialisation',
-            );
+            expect(() => {
+                tools.onResponseError(new HttpError(500, 'Server error.'), createRequest());
+            }).not.toThrow();
 
             const toaster = createRecordingToaster();
             const reporter = createRecordingReporter();
