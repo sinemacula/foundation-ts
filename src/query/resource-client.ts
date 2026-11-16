@@ -92,13 +92,16 @@ export class ResourceClient<Value> {
      * Create a new resource.
      *
      * @param body - the request body
-     * @param options - optional request options
+     * @param query - an optional {@link ApiQuery} shaping the returned record,
+     * merged into the request's query parameters
+     * @param options - optional request options; `options.query` entries win
+     * over `query` on collision
      * @returns the mapped created resource
      * @throws Error when the response does not match the expected envelope
      * shape
      */
-    async create(body: Readonly<Record<string, unknown>>, options?: HttpRequestOptions): Promise<Value> {
-        const raw = await this.#client.post<unknown>(this.#path, body, options);
+    async create(body: Readonly<Record<string, unknown>>, query?: ApiQuery, options?: HttpRequestOptions): Promise<Value> {
+        const raw = await this.#client.post<unknown>(this.#path, body, buildRequestOptions(query, options));
 
         return unwrapItem(raw, this.#map);
     }
@@ -108,15 +111,24 @@ export class ResourceClient<Value> {
      *
      * @param id - the resource identifier
      * @param body - the request body
-     * @param options - optional request options
-     * @returns the mapped updated resource
-     * @throws Error when the response does not match the expected envelope
+     * @param query - an optional {@link ApiQuery} shaping the returned record,
+     * merged into the request's query parameters
+     * @param options - optional request options; `options.query` entries win
+     * over `query` on collision
+     * @returns the mapped updated resource, or undefined when the server
+     * answers with no body (such as a 204)
+     * @throws Error when a response body does not match the expected envelope
      * shape
      */
-    async update(id: string, body: Readonly<Record<string, unknown>>, options?: HttpRequestOptions): Promise<Value> {
-        const raw = await this.#client.patch<unknown>(joinPath(this.#path, id), body, options);
+    async update(
+        id: string,
+        body: Readonly<Record<string, unknown>>,
+        query?: ApiQuery,
+        options?: HttpRequestOptions,
+    ): Promise<Value | undefined> {
+        const raw = await this.#client.patch<unknown>(joinPath(this.#path, id), body, buildRequestOptions(query, options));
 
-        return unwrapItem(raw, this.#map);
+        return raw === undefined ? undefined : unwrapItem(raw, this.#map);
     }
 
     /**
@@ -143,7 +155,7 @@ export class ResourceClient<Value> {
 function joinPath(path: string, id: string): string {
     let end = path.length;
 
-    while (end > 0 && path[end - 1] === '/') {
+    while (path[end - 1] === '/') {
         end -= 1;
     }
 

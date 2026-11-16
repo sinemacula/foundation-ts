@@ -14,16 +14,35 @@ import { ResourceClient } from './resource-client';
 
 /** A minimal domain type used to exercise the resource client. */
 interface Widget {
+    /** The widget identifier. */
     readonly id: string;
+
+    /** The widget display name. */
     readonly name: string;
 }
 
 /** The shape of a single call recorded by {@link FakeHttpClient}. */
 interface RecordedCall {
+    /** The HTTP method called. */
     readonly method: string;
+
+    /** The request path. */
     readonly path: string;
+
+    /** The request body, if any. */
     readonly body: unknown;
+
+    /** The request options passed through. */
     readonly options: HttpRequestOptions | undefined;
+}
+
+/** The fake transport and the resource client bound to it. */
+interface ResourceFixture {
+    /** The recording fake transport. */
+    readonly client: FakeHttpClient;
+
+    /** The resource client under test. */
+    readonly resource: ResourceClient<Widget>;
 }
 
 /**
@@ -31,7 +50,10 @@ interface RecordedCall {
  * queued response payloads in order.
  */
 class FakeHttpClient implements HttpClient {
+    /** Every call made, in order. */
     readonly calls: RecordedCall[] = [];
+
+    /** The queued response payloads, consumed in order. */
     readonly #queue: unknown[] = [];
 
     /**
@@ -43,30 +65,84 @@ class FakeHttpClient implements HttpClient {
         this.#queue.push(value);
     }
 
+    /**
+     * Record a GET call.
+     *
+     * @param path - the request path
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     get<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('GET', path, undefined, options);
     }
 
+    /**
+     * Record a POST call.
+     *
+     * @param path - the request path
+     * @param body - the request body
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     post<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('POST', path, body, options);
     }
 
+    /**
+     * Record a PUT call.
+     *
+     * @param path - the request path
+     * @param body - the request body
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     put<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('PUT', path, body, options);
     }
 
+    /**
+     * Record a PATCH call.
+     *
+     * @param path - the request path
+     * @param body - the request body
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     patch<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('PATCH', path, body, options);
     }
 
+    /**
+     * Record a DELETE call.
+     *
+     * @param path - the request path
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     delete<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('DELETE', path, undefined, options);
     }
 
+    /**
+     * Record a download call.
+     *
+     * @param path - the request path
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     download(path: string, options?: HttpRequestOptions): Promise<Blob> {
         return this.#consume('DOWNLOAD', path, undefined, options);
     }
 
+    /**
+     * Record a call and resolve with the next queued payload.
+     *
+     * @param method - the HTTP method called
+     * @param path - the request path
+     * @param body - the request body, if any
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     #consume<T>(method: string, path: string, body: unknown, options: HttpRequestOptions | undefined): Promise<T> {
         this.calls.push({ method, path, body, options });
 
@@ -77,8 +153,7 @@ class FakeHttpClient implements HttpClient {
 /**
  * Build a `Record<string, unknown>` from an array of `[key, value]` pairs.
  *
- * Keeps snake_case wire-field names out of object-literal key positions so
- * Biome's naming-convention rule never sees them.
+ * Keeps snake_case wire-field names out of object-literal key positions.
  *
  * @param entries - key-value pairs for the record
  * @returns a plain `Record<string, unknown>`
@@ -87,7 +162,13 @@ function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string
     return Object.fromEntries(entries);
 }
 
-/** Build a raw widget wire record. */
+/**
+ * Build a raw widget wire record.
+ *
+ * @param id - the widget id
+ * @param name - the widget name
+ * @returns the wire record
+ */
 function widgetRecord(id: string, name: string): Record<string, unknown> {
     return wire([
         ['id', id],
@@ -95,7 +176,13 @@ function widgetRecord(id: string, name: string): Record<string, unknown> {
     ]);
 }
 
-/** Build a valid single-widget envelope. */
+/**
+ * Build a valid single-widget envelope.
+ *
+ * @param id - the widget id
+ * @param name - the widget name
+ * @returns the envelope payload
+ */
 function widgetEnvelope(id: string, name: string): Record<string, unknown> {
     return { data: widgetRecord(id, name) };
 }
@@ -115,8 +202,13 @@ function mapWidget(raw: RawRecord): Widget {
     return { id: raw['id'], name: raw['name'] };
 }
 
-/** Build a `ResourceClient<Widget>` wired against a fresh `FakeHttpClient`. */
-function createResource(path = 'widgets'): { client: FakeHttpClient; resource: ResourceClient<Widget> } {
+/**
+ * Build a `ResourceClient<Widget>` wired against a fresh `FakeHttpClient`.
+ *
+ * @param path - the resource collection path
+ * @returns the fake client and the resource bound to it
+ */
+function createResource(path = 'widgets'): ResourceFixture {
     const client = new FakeHttpClient();
     const resource = new ResourceClient({ client, path, map: mapWidget });
 
@@ -298,9 +390,29 @@ describe('ResourceClient', () => {
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
             const controller = new AbortController();
 
-            await resource.create({ name: 'Widget One' }, { signal: controller.signal });
+            await resource.create({ name: 'Widget One' }, undefined, { signal: controller.signal });
 
-            expect(client.calls.at(0)?.options?.signal).toBe(controller.signal);
+            expect(client.calls.at(0)?.options).toEqual({ signal: controller.signal });
+        });
+
+        it('shapes the returned record with an ApiQuery, explicit options.query winning on collision', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await resource.create({ name: 'Widget One' }, ApiQuery.create().fieldsFor('widget', ['id', 'name']).limit(1), {
+                query: { limit: 2 },
+            });
+
+            expect(client.calls.at(0)?.options?.query).toEqual({ 'fields[widget]': 'id,name', limit: 2 });
+        });
+
+        it('sends no options when neither a query nor options are given', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await resource.create({ name: 'Widget One' });
+
+            expect(client.calls.at(0)?.options).toBeUndefined();
         });
 
         it('propagates malformed-envelope errors', async () => {
@@ -325,7 +437,32 @@ describe('ResourceClient', () => {
             expect(call?.method).toBe('PATCH');
             expect(call?.path).toBe('widgets/w1');
             expect(call?.body).toEqual({ name: 'Widget One (renamed)' });
-            expect(updated.name).toBe('Widget One (renamed)');
+            expect(updated).toEqual({ id: 'w1', name: 'Widget One (renamed)' });
+        });
+
+        it('shapes the returned record with an ApiQuery', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await resource.update('w1', { name: 'Widget One' }, ApiQuery.create().fieldsFor('widget', ['id', 'name']));
+
+            expect(client.calls.at(0)?.options?.query).toEqual({ 'fields[widget]': 'id,name' });
+        });
+
+        it('resolves undefined when the server answers with no body', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(undefined);
+
+            await expect(resource.update('w1', { name: 'Widget One' })).resolves.toBeUndefined();
+        });
+
+        it('still rejects a null body as a malformed envelope', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(null);
+
+            await expect(resource.update('w1', { name: 'x' })).rejects.toThrow(
+                'The response did not match the expected envelope shape.',
+            );
         });
 
         it('passes through request options', async () => {
@@ -333,9 +470,9 @@ describe('ResourceClient', () => {
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
             const controller = new AbortController();
 
-            await resource.update('w1', { name: 'Widget One' }, { signal: controller.signal });
+            await resource.update('w1', { name: 'Widget One' }, undefined, { signal: controller.signal });
 
-            expect(client.calls.at(0)?.options?.signal).toBe(controller.signal);
+            expect(client.calls.at(0)?.options).toEqual({ signal: controller.signal });
         });
 
         it('propagates malformed-envelope errors', async () => {
