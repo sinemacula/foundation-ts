@@ -61,8 +61,8 @@ export class ResourceClient<Value> {
      * @param options - optional request options; `options.query` entries win
      * over `query` on collision
      * @returns the mapped items and pagination metadata
-     * @throws Error when the response does not match the expected envelope
-     * shape
+     * @throws {@link QueryError} when the response does not match the expected
+     * envelope shape
      */
     async list(query?: ApiQuery, options?: HttpRequestOptions): Promise<ListResult<Value>> {
         const raw = await this.#client.get<unknown>(this.#path, buildRequestOptions(query, options));
@@ -79,8 +79,8 @@ export class ResourceClient<Value> {
      * @param options - optional request options; `options.query` entries win
      * over `query` on collision
      * @returns the mapped resource
-     * @throws Error when the response does not match the expected envelope
-     * shape
+     * @throws {@link QueryError} when the response does not match the expected
+     * envelope shape
      */
     async show(id: string, query?: ApiQuery, options?: HttpRequestOptions): Promise<Value> {
         const raw = await this.#client.get<unknown>(joinPath(this.#path, id), buildRequestOptions(query, options));
@@ -97,10 +97,14 @@ export class ResourceClient<Value> {
      * @param options - optional request options; `options.query` entries win
      * over `query` on collision
      * @returns the mapped created resource
-     * @throws Error when the response does not match the expected envelope
-     * shape
+     * @throws {@link QueryError} when the response body is missing or does not
+     * match the expected envelope shape
      */
-    async create(body: Readonly<Record<string, unknown>>, query?: ApiQuery, options?: HttpRequestOptions): Promise<Value> {
+    async create(
+        body: Readonly<Record<string, unknown>>,
+        query?: ApiQuery,
+        options?: HttpRequestOptions,
+    ): Promise<Value> {
         const raw = await this.#client.post<unknown>(this.#path, body, buildRequestOptions(query, options));
 
         return unwrapItem(raw, this.#map);
@@ -115,20 +119,39 @@ export class ResourceClient<Value> {
      * merged into the request's query parameters
      * @param options - optional request options; `options.query` entries win
      * over `query` on collision
-     * @returns the mapped updated resource, or undefined when the server
-     * answers with no body (such as a 204)
-     * @throws Error when a response body does not match the expected envelope
-     * shape
+     * @returns the mapped updated resource
+     * @throws {@link QueryError} when the response body is missing or does not
+     * match the expected envelope shape
      */
     async update(
         id: string,
         body: Readonly<Record<string, unknown>>,
         query?: ApiQuery,
         options?: HttpRequestOptions,
-    ): Promise<Value | undefined> {
-        const raw = await this.#client.patch<unknown>(joinPath(this.#path, id), body, buildRequestOptions(query, options));
+    ): Promise<Value> {
+        const raw = await this.#client.patch<unknown>(
+            joinPath(this.#path, id),
+            body,
+            buildRequestOptions(query, options),
+        );
 
-        return raw === undefined ? undefined : unwrapItem(raw, this.#map);
+        return unwrapItem(raw, this.#map);
+    }
+
+    /**
+     * Apply an update whose endpoint answers with no content, such as a 204
+     * action; any response body is ignored.
+     *
+     * @param id - the resource identifier
+     * @param body - the request body
+     * @param options - optional request options
+     */
+    async updateWithoutContent(
+        id: string,
+        body: Readonly<Record<string, unknown>>,
+        options?: HttpRequestOptions,
+    ): Promise<void> {
+        await this.#client.patch<void>(joinPath(this.#path, id), body, options);
     }
 
     /**

@@ -1,5 +1,6 @@
 /**
- * Filter-expression types for the laravel-api-toolkit 2.x wire protocol.
+ * Filter-expression types for the laravel-api-toolkit 2.x wire protocol, and
+ * the operand types the {@link ApiQuery} builder signatures accept.
  *
  * These types describe the **shape** of the filter tree that {@link ApiQuery}
  * assembles and JSON-encodes into the `filters` URL query parameter. A fully
@@ -48,14 +49,26 @@
  * { "$has": { "posts": {}, "comments": { "title": "X" } } }
  * ```
  * The three forms are a bare list, a conditioned map, and a mix - use `{}` for
- * a bare relation inside the map form.
+ * a bare relation inside the map form. Two `$hasnt` documents on one relation
+ * are separate conditions, so the second stands as its own `$and` document.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 
+import type { ApiQuery } from './api-query';
+
 /** A primitive scalar value accepted as a filter operand. */
 export type FilterScalar = string | number | boolean;
+
+/** The comparison operators accepted by the three-argument `where`. */
+export type ScalarOperator = '$eq' | '$neq' | '$gt' | '$lt' | '$ge' | '$le';
+
+/** Builds one filter document on the fresh query it is given. */
+export type FilterDocumentBuilder = (query: ApiQuery) => ApiQuery;
+
+/** The direction of one sort entry. */
+export type SortDirection = 'asc' | 'desc';
 
 /**
  * Comparison and membership operators supported by the toolkit wire protocol.

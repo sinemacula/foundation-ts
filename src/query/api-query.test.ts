@@ -313,7 +313,9 @@ describe('ApiQuery', () => {
         });
 
         it('nests multiple conditions in one relation document', () => {
-            const query = ApiQuery.create().whereRelation('posts', q => q.where('published', true).where('views', '$gt', 100));
+            const query = ApiQuery.create().whereRelation('posts', q =>
+                q.where('published', true).where('views', '$gt', 100),
+            );
 
             expect(filtersParam(query)).toBe('{"posts":{"published":true,"views":{"$gt":100}}}');
         });
@@ -379,9 +381,7 @@ describe('ApiQuery', () => {
                 .whereRelation('posts', p => p.orWhere([q => q.where('a', 1), q => q.where('b', 2)]))
                 .whereRelation('posts', p => p.orWhere([q => q.where('c', 3), q => q.where('d', 4)]));
 
-            expect(filtersParam(query)).toBe(
-                '{"posts":{"$or":[{"a":1},{"b":2}],"$and":[{"$or":[{"c":3},{"d":4}]}]}}',
-            );
+            expect(filtersParam(query)).toBe('{"posts":{"$or":[{"a":1},{"b":2}],"$and":[{"$or":[{"c":3},{"d":4}]}]}}');
         });
 
         it('appends a later $or to an $and the relation document already carries', () => {
@@ -436,12 +436,25 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"author":{"$has":{"posts":{},"comments":{"approved":true}}}}');
         });
 
-        it('merges nested $hasnt documents on the same relation', () => {
+        it('ANDs a second conditioned $hasnt inside the relation document, not the root', () => {
             const query = ApiQuery.create()
+                .andWhere([q => q.where('a', 1)])
                 .whereRelation('author', a => a.whereHasNot('posts', p => p.where('spam', true)))
-                .whereRelation('author', a => a.whereHasNot('posts', p => p.where('flagged', true)));
+                .whereRelation('author', a => a.whereHasNot('posts', p => p.where('x', 1)));
 
-            expect(filtersParam(query)).toBe('{"author":{"$hasnt":{"posts":{"spam":true,"flagged":true}}}}');
+            expect(filtersParam(query)).toBe(
+                '{"$and":[{"a":1}],"author":{"$hasnt":{"posts":{"spam":true}},"$and":[{"$hasnt":{"posts":{"x":1}}}]}}',
+            );
+        });
+
+        it('ANDs a second conditioned $hasnt inside a $has relation document', () => {
+            const query = ApiQuery.create()
+                .whereHas('author', a => a.whereHasNot('posts', p => p.where('spam', true)))
+                .whereHas('author', a => a.whereHasNot('posts', p => p.where('flagged', true)));
+
+            expect(filtersParam(query)).toBe(
+                '{"$has":{"author":{"$hasnt":{"posts":{"spam":true}},"$and":[{"$hasnt":{"posts":{"flagged":true}}}]}}}',
+            );
         });
 
         it('merges nested bare $hasnt lists', () => {
@@ -534,6 +547,14 @@ describe('ApiQuery', () => {
 
             expect(filtersParam(query)).toBe('{"$has":{"posts":{"published":true,"featured":true}}}');
         });
+
+        it('treats a build with no conditions as bare', () => {
+            const query = ApiQuery.create()
+                .whereHas('posts', q => q)
+                .whereHas('comments');
+
+            expect(filtersParam(query)).toBe('{"$has":["posts","comments"]}');
+        });
     });
 
     describe('whereHasNot', () => {
@@ -555,12 +576,56 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"$hasnt":{"comments":{},"posts":{"spam":true}}}');
         });
 
-        it('merges conditions when the same relation is refused twice', () => {
+        it('does not repeat a bare relation refused twice', () => {
+            const query = ApiQuery.create().whereHasNot('posts').whereHasNot('posts');
+
+            expect(filtersParam(query)).toBe('{"$hasnt":["posts"]}');
+        });
+
+        it('ANDs a second conditioned document on one relation beside the first instead of merging', () => {
             const query = ApiQuery.create()
                 .whereHasNot('posts', q => q.where('spam', true))
                 .whereHasNot('posts', q => q.where('flagged', true));
 
-            expect(filtersParam(query)).toBe('{"$hasnt":{"posts":{"spam":true,"flagged":true}}}');
+            expect(filtersParam(query)).toBe(
+                '{"$hasnt":{"posts":{"spam":true}},"$and":[{"$hasnt":{"posts":{"flagged":true}}}]}',
+            );
+        });
+
+        it('appends a colliding conditioned document to an existing $and group', () => {
+            const query = ApiQuery.create()
+                .andWhere([q => q.where('status', 'active')])
+                .whereHasNot('posts', q => q.where('spam', true))
+                .whereHasNot('posts', q => q.where('flagged', true));
+
+            expect(filtersParam(query)).toBe(
+                '{"$and":[{"status":"active"},{"$hasnt":{"posts":{"flagged":true}}}],"$hasnt":{"posts":{"spam":true}}}',
+            );
+        });
+
+        it('lets a bare relation absorb a later conditioned one', () => {
+            const query = ApiQuery.create()
+                .whereHasNot('posts')
+                .whereHasNot('posts', q => q.where('spam', true));
+
+            expect(filtersParam(query)).toBe('{"$hasnt":["posts"]}');
+        });
+
+        it('lets a bare relation absorb an earlier conditioned one', () => {
+            const query = ApiQuery.create()
+                .whereHasNot('comments', q => q.where('approved', false))
+                .whereHasNot('posts', q => q.where('spam', true))
+                .whereHasNot('posts');
+
+            expect(filtersParam(query)).toBe('{"$hasnt":{"comments":{"approved":false},"posts":{}}}');
+        });
+
+        it('treats a build with no conditions as bare', () => {
+            const query = ApiQuery.create()
+                .whereHasNot('posts', q => q.where('spam', true))
+                .whereHasNot('posts', q => q);
+
+            expect(filtersParam(query)).toBe('{"$hasnt":["posts"]}');
         });
 
         it('keeps $has and $hasnt apart', () => {
@@ -671,7 +736,9 @@ describe('ApiQuery', () => {
         });
 
         it('rejects an empty group', () => {
-            expect(() => ApiQuery.create().orWhere([])).toThrow(new QueryError('A $or group needs at least one document.'));
+            expect(() => ApiQuery.create().orWhere([])).toThrow(
+                new QueryError('A $or group needs at least one document.'),
+            );
         });
 
         it('rejects a document with no conditions', () => {
@@ -690,7 +757,9 @@ describe('ApiQuery', () => {
         });
 
         it('trims the term', () => {
-            expect(ApiQuery.create().search('  ada lovelace  ').toQueryParameters()).toEqual({ search: 'ada lovelace' });
+            expect(ApiQuery.create().search('  ada lovelace  ').toQueryParameters()).toEqual({
+                search: 'ada lovelace',
+            });
         });
 
         it('replaces an earlier term', () => {
@@ -773,6 +842,18 @@ describe('ApiQuery', () => {
 
             expect(query.toQueryParameters()).toEqual({ order: 'name', pagination: 'cursor' });
         });
+
+        it('keeps a query paginated by a cursor token alone in cursor mode', () => {
+            const query = ApiQuery.create().cursor('tok').orderBy('name');
+
+            expect(query.toQueryParameters()).toEqual({ order: 'name', pagination: 'cursor' });
+        });
+
+        it('leaves an offset-paginated query offset-paginated', () => {
+            const query = ApiQuery.create().page(2).orderBy('name');
+
+            expect(query.toQueryParameters()).toEqual({ order: 'name', page: 2 });
+        });
     });
 
     describe('orderByRandom', () => {
@@ -794,10 +875,10 @@ describe('ApiQuery', () => {
             expect(params['order']).toBe('random');
         });
 
-        it('drops a cursor token and stays offset-paginated', () => {
-            const query = ApiQuery.create().cursor('tok').orderByRandom();
-
-            expect(query.toQueryParameters()).toEqual({ order: 'random' });
+        it('refuses random order on a query paginated by a cursor token', () => {
+            expect(() => ApiQuery.create().cursor('tok').orderByRandom()).toThrow(
+                new QueryError('Random order cannot be combined with cursor pagination.'),
+            );
         });
 
         it('refuses random order under forced cursor pagination', () => {

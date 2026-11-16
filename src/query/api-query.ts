@@ -26,17 +26,15 @@
 
 import { isRecord } from '../support/is-record';
 import type { QueryParameters } from '../http/http-client';
-import type { FilterOperators, FilterScalar, FilterTree } from './filter-expression';
+import type {
+    FilterDocumentBuilder,
+    FilterOperators,
+    FilterScalar,
+    FilterTree,
+    ScalarOperator,
+    SortDirection,
+} from './filter-expression';
 import { QueryError } from './query-error';
-
-/**
- * The scalar comparison operators accepted by the two-argument `where`
- * overload.
- */
-type ScalarOperator = '$eq' | '$neq' | '$gt' | '$lt' | '$ge' | '$le';
-
-/** Builds one filter document from a fresh query. */
-type DocumentBuilder = (query: ApiQuery) => ApiQuery;
 
 /** The logical group keys of the filter grammar. */
 type GroupKey = '$and' | '$or';
@@ -53,7 +51,7 @@ interface OrderEntry {
     readonly column: string;
 
     /** The sort direction. */
-    readonly direction: 'asc' | 'desc';
+    readonly direction: SortDirection;
 }
 
 /**
@@ -111,36 +109,6 @@ const EMPTY_STATE: QueryState = {
 const RANDOM_ORDER = 'random';
 
 /**
- * Merge a `FilterOperators` patch into an existing field entry.
- *
- * When the existing entry is already an operator map, the two objects are
- * merged. When it is a scalar equality value (or undefined), the patch replaces
- * it entirely.
- *
- * @param existing - the current value stored under the field key
- * @param patch - the operator map to merge or replace with
- * @returns the merged or replaced operator map
- */
-function mergeOperators(existing: unknown, patch: FilterOperators): FilterOperators {
-    if (isRecord(existing)) {
-        return { ...(existing as FilterOperators), ...patch };
-    }
-
-    return patch;
-}
-
-/**
- * Build a single-operator filter patch without a literal operator key.
- *
- * @param operator - the wire-protocol operator (for example `$in`)
- * @param value - the operand stored under the operator
- * @returns a one-entry operator map
- */
-function operatorPatch(operator: string, value: unknown): FilterOperators {
-    return Object.fromEntries([[operator, value]]) as FilterOperators;
-}
-
-/**
  * Read a filter value as a list, treating anything else as empty.
  *
  * @param value - the value stored under a list-valued key
@@ -151,56 +119,78 @@ function asList(value: unknown): readonly unknown[] {
 }
 
 /**
+ * Determine whether a filter document carries no conditions.
+ *
+ * @param document - the filter document
+ * @returns true when the document is empty
+ */
+function isEmpty(document: FilterTree): boolean {
+    return Object.keys(document).length === 0;
+}
+
+/**
  * Read a `$has` or `$hasnt` value as relation entries, a bare relation carrying
- * no document.
+ * an empty document.
  *
  * @param value - the list or map stored under the existence key
  * @returns the relation names paired with their documents
  */
-function existenceEntries(value: unknown): Array<[string, FilterTree | undefined]> {
+function existenceEntries(value: unknown): Array<[string, FilterTree]> {
     if (isRecord(value)) {
         return Object.entries(value) as Array<[string, FilterTree]>;
     }
 
-    return asList(value).map(relation => [relation as string, undefined]);
+    return asList(value).map(relation => [relation as string, {}]);
 }
 
 /**
- * Merge two `$has` or `$hasnt` values.
+ * Merge an existence value into the one a document already holds.
  *
- * Documents asserted on the same relation merge, as every condition must hold
- * for the same related row. The list form survives while every relation is
- * bare; one conditioned relation promotes the rest to `{}` entries.
+ * `$has` documents on one relation merge, as every condition must hold for the
+ * same related row. Under `$hasnt` a bare relation, which an empty document
+ * also is, absorbs a conditioned one it already implies, and two conditioned
+ * documents stay separate conditions: the later is returned to stand as its own
+ * `$and` document. The list form survives while every relation is bare.
  *
- * @param existing - the current value stored under the existence key
+ * @param key - either `'$has'` or `'$hasnt'`
+ * @param existing - the value the document already holds under `key`
  * @param patch - the incoming list or map
- * @returns the merged list or map
+ * @returns the merged value and the documents that must stand apart
  */
-function mergeExistence(existing: unknown, patch: unknown): unknown {
+function mergeExistence(key: ExistenceKey, existing: unknown, patch: unknown): [unknown, FilterTree[]] {
     const merged = new Map(existenceEntries(existing));
+    const apart: FilterTree[] = [];
 
     for (const [relation, document] of existenceEntries(patch)) {
         const current = merged.get(relation);
 
-        merged.set(relation, document === undefined ? current : mergeDocument(current ?? {}, document));
+        if (key === '$has') {
+            merged.set(relation, mergeDocument(current ?? {}, document));
+        } else if (current === undefined) {
+            merged.set(relation, document);
+        } else if (isEmpty(current) || isEmpty(document)) {
+            merged.set(relation, {});
+        } else {
+            apart.push({ [key]: { [relation]: document } });
+        }
     }
 
     const entries = [...merged];
+    const value = entries.every(([, document]) => isEmpty(document))
+        ? entries.map(([relation]) => relation)
+        : Object.fromEntries(entries);
 
-    if (entries.every(([, document]) => document === undefined)) {
-        return entries.map(([relation]) => relation);
-    }
-
-    return Object.fromEntries(entries.map(([relation, document]) => [relation, document ?? {}]));
+    return [value, apart];
 }
 
 /**
  * Merge a filter document into another, both applying to the same rows.
  *
- * Fields and relation documents merge key by key, existence maps merge per
+ * Fields and relation documents merge key by key, existence values merge per
  * relation, and `$and` lists concatenate. Group documents never merge into each
- * other: a second `$or` joins the `$and` list as its own document so both
- * disjunctions keep their meaning. Any other collision is replaced.
+ * other: a second `$or`, like a second conditioned `$hasnt` on a relation,
+ * joins the `$and` list as its own document so both keep their meaning. Any
+ * other collision is replaced.
  *
  * @param existing - the document already stored
  * @param patch - the document to merge in
@@ -208,19 +198,27 @@ function mergeExistence(existing: unknown, patch: unknown): unknown {
  */
 function mergeDocument(existing: FilterTree, patch: FilterTree): FilterTree {
     const merged: Record<string, unknown> = { ...existing };
+    const apart: FilterTree[] = [];
 
     for (const [key, value] of Object.entries(patch)) {
         const current = merged[key];
 
         if (key === '$or' && Array.isArray(current)) {
-            merged['$and'] = [...asList(merged['$and']), Object.fromEntries([[key, value]])];
+            apart.push({ [key]: value });
         } else if (key === '$and') {
             merged[key] = [...asList(current), ...asList(value)];
         } else if (key === '$has' || key === '$hasnt') {
-            merged[key] = mergeExistence(current, value);
+            const [existence, separate] = mergeExistence(key, current, value);
+
+            merged[key] = existence;
+            apart.push(...separate);
         } else {
             merged[key] = isRecord(current) && isRecord(value) ? mergeDocument(current, value) : value;
         }
+    }
+
+    if (apart.length > 0) {
+        merged['$and'] = [...asList(merged['$and']), ...apart];
     }
 
     return merged;
@@ -373,10 +371,8 @@ export class ApiQuery {
      * query
      * @returns a new `ApiQuery` with the relation filter applied
      */
-    whereRelation(relation: string, build: DocumentBuilder): ApiQuery {
-        const document = build(ApiQuery.create()).#state.filters;
-
-        return this.#withMergedDocument(Object.fromEntries([[relation, document]]));
+    whereRelation(relation: string, build: FilterDocumentBuilder): ApiQuery {
+        return this.#withMergedDocument({ [relation]: ApiQuery.#document(build) });
     }
 
     /**
@@ -391,20 +387,22 @@ export class ApiQuery {
      * @param build - optional callback to add filter conditions on the relation
      * @returns a new `ApiQuery` with the `$has` condition applied
      */
-    whereHas(relation: string, build?: DocumentBuilder): ApiQuery {
+    whereHas(relation: string, build?: FilterDocumentBuilder): ApiQuery {
         return this.#applyExistence('$has', relation, build);
     }
 
     /**
      * Assert that the relation does not exist, optionally with conditions.
      *
-     * Same shape rules as {@link whereHas} but uses the `$hasnt` key.
+     * Same shape rules as {@link whereHas} under the `$hasnt` key, except that
+     * conditions never merge: a bare assertion absorbs any conditioned one on
+     * the relation, and a second conditioned one is ANDed beside the first.
      *
      * @param relation - the relation name
      * @param build - optional callback to add filter conditions on the relation
      * @returns a new `ApiQuery` with the `$hasnt` condition applied
      */
-    whereHasNot(relation: string, build?: DocumentBuilder): ApiQuery {
+    whereHasNot(relation: string, build?: FilterDocumentBuilder): ApiQuery {
         return this.#applyExistence('$hasnt', relation, build);
     }
 
@@ -429,7 +427,7 @@ export class ApiQuery {
      * @throws {@link QueryError} when no documents are given or a document has
      * no conditions
      */
-    andWhere(documents: readonly DocumentBuilder[]): ApiQuery {
+    andWhere(documents: readonly FilterDocumentBuilder[]): ApiQuery {
         return this.#appendGroup('$and', documents);
     }
 
@@ -450,7 +448,7 @@ export class ApiQuery {
      * @throws {@link QueryError} when no documents are given or a document has
      * no conditions
      */
-    orWhere(documents: readonly DocumentBuilder[]): ApiQuery {
+    orWhere(documents: readonly FilterDocumentBuilder[]): ApiQuery {
         return this.#appendGroup('$or', documents);
     }
 
@@ -462,9 +460,9 @@ export class ApiQuery {
      * Match a free-text term against the fields the resource declares
      * searchable (`search=<term>`).
      *
-     * An empty or whitespace-only term clears the search. The toolkit refuses a
-     * term with a word shorter than three characters, over 128 characters, or
-     * over 10 words.
+     * An empty or whitespace-only term clears the search. By default the
+     * toolkit refuses a term with a word shorter than three characters, over
+     * 128 characters, or over 10 words.
      *
      * @param term - the search term
      * @returns a new `ApiQuery` with the search term set or cleared
@@ -483,18 +481,24 @@ export class ApiQuery {
      * Append a sort entry for `column`.
      *
      * If `column` already appears in the order list its previous entry is
-     * removed before the new entry is appended at the end. Any cursor is
-     * cleared, as a cursor only seeks within the order it was issued for.
+     * removed before the new entry is appended at the end. Any cursor token is
+     * dropped, as it only seeks within the order it was issued for, but a
+     * cursor-paginated query stays cursor-paginated.
      *
      * @param column - the column name to sort by
      * @param direction - sort direction; defaults to `'asc'`
      * @returns a new `ApiQuery` with the order entry appended
      * @throws {@link QueryError} when random order meets cursor pagination
      */
-    orderBy(column: string, direction: 'asc' | 'desc' = 'asc'): ApiQuery {
-        const order = [...this.#state.order.filter(e => e.column !== column), { column, direction }];
+    orderBy(column: string, direction: SortDirection = 'asc'): ApiQuery {
+        const { order, cursorToken, cursorPagination } = this.#state;
 
-        return ApiQuery.#guarded({ ...this.#state, order, cursorToken: undefined });
+        return ApiQuery.#guarded({
+            ...this.#state,
+            order: [...order.filter(e => e.column !== column), { column, direction }],
+            cursorToken: undefined,
+            cursorPagination: cursorPagination || cursorToken !== undefined,
+        });
     }
 
     /**
@@ -675,6 +679,16 @@ export class ApiQuery {
     // -------------------------------------------------------------------------
 
     /**
+     * Build one filter document on a fresh query.
+     *
+     * @param build - the document builder
+     * @returns the document the builder assembled
+     */
+    static #document(build: FilterDocumentBuilder): FilterTree {
+        return build(ApiQuery.create()).#state.filters;
+    }
+
+    /**
      * Build a query from `state`, refusing random order under cursor
      * pagination, which the toolkit cannot seek by.
      *
@@ -718,7 +732,7 @@ export class ApiQuery {
      * @param params - the parameter record to mutate
      */
     #applyFilterParams(params: Record<string, string | number | boolean>): void {
-        if (Object.keys(this.#state.filters).length > 0) {
+        if (!isEmpty(this.#state.filters)) {
             params['filters'] = JSON.stringify(this.#state.filters);
         }
 
@@ -803,8 +817,8 @@ export class ApiQuery {
      * @param value - the operand stored under the operator
      * @returns a new `ApiQuery` with the operator applied
      */
-    #withOperator(field: string, operator: string, value: unknown): ApiQuery {
-        return this.#withFilter(field, mergeOperators(this.#state.filters[field], operatorPatch(operator, value)));
+    #withOperator(field: string, operator: keyof FilterOperators, value: unknown): ApiQuery {
+        return this.#withMergedDocument({ [field]: { [operator]: value } });
     }
 
     /**
@@ -826,15 +840,15 @@ export class ApiQuery {
      * @throws {@link QueryError} when no builders are given or a document has
      * no conditions
      */
-    #appendGroup(key: GroupKey, builders: readonly DocumentBuilder[]): ApiQuery {
+    #appendGroup(key: GroupKey, builders: readonly FilterDocumentBuilder[]): ApiQuery {
         if (builders.length === 0) {
             throw new QueryError(`A ${key} group needs at least one document.`);
         }
 
         const documents = builders.map(build => {
-            const document = build(ApiQuery.create()).#state.filters;
+            const document = ApiQuery.#document(build);
 
-            if (Object.keys(document).length === 0) {
+            if (isEmpty(document)) {
                 throw new QueryError(`Every ${key} document needs at least one condition.`);
             }
 
@@ -852,9 +866,7 @@ export class ApiQuery {
      * @param build - optional sub-query builder
      * @returns a new `ApiQuery` with the existence condition applied
      */
-    #applyExistence(key: ExistenceKey, relation: string, build?: DocumentBuilder): ApiQuery {
-        const patch = build ? Object.fromEntries([[relation, build(ApiQuery.create()).#state.filters]]) : [relation];
-
-        return this.#withFilter(key, mergeExistence(this.#state.filters[key], patch));
+    #applyExistence(key: ExistenceKey, relation: string, build?: FilterDocumentBuilder): ApiQuery {
+        return this.#withMergedDocument({ [key]: build ? { [relation]: ApiQuery.#document(build) } : [relation] });
     }
 }

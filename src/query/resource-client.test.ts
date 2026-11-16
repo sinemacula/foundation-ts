@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { HttpClient, HttpRequestOptions } from '../http/http-client';
 import { ApiQuery } from './api-query';
 import type { RawRecord } from './envelope';
+import { QueryError } from './query-error';
 import { ResourceClient } from './resource-client';
 
 /** A minimal domain type used to exercise the resource client. */
@@ -399,9 +400,13 @@ describe('ResourceClient', () => {
             const { client, resource } = createResource();
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
 
-            await resource.create({ name: 'Widget One' }, ApiQuery.create().fieldsFor('widget', ['id', 'name']).limit(1), {
-                query: { limit: 2 },
-            });
+            await resource.create(
+                { name: 'Widget One' },
+                ApiQuery.create().fieldsFor('widget', ['id', 'name']).limit(1),
+                {
+                    query: { limit: 2 },
+                },
+            );
 
             expect(client.calls.at(0)?.options?.query).toEqual({ 'fields[widget]': 'id,name', limit: 2 });
         });
@@ -422,6 +427,13 @@ describe('ResourceClient', () => {
             await expect(resource.create({ name: 'Widget One' })).rejects.toThrow(
                 'The response did not match the expected envelope shape.',
             );
+        });
+
+        it('rejects a missing body with a QueryError', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(undefined);
+
+            await expect(resource.create({ name: 'Widget One' })).rejects.toBeInstanceOf(QueryError);
         });
     });
 
@@ -449,20 +461,11 @@ describe('ResourceClient', () => {
             expect(client.calls.at(0)?.options?.query).toEqual({ 'fields[widget]': 'id,name' });
         });
 
-        it('resolves undefined when the server answers with no body', async () => {
+        it('rejects a missing body with a QueryError', async () => {
             const { client, resource } = createResource();
             client.queueResponse(undefined);
 
-            await expect(resource.update('w1', { name: 'Widget One' })).resolves.toBeUndefined();
-        });
-
-        it('still rejects a null body as a malformed envelope', async () => {
-            const { client, resource } = createResource();
-            client.queueResponse(null);
-
-            await expect(resource.update('w1', { name: 'x' })).rejects.toThrow(
-                'The response did not match the expected envelope shape.',
-            );
+            await expect(resource.update('w1', { name: 'Widget One' })).rejects.toBeInstanceOf(QueryError);
         });
 
         it('passes through request options', async () => {
@@ -482,6 +485,34 @@ describe('ResourceClient', () => {
             await expect(resource.update('w1', { name: 'x' })).rejects.toThrow(
                 'The response did not match the expected envelope shape.',
             );
+        });
+    });
+
+    describe('updateWithoutContent', () => {
+        it('patches the joined resource path with the body', async () => {
+            const { client, resource } = createResource();
+
+            await resource.updateWithoutContent('w1', { archived: true });
+
+            expect(client.calls).toEqual([
+                { method: 'PATCH', path: 'widgets/w1', body: { archived: true }, options: undefined },
+            ]);
+        });
+
+        it('resolves with no value whatever the server answers', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await expect(resource.updateWithoutContent('w1', { archived: true })).resolves.toBeUndefined();
+        });
+
+        it('passes through request options', async () => {
+            const { client, resource } = createResource();
+            const controller = new AbortController();
+
+            await resource.updateWithoutContent('w1', { archived: true }, { signal: controller.signal });
+
+            expect(client.calls.at(0)?.options).toEqual({ signal: controller.signal });
         });
     });
 

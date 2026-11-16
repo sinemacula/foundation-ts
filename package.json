@@ -51,6 +51,7 @@
         "./notifications/toaster": "./src/notifications/toaster.ts",
         "./query/api-query": "./src/query/api-query.ts",
         "./query/envelope": "./src/query/envelope.ts",
+        "./query/filter-expression": "./src/query/filter-expression.ts",
         "./query/list-filter": "./src/query/list-filter.ts",
         "./query/list-query-definition": "./src/query/list-query-definition.ts",
         "./query/query-error": "./src/query/query-error.ts",
