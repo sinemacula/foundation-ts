@@ -22,6 +22,12 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
     return { promise, resolve, reject };
 }
 
+/** A refresh outcome richer than a boolean. */
+interface Outcome {
+    /** The outcome kind. */
+    readonly kind: string;
+}
+
 describe('TokenRefreshCoordinator', () => {
     it('calls the refresher once for a single refresh call', async () => {
         const refreshFn = vi.fn().mockResolvedValue(true);
@@ -36,6 +42,20 @@ describe('TokenRefreshCoordinator', () => {
         const coordinator = new TokenRefreshCoordinator({ refresh: vi.fn().mockResolvedValue(true) });
 
         expect(await coordinator.refresh()).toBe(true);
+    });
+
+    it('shares a non-boolean refresher result with every concurrent caller', async () => {
+        const { promise, resolve } = deferred<Outcome>();
+        const coordinator = new TokenRefreshCoordinator<Outcome>({ refresh: () => promise });
+        const outcome = { kind: 'retryable' };
+
+        const first = coordinator.refresh();
+        const second = coordinator.refresh();
+
+        resolve(outcome);
+
+        expect(await first).toBe(outcome);
+        expect(await second).toBe(outcome);
     });
 
     it('shares one in-flight promise across concurrent calls', async () => {
