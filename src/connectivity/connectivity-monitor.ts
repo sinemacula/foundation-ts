@@ -2,10 +2,11 @@
  * Network-connectivity monitoring port.
  *
  * The reachability signal the kernel uses to pause pointless work while offline
- * - the update monitor pauses its polling and realtime connections pause
- * reconnect attempts rather than storming a network known to be down. Each
- * platform supplies an implementation (online/offline window events on web,
- * NetInfo on mobile); consumers depend only on this contract.
+ * - the update monitor pauses its polling rather than storming a network known
+ * to be down. Realtime connections are not wired to it and keep retrying on
+ * their own backoff. Each platform supplies an implementation (online/offline
+ * window events on web, NetInfo on mobile); consumers depend only on this
+ * contract.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

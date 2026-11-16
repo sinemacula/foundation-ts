@@ -75,6 +75,28 @@ const core = await bootFoundationCore(options, { fetchFn }, runtimeUrl);
 Everything the core installs is reachable afterwards through the service accessors in
 `@sinemacula/foundation/app/services`.
 
+## Realtime
+
+`@sinemacula/foundation/realtime/web-socket-connection` is the WebSocket adapter for the `RealtimeConnection` port.
+It reconnects with exponential backoff after any close it did not initiate, and `disconnect()` stops it and resets
+the backoff. Wire the token refresh into `beforeReconnect`: a hook that resolves `false` or rejects skips that
+attempt and retries after the next backoff delay, so a failed refresh never reconnects with stale credentials.
+
+```ts
+const connection = new WebSocketConnection({
+    url: () => `wss://example.test/realtime?token=${readAccessToken()}`,
+    beforeReconnect: () => coordinator.refresh(),
+    onError: error => reporter.captureError(error),
+});
+
+connection.on('order.updated', message => applyOrderUpdate(message.data));
+connection.connect();
+```
+
+`onError` receives the errors the connection contains rather than throws: a subscriber that threw, or a reconnect
+whose `url()` builder or socket factory threw. The same failure inside `connect()` surfaces to the caller as a
+`RealtimeError` (`@sinemacula/foundation/realtime/realtime-error`) with the original error as its `cause`.
+
 ## Quality gates
 
 | Command                 | What it runs                                           |
