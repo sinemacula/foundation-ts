@@ -107,11 +107,14 @@ export type LoginOutcome =
  * What a refresh through the session core did.
  *
  * `refreshed` means the state holds a usable session, either newly issued and
- * persisted or adopted from persisted state another context wrote. `rejected`
- * means the session was cleared. `retryable` and `failed` keep the tokens.
- * `interactionRequired` keeps the tokens and hands back the pending session.
- * `superseded` means a sign-out, sign-in, or hydration overtook the refresh,
- * whose result was discarded.
+ * persisted or adopted from a session another context persisted. `rejected`
+ * means the session was cleared. `retryable` keeps the tokens. `failed` keeps
+ * the tokens too: the refresh failed, or the server rotated the pair and it
+ * could not be persisted, in which case the next transition retries persisting
+ * it. `interactionRequired` clears the session, since the server no longer
+ * accepts it, and hands back the pending session to continue with. `superseded`
+ * means a sign-out, sign-in, or hydration overtook the refresh, whose result
+ * was discarded.
  */
 export type RefreshOutcome =
     | {

@@ -12,9 +12,7 @@ import { DEFAULT_SESSION_STORAGE_KEYS } from './session-storage-keys';
 describe('DEFAULT_SESSION_STORAGE_KEYS', () => {
     it('pins the exact versioned key strings live sessions persist under', () => {
         expect(DEFAULT_SESSION_STORAGE_KEYS).toStrictEqual({
-            accessToken: 'auth.access_token',
-            refreshToken: 'auth.refresh_token',
-            expiresAt: 'auth.expires_at',
+            session: 'auth.session',
             deviceUuid: 'auth.device_uuid',
         });
     });
