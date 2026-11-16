@@ -1,8 +1,8 @@
 /**
  * Session storage keys.
  *
- * The keys the session persists under in the application storage adapter,
- * shared by every platform's session module.
+ * The keys the key-value session persistence adapter writes the session under,
+ * plus the device identifier key, shared by every platform's session module.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -11,12 +11,10 @@
 /**
  * The storage keys the session persists under.
  *
- * PUBLIC CONTRACT: live user sessions (and e2e suites) seed these exact
- * localStorage keys, so the defaults are load-bearing and versioned - renaming
- * any of them is a breaking change requiring an explicit migration. Keys are
- * matched RAW against cross-tab storage-event keys, so the storage adapter must
- * persist un-namespaced (namespaced wrapping is unsupported here; applications
- * wanting a prefix set it in these options so event keys still match).
+ * Existing persisted sessions and seeded test sessions are read under these
+ * exact keys, so renaming a default is a breaking change. Platforms that
+ * observe storage changes from other contexts match on these raw keys, so a
+ * prefix belongs in these options rather than in a namespacing storage wrapper.
  */
 export interface SessionStorageKeys {
     /** Default 'auth.access_token'. */
