@@ -17,6 +17,12 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
  */
 export type QueryParameters = Readonly<Record<string, string | number | boolean | undefined>>;
 
+/**
+ * Whether a request sends credentials such as cookies: never, to its own origin
+ * only, or to any origin.
+ */
+export type HttpCredentialsMode = 'omit' | 'same-origin' | 'include';
+
 /** Per-request options forwarded to every HTTP method. */
 export interface HttpRequestOptions {
     /** Query parameters appended to the request URL. */
@@ -27,6 +33,9 @@ export interface HttpRequestOptions {
 
     /** Abort signal that cancels the request when it fires. */
     readonly signal?: AbortSignal;
+
+    /** Whether credentials such as cookies are sent; omit for the platform default (same-origin in browsers). */
+    readonly credentials?: HttpCredentialsMode;
 
     /** Whether a 401 response may trigger the unauthorized handler (token refresh). Defaults to true. Set false on the refresh request itself so a failed refresh cannot recurse back into the handler. */
     readonly retryOnUnauthorized?: boolean;

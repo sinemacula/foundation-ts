@@ -5,8 +5,9 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
+import { FetchHttpClient } from '../http/fetch-http-client';
 import type { HttpClient, HttpRequestOptions } from '../http/http-client';
 import { HttpError, NetworkError } from '../http/http-error';
 import type { DefaultSessionApiOptions } from './default-session-api';
@@ -48,10 +49,10 @@ interface PhoneCredentials {
     readonly phone: string;
 }
 
-/** A response wrapping the user under `user`. */
-interface UserWrapper {
-    /** The wrapped user. */
-    readonly user: unknown;
+/** A user with a role. */
+interface AdminUser extends SessionUser {
+    /** The user's role. */
+    readonly role: string;
 }
 
 /**
@@ -190,12 +191,10 @@ function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string
 const NOW = 1_700_000_000_000;
 const CREDENTIALS = { email: 'alice@example.com', password: 'secret' };
 const DEVICE = { uuid: 'device-uuid', os: 'macOS' };
-const QUIET = { notifyOnError: false, retryOnUnauthorized: false, headers: {} };
-const COOKIE_QUIET = {
-    notifyOnError: false,
-    retryOnUnauthorized: false,
-    headers: { 'X-Requested-With': 'XMLHttpRequest' },
-};
+const COOKIE = { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'include' };
+const SIGN_IN = { retryOnUnauthorized: false };
+const QUIET = { retryOnUnauthorized: false, notifyOnError: false };
+const COOKIE_QUIET = { ...COOKIE, ...QUIET };
 
 /**
  * Build a documented session response body.
@@ -226,7 +225,7 @@ function pendingBody(): Record<string, unknown> {
  * @param options - further gateway options
  * @returns the gateway
  */
-function gateway(http: FakeHttpClient, options: DefaultSessionApiOptions = {}): SessionApi {
+function gateway(http: HttpClient, options: DefaultSessionApiOptions = {}): SessionApi {
     return createDefaultSessionApi(http, { now: () => NOW, ...options });
 }
 
@@ -259,7 +258,7 @@ describe('createDefaultSessionApi', () => {
                     method: 'POST',
                     path: 'auth/sign-in',
                     body: { ...CREDENTIALS, platform: 'macOS' },
-                    options: { headers: {} },
+                    options: SIGN_IN,
                 },
             ]);
         });
@@ -328,7 +327,12 @@ describe('createDefaultSessionApi', () => {
 
         it('maps a null refresh token and expiry to null', async () => {
             const http = new FakeHttpClient();
-            http.queueResponse(sessionBody([['refresh_token', null], ['expires_in', null]]));
+            http.queueResponse(
+                sessionBody([
+                    ['refresh_token', null],
+                    ['expires_in', null],
+                ]),
+            );
 
             await expect(gateway(http).login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
                 kind: 'authenticated',
@@ -377,13 +381,28 @@ describe('createDefaultSessionApi', () => {
             await expect(gateway(http).login(CREDENTIALS, DEVICE)).rejects.toBe(failure);
         });
 
-        it('sends the cross-site header and ignores a body refresh token in cookie transport', async () => {
+        it('never triggers the unauthorized handler, so a refused sign-in is sent once', async () => {
+            const fetchFn = vi.fn<typeof fetch>(() =>
+                Promise.resolve(new Response('{}', { status: 401, headers: { 'content-type': 'application/json' } })),
+            );
+            const onUnauthorized = vi.fn(() => Promise.resolve(true));
+            const http = new FetchHttpClient({ baseUrl: 'https://api.example.com/', fetchFn, onUnauthorized });
+
+            await expect(gateway(http, { transport: 'cookie' }).login(CREDENTIALS, DEVICE)).rejects.toBeInstanceOf(
+                HttpError,
+            );
+            expect(onUnauthorized).not.toHaveBeenCalled();
+            expect(fetchFn).toHaveBeenCalledTimes(1);
+            expect(fetchFn.mock.calls[0]?.[1]?.method).toBe('POST');
+        });
+
+        it('sends cookie credentials and drops a body refresh token in cookie transport', async () => {
             const http = new FakeHttpClient();
             http.queueResponse(sessionBody());
 
             const result = await gateway(http, { transport: 'cookie' }).login(CREDENTIALS, DEVICE);
 
-            expect(http.calls[0]?.options).toStrictEqual({ headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+            expect(http.calls[0]?.options).toStrictEqual({ ...COOKIE, ...SIGN_IN });
             expect(result).toStrictEqual({
                 kind: 'authenticated',
                 tokens: { accessToken: 'access', refreshToken: null, expiresAtEpochMs: NOW + 900_000 },
@@ -416,9 +435,14 @@ describe('createDefaultSessionApi', () => {
             expect(result).toHaveProperty('error.message', 'No refresh token is held to refresh with.');
         });
 
-        it('sends no body token and the cross-site header in cookie transport', async () => {
+        it('sends credentials, the cross-site header and no body token in cookie transport', async () => {
             const http = new FakeHttpClient();
-            http.queueResponse(wire([['access_token', 'access'], ['expires_in', 60]]));
+            http.queueResponse(
+                wire([
+                    ['access_token', 'access'],
+                    ['expires_in', 60],
+                ]),
+            );
 
             await expect(gateway(http, { transport: 'cookie' }).refresh(null)).resolves.toStrictEqual({
                 kind: 'refreshed',
@@ -436,26 +460,6 @@ describe('createDefaultSessionApi', () => {
             await gateway(http, { transport: 'cookie' }).refresh('stale');
 
             expect(http.calls[0]?.body).toBeUndefined();
-        });
-
-        it('sends a custom cross-site header', async () => {
-            const http = new FakeHttpClient();
-            http.queueResponse(sessionBody());
-
-            await gateway(http, { transport: 'cookie', crossSiteHeader: { name: 'X-App', value: 'fetch' } }).refresh(
-                null,
-            );
-
-            expect(http.calls[0]?.options?.headers).toStrictEqual({ 'X-App': 'fetch' });
-        });
-
-        it('sends no cross-site header when disabled', async () => {
-            const http = new FakeHttpClient();
-            http.queueResponse(sessionBody());
-
-            await gateway(http, { transport: 'cookie', crossSiteHeader: null }).refresh(null);
-
-            expect(http.calls[0]?.options?.headers).toStrictEqual({});
         });
 
         it('maps a pending response onto interactionRequired', async () => {
@@ -491,24 +495,6 @@ describe('createDefaultSessionApi', () => {
             expect(result.kind).toBe('failed');
             expect(result).toHaveProperty('error', expect.any(SessionError));
         });
-
-        it('classifies failures with a custom classifier', async () => {
-            const http = new FakeHttpClient();
-            const failure = new HttpError(403, 'Forbidden');
-            const seen: unknown[] = [];
-            http.queueError(failure);
-
-            const result = await gateway(http, {
-                classifyRefreshError: (error) => {
-                    seen.push(error);
-
-                    return 'rejected';
-                },
-            }).refresh('held');
-
-            expect(seen).toStrictEqual([failure]);
-            expect(result).toStrictEqual({ kind: 'rejected', error: failure });
-        });
     });
 
     describe('logout', () => {
@@ -532,7 +518,7 @@ describe('createDefaultSessionApi', () => {
             ]);
         });
 
-        it('sends no body token and the cross-site header in cookie transport', async () => {
+        it('sends credentials, the cross-site header and no body token in cookie transport', async () => {
             const http = new FakeHttpClient();
 
             await gateway(http, { transport: 'cookie' }).logout('stale');
@@ -551,110 +537,46 @@ describe('createDefaultSessionApi', () => {
         });
     });
 
-    describe('endpoints and fields', () => {
-        it.each([
-            ['PUT', 'PUT'],
-            ['PATCH', 'PATCH'],
-            ['POST', 'POST'],
-        ] as const)('reaches a custom %s endpoint with a body', async (method, recorded) => {
+    describe('paths and sign-in body', () => {
+        it('reaches custom paths', async () => {
             const http = new FakeHttpClient();
             http.queueResponse(sessionBody());
             http.queueResponse(sessionBody());
             http.queueResponse(undefined);
-            const endpoint = { path: 'custom', method };
+            http.queueResponse(userEnvelope());
 
-            const api = gateway(http, { endpoints: { login: endpoint, refresh: endpoint, logout: endpoint } });
+            const api = gateway(http, { paths: { login: 'login', refresh: 'renew', logout: 'leave', user: 'me' } });
 
             await api.login(CREDENTIALS, DEVICE);
             await api.refresh('held');
             await api.logout('held');
+            await api.currentUser();
 
-            expect(http.calls.map((call) => [call.method, call.path, call.body])).toStrictEqual([
-                [recorded, 'custom', { ...CREDENTIALS, platform: 'macOS' }],
-                [recorded, 'custom', wire([['refresh_token', 'held']])],
-                [recorded, 'custom', wire([['refresh_token', 'held']])],
+            expect(http.calls.map(call => [call.method, call.path])).toStrictEqual([
+                ['POST', 'login'],
+                ['POST', 'renew'],
+                ['POST', 'leave'],
+                ['GET', 'me'],
             ]);
         });
 
-        it('reaches a DELETE endpoint without a body', async () => {
+        it('keeps the default for a path left out', async () => {
             const http = new FakeHttpClient();
 
-            await gateway(http, { endpoints: { logout: { path: 'auth', method: 'DELETE' } } }).logout('held');
+            await gateway(http, { paths: { login: 'login' } }).logout(null);
 
-            expect(http.calls).toStrictEqual([{ method: 'DELETE', path: 'auth', body: undefined, options: QUIET }]);
-        });
-
-        it('maps custom field names', async () => {
-            const http = new FakeHttpClient();
-            http.queueResponse(
-                wire([
-                    ['token', 'access'],
-                    ['ttl', 30],
-                    ['renewal', 'refresh'],
-                ]),
-            );
-            http.queueResponse(
-                wire([
-                    ['challenge', 'pending'],
-                    ['needs', ['mfa']],
-                ]),
-            );
-
-            const api = gateway(http, {
-                fields: {
-                    accessToken: 'token',
-                    expiresIn: 'ttl',
-                    refreshToken: 'renewal',
-                    pendingCredential: 'challenge',
-                    requires: 'needs',
-                },
-            });
-
-            await expect(api.refresh('held')).resolves.toStrictEqual({
-                kind: 'refreshed',
-                tokens: { accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: NOW + 30_000 },
-            });
-            await expect(api.refresh('held')).resolves.toStrictEqual({
-                kind: 'interactionRequired',
-                pending: { credential: 'pending', requires: ['mfa'] },
-            });
-            expect(http.calls[0]?.body).toStrictEqual(wire([['renewal', 'held']]));
+            expect(http.calls[0]?.path).toBe('auth/logout');
         });
 
         it('builds the sign-in body with a custom builder', async () => {
             const http = new FakeHttpClient();
             http.queueResponse(sessionBody());
 
-            await createDefaultSessionApi<SessionUser, PhoneCredentials>(http, {
+            await createDefaultSessionApi<PhoneCredentials>(http, {
                 loginBody: (credentials, device) => ({ ...credentials, device: device.uuid }),
             }).login({ phone: '+441234' }, DEVICE);
 
             expect(http.calls[0]?.body).toStrictEqual({ phone: '+441234', device: 'device-uuid' });
-        });
-
-        it('maps sessions with a custom mapper', async () => {
-            const http = new FakeHttpClient();
-            const seen: unknown[] = [];
-            http.queueResponse('raw-login');
-            http.queueResponse('raw-refresh');
-
-            const api = gateway(http, {
-                mapSession: (payload) => {
-                    seen.push(payload);
-
-                    return { kind: 'authenticated', tokens: { accessToken: 'a', refreshToken: 'r', expiresAtEpochMs: 1 } };
-                },
-            });
-
-            await expect(api.login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
-                kind: 'authenticated',
-                tokens: { accessToken: 'a', refreshToken: 'r', expiresAtEpochMs: 1 },
-            });
-            await expect(api.refresh('held')).resolves.toStrictEqual({
-                kind: 'refreshed',
-                tokens: { accessToken: 'a', refreshToken: 'r', expiresAtEpochMs: 1 },
-            });
-            expect(seen).toStrictEqual(['raw-login', 'raw-refresh']);
         });
     });
 
@@ -669,7 +591,9 @@ describe('createDefaultSessionApi', () => {
                 name: 'Alice Smith',
                 permissions: [],
             });
-            expect(http.calls).toStrictEqual([{ method: 'GET', path: 'users/self', body: undefined, options: undefined }]);
+            expect(http.calls).toStrictEqual([
+                { method: 'GET', path: 'users/self', body: undefined, options: undefined },
+            ]);
         });
 
         it('maps an unenveloped user', async () => {
@@ -684,32 +608,41 @@ describe('createDefaultSessionApi', () => {
             });
         });
 
-        it('gets a custom user endpoint', async () => {
-            const http = new FakeHttpClient();
-            http.queueResponse(userEnvelope());
-
-            await gateway(http, { endpoints: { user: 'me' } }).currentUser();
-
-            expect(http.calls[0]?.path).toBe('me');
-        });
-
         it('keeps only the string permissions', async () => {
             const http = new FakeHttpClient();
-            http.queueResponse({ data: wire([['id', 'u1'], ['permissions', ['users.view', 3, 'users.edit']]]) });
+            http.queueResponse({
+                data: wire([
+                    ['id', 'u1'],
+                    ['permissions', ['users.view', 3, 'users.edit']],
+                ]),
+            });
 
-            await expect(gateway(http).currentUser()).resolves.toHaveProperty('permissions', ['users.view', 'users.edit']);
+            await expect(gateway(http).currentUser()).resolves.toHaveProperty('permissions', [
+                'users.view',
+                'users.edit',
+            ]);
         });
 
         it('collapses a non-array permissions field to an empty list', async () => {
             const http = new FakeHttpClient();
-            http.queueResponse({ data: wire([['id', 'u1'], ['permissions', 'users.view']]) });
+            http.queueResponse({
+                data: wire([
+                    ['id', 'u1'],
+                    ['permissions', 'users.view'],
+                ]),
+            });
 
             await expect(gateway(http).currentUser()).resolves.toHaveProperty('permissions', []);
         });
 
         it('maps a non-string email to null', async () => {
             const http = new FakeHttpClient();
-            http.queueResponse({ data: wire([['id', 'u1'], ['email', 42]]) });
+            http.queueResponse({
+                data: wire([
+                    ['id', 'u1'],
+                    ['email', 42],
+                ]),
+            });
 
             await expect(gateway(http).currentUser()).resolves.toHaveProperty('email', null);
         });
@@ -717,7 +650,13 @@ describe('createDefaultSessionApi', () => {
         it.each([
             [[['first_name', 'Alice']], 'Alice'],
             [[['last_name', 'Smith']], 'Smith'],
-            [[['first_name', 42], ['last_name', 'Smith']], 'Smith'],
+            [
+                [
+                    ['first_name', 42],
+                    ['last_name', 'Smith'],
+                ],
+                'Smith',
+            ],
         ] as const)('composes the name from %j', async (parts, name) => {
             const http = new FakeHttpClient();
             http.queueResponse({ data: wire([['id', 'u1'], ...parts]) });
@@ -742,28 +681,28 @@ describe('createDefaultSessionApi', () => {
             expect(error).toHaveProperty('message', 'The user response did not match the expected shape.');
         });
 
-        it('maps a user through a custom unwrap and mapper', async () => {
-            /** A user with a role. */
-            interface AdminUser extends SessionUser {
-                /** The user's role. */
-                readonly role: string;
-            }
-
+        it('maps the unwrapped user through a custom mapping', async () => {
             const http = new FakeHttpClient();
             const seen: unknown[] = [];
-            http.queueResponse({ user: 'raw' });
+            http.queueResponse({ data: { role: 'raw' } });
 
-            const user = await createDefaultSessionApi<AdminUser>(http, {
-                unwrap: (payload) => (payload as UserWrapper).user,
-                mapUser: (payload) => {
+            const user = await createDefaultSessionApi(http, {
+                mapUser: (payload): AdminUser => {
                     seen.push(payload);
 
                     return { id: 'mapped', email: null, name: null, permissions: [], role: 'admin' };
                 },
             }).currentUser();
 
-            expect(seen).toStrictEqual(['raw']);
+            expect(seen).toStrictEqual([{ role: 'raw' }]);
             expect(user).toStrictEqual({ id: 'mapped', email: null, name: null, permissions: [], role: 'admin' });
+        });
+
+        it('requires a mapping for a richer user type', () => {
+            // @ts-expect-error a richer user type cannot fall back to the default mapping
+            const api: SessionApi<AdminUser> = createDefaultSessionApi(new FakeHttpClient());
+
+            expect(api).toBeDefined();
         });
     });
 });
