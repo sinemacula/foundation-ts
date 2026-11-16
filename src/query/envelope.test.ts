@@ -205,7 +205,9 @@ describe('unwrapList', () => {
         });
 
         it('is null when count is not a number', () => {
-            expect(unwrapList({ data: [], meta: { total: 4, count: null, continue: true } }, mapWidget).meta).toBeNull();
+            expect(
+                unwrapList({ data: [], meta: { total: 4, count: null, continue: true } }, mapWidget).meta,
+            ).toBeNull();
         });
     });
 
@@ -282,7 +284,11 @@ describe('unwrapList', () => {
         });
 
         it('is null when links are absent or not a record', () => {
-            expect(unwrapList({ data: [] }, mapWidget)).toMatchObject({ links: null, nextCursor: null, prevCursor: null });
+            expect(unwrapList({ data: [] }, mapWidget)).toMatchObject({
+                links: null,
+                nextCursor: null,
+                prevCursor: null,
+            });
             expect(unwrapList({ data: [], links: ['x'] }, mapWidget).links).toBeNull();
         });
 
