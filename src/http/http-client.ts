@@ -77,15 +77,12 @@ export type RequestInterceptor = (request: HttpRequest) => HttpRequest | Promise
 export type UnauthorizedHandler = () => Promise<boolean>;
 
 /**
- * Invoked whenever a request ultimately fails, whether with an
- * {@link HttpError} (non-2xx response), a {@link NetworkError} (no usable
- * response, including a {@link TimeoutError}), or a {@link ResponseParseError}
- * (an unparseable JSON body); a caller's own cancellation is never passed here.
- * This is the global seam for surfacing unexpected failures, e.g. a toast
- * notification or an error-reporting call; per-request opt-out is via
- * {@link HttpRequestOptions.notifyOnError}. Filtering out expected failures
- * such as {@link HttpValidationError} is left to the handler, since it receives
- * every failure.
+ * Invoked once with the final failure of a request, after any retries: an
+ * {@link HttpError}, a {@link NetworkError} (including a {@link TimeoutError})
+ * or a {@link ResponseParseError}, but never a {@link CancelledError}, since a
+ * caller's own cancellation is not a failure to surface. Expected failures such
+ * as an {@link HttpValidationError} arrive too and are the handler's to filter;
+ * a request opts out with {@link HttpRequestOptions.notifyOnError}.
  */
 export type ResponseErrorHandler = (error: unknown, request: HttpRequest) => void;
 

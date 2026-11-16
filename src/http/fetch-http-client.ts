@@ -3,18 +3,12 @@
  *
  * JSON-first: requests ask for JSON, request bodies are serialised to JSON,
  * JSON responses are parsed, and non-success responses are mapped onto the
- * {@link HttpError} hierarchy from the API error envelope, falling back to the
- * plain `{message, errors}` shape. FormData and Blob bodies are passed to fetch
+ * {@link HttpError} hierarchy. FormData and Blob bodies are passed to fetch
  * unchanged for uploads, and {@link FetchHttpClient.download} reads a response
- * as a raw Blob. A single optional unauthorized handler supports
- * refresh-and-retry token flows without coupling this adapter to any auth
- * implementation, and an optional response-error handler is notified of every
- * ultimate failure so an application can surface it globally. A caller abort
- * rejects with {@link CancelledError} and a configured timeout with
- * {@link TimeoutError}, so a deliberate cancel is never confused with a
- * transport failure, and every failure to read or parse a body stays inside the
- * typed hierarchy. An opt-in `retry` policy re-attempts transient failures on
- * idempotent requests with a backoff delay between attempts.
+ * as a raw Blob. An optional unauthorized handler supports refresh-and-retry
+ * token flows without coupling this adapter to any auth implementation, an
+ * optional response-error handler is told of each final failure, and an opt-in
+ * retry policy re-attempts transient failures on idempotent requests.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,8 +57,8 @@ export interface RetryBackoff {
  * {@link FetchHttpClient.get} and {@link FetchHttpClient.download}. POST, PUT,
  * PATCH, and DELETE never retry regardless of this policy. A
  * {@link NetworkError} (including a {@link TimeoutError}) or a 502, 503 or 504
- * response is retried; a {@link CancelledError} or {@link MaintenanceError}
- * never is.
+ * response is retried; a {@link CancelledError} never is, and nor is a
+ * {@link MaintenanceError}, since a maintenance window outlasts any backoff.
  */
 export interface FetchHttpClientRetryOptions {
     /** Number of retries attempted after the first try. Defaults to 2. */
@@ -94,7 +88,7 @@ export interface FetchHttpClientOptions {
     /** Handler invoked on a 401 to attempt a refresh-and-retry. */
     readonly onUnauthorized?: UnauthorizedHandler;
 
-    /** Invoked whenever a request ultimately fails. This is where an application wires a toast or error-reporting call; per-request `notifyOnError: false` opts a request out. The handler receives every ultimate failure except {@link CancelledError} (a deliberate cancel is never reported), including {@link HttpValidationError} and {@link TimeoutError}, so filtering expected failures is left to the handler. */
+    /** Told of each final request failure; see {@link ResponseErrorHandler}. */
     readonly onResponseError?: ResponseErrorHandler;
 
     /** Opt-in retry policy for transient failures. Omit entirely for a single attempt on every request; see {@link FetchHttpClientRetryOptions}. */
@@ -201,8 +195,7 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Send a GET request; transient failures are retried per the configured
-     * retry policy.
+     * Send a GET request.
      */
     get<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#sendAttempt(
@@ -220,7 +213,7 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Send a POST request; transient failures are not retried.
+     * Send a POST request.
      */
     post<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#sendAttempt(
@@ -230,7 +223,7 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Send a PUT request; transient failures are not retried.
+     * Send a PUT request.
      */
     put<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#sendAttempt(
@@ -240,7 +233,7 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Send a PATCH request; transient failures are not retried.
+     * Send a PATCH request.
      */
     patch<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#sendAttempt(
@@ -250,7 +243,7 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Send a DELETE request; transient failures are not retried.
+     * Send a DELETE request.
      */
     delete<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#sendAttempt(
@@ -268,8 +261,7 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Download a GET response as a raw Blob; transient failures are retried per
-     * the retry policy.
+     * Download a GET response as a raw Blob.
      */
     download(path: string, options?: HttpRequestOptions): Promise<Blob> {
         return this.#sendAttempt<Blob>(
@@ -701,9 +693,7 @@ function trimTrailingSlashes(value: string): string {
  * Determine whether a failed attempt is eligible for a transient retry.
  *
  * @param error - the error thrown by the failed attempt
- * @returns true for a {@link NetworkError} (including a {@link TimeoutError})
- * or an {@link HttpError} with a 502, 503, or 504 status that is not a
- * {@link MaintenanceError}
+ * @returns true when the retry policy covers the failure
  */
 function isTransientError(error: unknown): boolean {
     if (error instanceof NetworkError) {

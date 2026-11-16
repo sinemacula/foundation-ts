@@ -1,15 +1,7 @@
 /**
  * Error hierarchy for the HTTP layer.
  *
- * `NetworkError` covers transport failures (no response was received, or the
- * body could not be read), and its `TimeoutError` subtype covers a configured
- * request timeout, so both read as transient. `CancelledError` covers a
- * caller-initiated abort only, so it never gets confused with a genuine
- * transport failure. `HttpError` covers non-2xx responses and carries the API's
- * internal error code and title when the body uses the API error envelope;
- * `HttpValidationError`, `QueryTooExpensiveError` and `MaintenanceError` narrow
- * the codes callers commonly branch on. `ResponseParseError` covers a success
- * response whose declared JSON body does not parse. Callers branch on
+ * Every failure a client surfaces is one of these types, so callers branch on
  * `instanceof` and never inspect raw fetch internals.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -44,8 +36,7 @@ export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
 
 /**
  * The request never produced a usable response: DNS failure, refused
- * connection, or a connection reset while the body was being read. Treated as
- * transient by the retry policy.
+ * connection, or a connection reset while the body was being read.
  */
 export class NetworkError extends Error {
     constructor(message: string, options?: ErrorOptions) {
@@ -56,10 +47,7 @@ export class NetworkError extends Error {
 
 /**
  * The configured request timeout elapsed before the response body was fully
- * read. A {@link NetworkError} subtype, so code that treats transport failures
- * as transient (retries, keeping a session on a failed refresh) covers it too.
- * Unlike {@link CancelledError}, it is reported to the global response-error
- * handler and retried by the transient-retry policy.
+ * read; a transport failure like any other {@link NetworkError}.
  */
 export class TimeoutError extends NetworkError {
     constructor(message: string, options?: ErrorOptions) {
@@ -69,12 +57,8 @@ export class TimeoutError extends NetworkError {
 }
 
 /**
- * The request was deliberately cancelled by its caller: the caller's
- * `AbortSignal` fired, whether during the request, while its body was read, or
- * during a retry backoff. UIs generally suppress error handling for this type,
- * since the cancellation was their own doing; a configured timeout is a
- * {@link TimeoutError} instead and must not be suppressed. This is never passed
- * to the global response-error handler and is never retried.
+ * The caller's `AbortSignal` fired, during the request, while its body was
+ * read, or during a retry backoff.
  */
 export class CancelledError extends Error {
     constructor(message: string, options?: ErrorOptions) {
@@ -85,7 +69,7 @@ export class CancelledError extends Error {
 
 /**
  * A success response declared a JSON body that does not parse, such as an HTML
- * page served with a JSON content type. Never retried.
+ * page served with a JSON content type.
  */
 export class ResponseParseError extends Error {
     /** The HTTP status code of the response. */
@@ -199,9 +183,8 @@ export class QueryTooExpensiveError extends HttpError {
 }
 
 /**
- * The API is down for maintenance. Distinct from an ordinary 503 so a UI can
- * show a maintenance state, and never retried by the transient-retry policy
- * since a maintenance window outlasts any backoff.
+ * The API is down for maintenance; distinct from an ordinary 503 so a UI can
+ * show a maintenance state.
  */
 export class MaintenanceError extends HttpError {
     constructor(status: number, message: string, payload: unknown, details: HttpErrorDetails = {}) {
