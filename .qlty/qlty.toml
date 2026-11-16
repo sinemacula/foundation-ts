@@ -32,7 +32,7 @@ default = true
 [[source]]
 name = "sinemacula"
 repository = "https://github.com/sinemacula/coding-standards"
-tag = "v1.30.0"
+tag = "v1.30.1"
 
 [runtimes.enabled]
 node = "24.18.0"
@@ -47,15 +47,9 @@ name = "shellcheck"
 name = "shfmt"
 mode = "comment"
 
-# Biome runs in a sandbox where neither the exported nested config nor a
-# relative extends resolves, so the repo config is self-contained and passed
-# directly; re-sync it from the shared js/biome.json when the tag moves.
-[plugins.definitions.biome]
-exported_config_paths = []
-
 [[plugin]]
 name = "biome"
-version = "2.3.15"
+version = "2.5.6"
 mode = "comment"
 
 # Knip runs through `npm run deadcode`; qlty passes its config twice.
