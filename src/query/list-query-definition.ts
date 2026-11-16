@@ -48,7 +48,7 @@ export interface ListQueryDefinition<Filters extends Record<string, ListFilter<n
     /** Named filters the screen may set, keyed by the screen's vocabulary. */
     readonly filters?: Filters;
 
-    /** Free-text search mapping. When set, calling `search(term)` on the resulting list query applies this filter with the term as its value. */
+    /** Free-text search mapping, usually `filter.search()`. When set, calling `search(term)` on the resulting list query applies this filter with the term as its value. */
     readonly search?: ListFilter<string>;
 
     /** The columns the screen may sort by. When set, `sortBy` rejects any column not in this list by throwing a descriptive `Error`. When `undefined`, all columns are accepted. */

@@ -19,46 +19,36 @@ describe('FilterScalar', () => {
         expectTypeOf<string>().toExtend<FilterScalar>();
         expectTypeOf<number>().toExtend<FilterScalar>();
         expectTypeOf<boolean>().toExtend<FilterScalar>();
-        expectTypeOf<{ nested: true }>().not.toExtend<FilterScalar>();
+        expectTypeOf<Record<'nested', true>>().not.toExtend<FilterScalar>();
     });
 });
 
 describe('FilterOperators', () => {
     it('accepts fully-populated and partial operator maps', () => {
-        expectTypeOf<{
-            // biome-ignore-start lint/style/useNamingConvention: toolkit keys
-            $eq: string;
-            $neq: string;
-            $gt: number;
-            $lt: number;
-            $ge: number;
-            $le: number;
-            $like: string;
-            $in: string[];
-            $between: [number, number];
-            $contains: string;
-            $null: true;
-            $notNull: true;
-            // biome-ignore-end lint/style/useNamingConvention: toolkit keys
-        }>().toExtend<FilterOperators>();
-        // biome-ignore lint/style/useNamingConvention: toolkit keys
-        expectTypeOf<{ $ge: number }>().toExtend<FilterOperators>();
+        expectTypeOf<
+            Record<'$eq' | '$neq', string> &
+                Record<'$gt' | '$lt' | '$ge' | '$le', number> &
+                Record<'$in', string[]> &
+                Record<'$between', [number, number]> &
+                Record<'$contains', string> &
+                Record<'$null' | '$notNull', true>
+        >().toExtend<FilterOperators>();
+        expectTypeOf<Record<'$ge', number>>().toExtend<FilterOperators>();
     });
 
     it('rejects unknown operator keys', () => {
-        // biome-ignore lint/style/useNamingConvention: toolkit keys
-        expectTypeOf<{ $regex: string }>().not.toExtend<FilterOperators>();
+        expectTypeOf<Record<'$regex', string>>().not.toExtend<FilterOperators>();
+    });
+
+    it('rejects the removed pattern-match operator', () => {
+        expectTypeOf<Record<'$like', string>>().not.toExtend<FilterOperators>();
     });
 });
 
 describe('FilterTree', () => {
-    it('accepts field conditions, operator maps and group keys', () => {
-        expectTypeOf<{
-            name: string;
-            // biome-ignore-start lint/style/useNamingConvention: toolkit keys
-            age: { $ge: number };
-            $and: { status: string };
-            // biome-ignore-end lint/style/useNamingConvention: toolkit keys
-        }>().toExtend<FilterTree>();
+    it('accepts field conditions, operator maps and group lists', () => {
+        expectTypeOf<
+            Record<'name', string> & Record<'age', Record<'$ge', number>> & Record<'$and', Array<Record<'status', string>>>
+        >().toExtend<FilterTree>();
     });
 });

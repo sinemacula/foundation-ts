@@ -11,6 +11,16 @@ import type { ApiQuery } from './api-query';
 import { filter } from './list-filter';
 import { defineListQuery } from './list-query-definition';
 
+/**
+ * Narrow a query to the user fields a list needs.
+ *
+ * @param query - the query to shape
+ * @returns the shaped query
+ */
+function shapeUser(query: ApiQuery): ApiQuery {
+    return query.fieldsFor('user', ['id', 'name']);
+}
+
 describe('defineListQuery', () => {
     it('returns the definition unchanged', () => {
         const definition = defineListQuery({
@@ -41,14 +51,13 @@ describe('defineListQuery', () => {
     });
 
     it('preserves the base function', () => {
-        const base = (q: ApiQuery) => q.fields(['id', 'name']);
-        const definition = defineListQuery({ base });
+        const definition = defineListQuery({ base: shapeUser });
 
-        expect(definition.base).toBe(base);
+        expect(definition.base).toBe(shapeUser);
     });
 
     it('preserves the search filter', () => {
-        const searchFilter = filter.text('name');
+        const searchFilter = filter.search();
         const definition = defineListQuery({ search: searchFilter });
 
         expect(definition.search).toBe(searchFilter);
@@ -70,11 +79,11 @@ describe('defineListQuery', () => {
         const definition = defineListQuery({
             filters: {
                 status: filter.equals('status'),
-                name: filter.text('name'),
+                roles: filter.anyOf('role'),
             },
         });
 
         expect(definition.filters?.status).toBeDefined();
-        expect(definition.filters?.name).toBeDefined();
+        expect(definition.filters?.roles).toBeDefined();
     });
 });

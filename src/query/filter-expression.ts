@@ -10,29 +10,36 @@
  *
  * ## Supported tree shapes
  *
+ * The entries of a filter document AND together at every depth.
+ *
  * ### Equality (shorthand)
  * ```json
  * { "name": "Alice" }
  * ```
+ * Any scalar is a real condition, including `""`, `0` and `false`.
  *
  * ### Comparison operators
  * ```json
  * { "age": { "$ge": 18, "$le": 65 } }
  * ```
  * All operator keys are `$`-prefixed: `$eq`, `$neq`, `$gt`, `$lt`, `$ge`,
- * `$le`, `$like`, `$in`, `$between`, `$contains`, `$null`, `$notNull`.
+ * `$le`, `$in`, `$between`, `$contains`, `$null`, `$notNull`. Free-text
+ * matching is not a filter operator; it is the separate `search` parameter.
  *
  * ### Logical groups
  * ```json
- * { "$and": { "status": "active", "role": "admin" } }
- * { "$or":  { "name": { "$like": "alice" }, "email": { "$like": "alice" } } }
+ * { "$or": [{ "role": "admin", "status": "active" }, { "role": "owner" }] }
+ * { "$and": [{ "$or": [{ "a": 1 }, { "b": 2 }] }, { "$or": [{ "c": 3 }, { "d": 4 }] }] }
  * ```
- * Protocol limitation: each field may appear **once** inside a group object.
+ * A group is a non-empty list of non-empty documents. Each document is grouped
+ * on its own, its keys ANDed, and the documents joined by AND or OR.
  *
  * ### Relation filters (nested)
  * ```json
- * { "posts": { "title": { "$like": "news" } } }
+ * { "posts": { "title": "News", "published": true } }
  * ```
+ * Every condition in one relation document must hold for the same related
+ * row; split them across `$and` documents to let different rows match.
  *
  * ### Relation existence
  * ```json
@@ -40,8 +47,8 @@
  * { "$has": { "posts": { "published": true } } }
  * { "$has": { "posts": {}, "comments": { "title": "X" } } }
  * ```
- * The three forms are a bare array, a conditioned object, and a mix - use `{}`
- * for a bare relation inside the object form.
+ * The three forms are a bare list, a conditioned map, and a mix - use `{}` for
+ * a bare relation inside the map form.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,16 +84,13 @@ export interface FilterOperators {
     /** Less than or equal. */
     readonly $le?: FilterScalar;
 
-    /** Wildcard pattern match. */
-    readonly $like?: string;
-
     /** Value is one of the given set. */
     readonly $in?: readonly FilterScalar[];
 
     /** Value falls within the inclusive bounds. */
     readonly $between?: readonly [FilterScalar, FilterScalar];
 
-    /** Field contains the given value or values. */
+    /** Containment: an array is all-of, a comma-separated string any-of. */
     readonly $contains?: FilterScalar | readonly FilterScalar[];
 
     /** Field is null. */
