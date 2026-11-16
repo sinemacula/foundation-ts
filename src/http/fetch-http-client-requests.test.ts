@@ -8,7 +8,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { FetchHttpClient, stripQueryAndFragment } from './fetch-http-client';
+import { FetchHttpClient } from './fetch-http-client';
 
 // ---------------------------------------------------------------------------
 // Stub type
@@ -489,22 +489,5 @@ describe('FetchHttpClient - accept header', () => {
         await client.get('/items');
 
         expect(seen).toStrictEqual([{ accept: 'application/json' }]);
-    });
-});
-
-// ---------------------------------------------------------------------------
-// URL redaction
-// ---------------------------------------------------------------------------
-
-describe('stripQueryAndFragment', () => {
-    it.each([
-        ['https://api.example.com/items', 'https://api.example.com/items'],
-        ['https://api.example.com/reset?token=secret', 'https://api.example.com/reset'],
-        ['https://api.example.com/callback#code=secret', 'https://api.example.com/callback'],
-        ['https://api.example.com/a?b=1#c', 'https://api.example.com/a'],
-        ['https://api.example.com/a#b?c=1', 'https://api.example.com/a'],
-        ['', ''],
-    ])('strips %s to %s', (url, expected) => {
-        expect(stripQueryAndFragment(url)).toBe(expected);
     });
 });

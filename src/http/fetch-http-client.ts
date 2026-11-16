@@ -21,7 +21,9 @@
  */
 
 import { ExponentialBackoff } from '../realtime/exponential-backoff';
-import { isRecord } from '../support/is-record';
+import { stripQueryAndFragment } from '../support/url';
+import { onAbort, openAbortScope } from './abort-scope';
+import type { AbortScope } from './abort-scope';
 import type {
     HttpClient,
     HttpMethod,
@@ -33,17 +35,14 @@ import type {
     UnauthorizedHandler,
 } from './http-client';
 import {
-    ApiErrorCode,
     CancelledError,
     HttpError,
-    HttpValidationError,
     MaintenanceError,
     NetworkError,
-    QueryTooExpensiveError,
     ResponseParseError,
     TimeoutError,
 } from './http-error';
-import type { HttpErrorDetails, QueryTooExpensiveMeta } from './http-error';
+import { toResponseError } from './response-error';
 
 /**
  * A delay strategy spacing retry attempts, such as an
@@ -108,12 +107,6 @@ type BodyParseMode = 'json' | 'blob';
 /** HTTP statuses treated as transient, and therefore retryable, failures. */
 const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
 
-/** The query-cost meta fields carried as strings. */
-const QUERY_COST_STRING_FIELDS = ['parameter', 'pointer', 'reason'] as const;
-
-/** The query-cost meta fields carried as numbers. */
-const QUERY_COST_NUMBER_FIELDS = ['limit', 'actual'] as const;
-
 /** The default `accept` header per parse mode; downloads still prefer JSON errors. */
 const DEFAULT_ACCEPT: Readonly<Record<BodyParseMode, string>> = {
     json: 'application/json',
@@ -154,28 +147,6 @@ interface SendRequest {
 interface AttemptContext {
     /** The most recently resolved request, or null before dispatch. */
     request: HttpRequest | null;
-}
-
-/**
- * The abort signal governing one request-and-body exchange, composing the
- * caller's signal with the configured timeout.
- */
-interface AbortScope {
-    /** The signal to hand to fetch, or null when neither applies. */
-    readonly signal: AbortSignal | null;
-
-    /**
-     * Report whether the configured timeout, rather than the caller, aborted
-     * the exchange.
-     *
-     * @returns true once the timeout has fired
-     */
-    timedOut(): boolean;
-
-    /**
-     * Clear the timeout and detach from the caller's signal.
-     */
-    dispose(): void;
 }
 
 /**
@@ -640,90 +611,6 @@ export class FetchHttpClient implements HttpClient {
 }
 
 /**
- * Strip the query string and fragment from a URL, which can carry secrets such
- * as reset tokens or authorization codes, before it is logged or reported.
- *
- * @param url - the URL to strip
- * @returns the URL up to its first `?` or `#`
- */
-export function stripQueryAndFragment(url: string): string {
-    const end = url.search(/[?#]/u);
-
-    return end === -1 ? url : url.slice(0, end);
-}
-
-/**
- * Open the abort scope for one exchange. The timeout uses a plain controller
- * and timer rather than `AbortSignal.timeout`/`AbortSignal.any`, which some
- * runtimes (React Native, older Safari) lack.
- *
- * @param timeout - the configured timeout in milliseconds, or null for none
- * @param callerSignal - the caller's signal, if any
- * @returns the scope; dispose it once the body has been read
- */
-function openAbortScope(timeout: number | null, callerSignal: AbortSignal | undefined): AbortScope {
-    if (timeout === null) {
-        return { signal: callerSignal ?? null, timedOut: () => false, dispose: () => undefined };
-    }
-
-    const controller = new AbortController();
-    let timedOut = false;
-
-    const timer = setTimeout(() => {
-        if (!controller.signal.aborted) {
-            timedOut = true;
-            controller.abort();
-        }
-    }, timeout);
-
-    const detach = onAbort(callerSignal, reason => {
-        controller.abort(reason);
-    });
-
-    return {
-        signal: controller.signal,
-        timedOut: () => timedOut,
-        dispose: () => {
-            clearTimeout(timer);
-            detach();
-        },
-    };
-}
-
-/**
- * Run a listener when a signal aborts: at once when it already has, otherwise
- * on its abort event.
- *
- * @param signal - the signal to watch, if any
- * @param listener - receives the signal's abort reason
- * @returns a function that stops watching the signal
- */
-function onAbort(signal: AbortSignal | undefined, listener: (reason: unknown) => void): () => void {
-    if (signal === undefined) {
-        return () => undefined;
-    }
-
-    if (signal.aborted) {
-        listener(signal.reason);
-
-        return () => undefined;
-    }
-
-    /**
-     * Forward the abort reason to the listener.
-     */
-    const forward = (): void => {
-        listener(signal.reason);
-    };
-
-    signal.addEventListener('abort', forward);
-
-    return () => {
-        signal.removeEventListener('abort', forward);
-    };
-}
-
-/**
  * Build the fetch `RequestInit`, passing FormData and Blob bodies through
  * unchanged and JSON-serialising any other body with a default content-type.
  *
@@ -843,161 +730,6 @@ function isTransientError(error: unknown): boolean {
     }
 
     return error instanceof HttpError && !(error instanceof MaintenanceError) && TRANSIENT_STATUSES.has(error.status);
-}
-
-/**
- * Map a non-success response onto the error hierarchy, reading the API error
- * envelope when present and the plain `{message, errors}` shape otherwise.
- *
- * @param status - the response status code
- * @param text - the response body text
- * @returns the mapped error, ready to throw
- */
-function toResponseError(status: number, text: string): HttpError {
-    const payload = parseJsonOrNull(text);
-    const envelope = isRecord(payload) ? payload['error'] : null;
-
-    if (isRecord(envelope) && typeof envelope['code'] === 'number') {
-        return toEnvelopeError(status, payload, envelope, envelope['code']);
-    }
-
-    return toPlainError(status, payload);
-}
-
-/**
- * Map an API error envelope (`{error: {status, code, title, detail, meta}}`)
- * onto the error hierarchy, narrowing the codes callers branch on.
- *
- * @param status - the response status code
- * @param payload - the whole parsed body
- * @param envelope - the body's `error` object
- * @param code - the envelope's internal error code
- * @returns the mapped error
- */
-function toEnvelopeError(status: number, payload: unknown, envelope: Record<string, unknown>, code: number): HttpError {
-    const title = nonEmptyString(envelope['title']);
-    const message = nonEmptyString(envelope['detail']) ?? title ?? statusMessage(status);
-    const details: HttpErrorDetails = { code, title };
-    const meta = envelope['meta'];
-
-    if (code === ApiErrorCode.InvalidInput) {
-        return new HttpValidationError(status, message, payload, toFieldErrors(meta) ?? {}, details);
-    }
-
-    if (code === ApiErrorCode.MaintenanceMode) {
-        return new MaintenanceError(status, message, payload, details);
-    }
-
-    const cost = code === ApiErrorCode.QueryTooExpensive ? toQueryCostMeta(meta) : null;
-
-    return cost === null
-        ? new HttpError(status, message, payload, details)
-        : new QueryTooExpensiveError(status, message, payload, cost, details);
-}
-
-/**
- * Map a plain `{message, errors}` error body, as sent by endpoints outside the
- * API error envelope, onto the error hierarchy.
- *
- * @param status - the response status code
- * @param payload - the parsed body, or null
- * @returns the mapped error
- */
-function toPlainError(status: number, payload: unknown): HttpError {
-    const message = isRecord(payload) ? nonEmptyString(payload['message']) : null;
-    const errors = isRecord(payload) ? toFieldErrors(payload['errors']) : null;
-
-    if (status === 422 && errors !== null) {
-        return new HttpValidationError(status, message ?? statusMessage(status), payload, errors);
-    }
-
-    return new HttpError(status, message ?? statusMessage(status), payload);
-}
-
-/**
- * Normalise a per-field error map, keeping only string messages.
- *
- * @param value - the candidate map of field keys to message lists
- * @returns the normalised map, or null when the value is not a record
- */
-function toFieldErrors(value: unknown): Record<string, readonly string[]> | null {
-    if (!isRecord(value)) {
-        return null;
-    }
-
-    const errors: Record<string, readonly string[]> = {};
-
-    for (const [field, messages] of Object.entries(value)) {
-        if (Array.isArray(messages)) {
-            errors[field] = messages.filter((message): message is string => typeof message === 'string');
-        }
-    }
-
-    return errors;
-}
-
-/**
- * Read the cap details of a query-too-expensive error.
- *
- * @param value - the envelope's `meta`
- * @returns the typed details, or null when any field is missing or mistyped
- */
-function toQueryCostMeta(value: unknown): QueryTooExpensiveMeta | null {
-    if (!isQueryCostMeta(value)) {
-        return null;
-    }
-
-    const { parameter, pointer, reason, limit, actual } = value;
-
-    return { parameter, pointer, reason, limit, actual };
-}
-
-/**
- * Determine whether a value carries every query-cost field with its type.
- *
- * @param value - the candidate meta
- * @returns true when the string and number fields are all present
- */
-function isQueryCostMeta(value: unknown): value is QueryTooExpensiveMeta {
-    return (
-        isRecord(value) &&
-        QUERY_COST_STRING_FIELDS.every(field => typeof value[field] === 'string') &&
-        QUERY_COST_NUMBER_FIELDS.every(field => typeof value[field] === 'number')
-    );
-}
-
-/**
- * Best-effort parse of an error response body.
- *
- * @param text - the body text
- * @returns the parsed JSON payload, or null when the body is not JSON
- */
-function parseJsonOrNull(text: string): unknown {
-    try {
-        return JSON.parse(text);
-    } catch {
-        return null;
-    }
-}
-
-/**
- * Narrow a value to a non-empty string.
- *
- * @param value - the candidate value
- * @returns the string, or null when it is not a non-empty string
- */
-function nonEmptyString(value: unknown): string | null {
-    return typeof value === 'string' && value !== '' ? value : null;
-}
-
-/**
- * Build the generic message for a status without a usable body message.
- *
- * @param status - the response status code
- * @returns the generic message
- */
-function statusMessage(status: number): string {
-    return `Request failed with status ${status}.`;
 }
 
 /**

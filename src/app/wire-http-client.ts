@@ -18,7 +18,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { FetchHttpClient, stripQueryAndFragment } from '../http/fetch-http-client';
+import { FetchHttpClient } from '../http/fetch-http-client';
 import type {
     HttpClient,
     HttpRequest,
@@ -28,6 +28,7 @@ import type {
 } from '../http/http-client';
 import { HttpError, HttpValidationError } from '../http/http-error';
 import type { ModuleHttpContributions } from '../http/module-http-contributions';
+import { stripQueryAndFragment } from '../support/url';
 import { installApi, reporting, toasts } from './services';
 import type { FoundationConfig } from './foundation-config';
 
@@ -123,7 +124,9 @@ function buildDefaultClient<T extends FoundationConfig>(tools: WireHttpClientToo
  * @param options - the wiring inputs carrying the override, key, and handlers
  * @returns the composed response-error handler
  */
-function composeResponseErrorHandler<T extends FoundationConfig>(options: WireHttpClientOptions<T>): ResponseErrorHandler {
+function composeResponseErrorHandler<T extends FoundationConfig>(
+    options: WireHttpClientOptions<T>,
+): ResponseErrorHandler {
     const preset = options.onResponseError ?? createDefaultResponseErrorHandler(options.unexpectedErrorToastKey);
     const moduleHandlers = options.contributions.responseErrorHandlers;
 
