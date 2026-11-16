@@ -24,6 +24,9 @@ interface RecoveredBody {
 /** Explicit overload signature so mock.calls carries a typed tuple, not []. */
 type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 
+/** A constructor of the error type a rejection is expected to have. */
+type ErrorType<E extends Error> = new (...args: never[]) => E;
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -54,6 +57,21 @@ function makeClient(
     extra: Partial<ConstructorParameters<typeof FetchHttpClient>[0]> = {},
 ): FetchHttpClient {
     return new FetchHttpClient({ baseUrl: 'https://api.example.com', fetchFn, ...extra });
+}
+
+/**
+ * Await a request expected to reject with a given error type.
+ *
+ * @param promise - the pending request
+ * @param type - the error type the rejection must have
+ * @returns the rejection
+ */
+async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: ErrorType<E>): Promise<E> {
+    const error = await promise.catch((rejection: unknown) => rejection);
+
+    expect(error).toBeInstanceOf(type);
+
+    return error as E;
 }
 
 /** Fixed-delay backoff for deterministic retry-delay assertions. */
@@ -133,14 +151,13 @@ describe('FetchHttpClient - transient retry', () => {
             onResponseError,
         });
 
-        const pending = client.get('/items').catch(error => error);
+        const pending = rejectionOf(client.get('/items'), HttpError);
 
         await vi.advanceTimersByTimeAsync(10);
 
         const error = await pending;
 
-        expect(error).toBeInstanceOf(HttpError);
-        expect((error as HttpError).status).toBe(503);
+        expect(error.status).toBe(503);
         expect(fetchFn).toHaveBeenCalledTimes(2);
         expect(onResponseError).toHaveBeenCalledTimes(1);
         expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
@@ -246,13 +263,11 @@ describe('FetchHttpClient - transient retry', () => {
             onResponseError,
         });
 
-        const pending = client.get('/items').catch(error => error);
+        const pending = rejectionOf(client.get('/items'), CancelledError);
 
         await vi.advanceTimersByTimeAsync(10);
 
-        const error = await pending;
-
-        expect(error).toBeInstanceOf(CancelledError);
+        await pending;
         expect(fetchFn).toHaveBeenCalledTimes(2);
         expect(onResponseError).not.toHaveBeenCalled();
     });

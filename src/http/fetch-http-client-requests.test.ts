@@ -103,9 +103,6 @@ function lastInit(fn: ReturnType<typeof makeFetch>): RequestInit {
  * @returns the headers as a plain record
  */
 function lastHeaders(fn: ReturnType<typeof makeFetch>): Record<string, string> {
-    // Cast is proven safe: #buildRequestInit always writes a plain object
-    // literal into init.headers, so the value is always Record<string, string>
-    // at runtime.
     return (lastInit(fn).headers ?? {}) as Record<string, string>;
 }
 
@@ -434,6 +431,19 @@ describe('FetchHttpClient - accept header', () => {
         await client.post('/items', { name: 'Alice' });
 
         expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/json', 'content-type': 'application/json' });
+    });
+
+    it.each([
+        ['GET', (client: FetchHttpClient) => client.get('/items')],
+        ['PUT', (client: FetchHttpClient) => client.put('/items')],
+        ['PATCH', (client: FetchHttpClient) => client.patch('/items')],
+        ['DELETE', (client: FetchHttpClient) => client.delete('/items')],
+    ] as const)('asks for JSON on a %s', async (_verb, invoke) => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+
+        await invoke(makeClient(fetchFn));
+
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/json' });
     });
 
     it('asks downloads for any type while still preferring JSON errors', async () => {
