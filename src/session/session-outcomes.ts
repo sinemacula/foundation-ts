@@ -99,7 +99,7 @@ export type LoginOutcome =
           readonly pending: PendingAuthentication;
       }
     | {
-          /** A later sign-in, sign-out, or hydration overtook this sign-in, whose session was discarded. */
+          /** Another session transition overtook this sign-in, whose session was discarded. */
           readonly kind: 'superseded';
       };
 
@@ -109,12 +109,14 @@ export type LoginOutcome =
  * `refreshed` means the state holds a usable session, either newly issued and
  * persisted or adopted from a session another context persisted. `rejected`
  * means the session was cleared. `retryable` keeps the tokens. `failed` keeps
- * the tokens too: the refresh failed, or the server rotated the pair and it
- * could not be persisted, in which case the next transition retries persisting
- * it. `interactionRequired` clears the session, since the server no longer
- * accepts it, and hands back the pending session to continue with. `superseded`
- * means a sign-out, sign-in, or hydration overtook the refresh, whose result
- * was discarded.
+ * the tokens when the refresh failed, or when the server rotated the pair and
+ * it could not be persisted, in which case the next transition retries
+ * persisting it; it discards them when the server refused the session and it
+ * could not be cleared from persistence. `interactionRequired` clears the
+ * session, since the server no longer accepts it, and hands back the pending
+ * session to continue with. `superseded` means the session the refresh started
+ * with was replaced or signed out meanwhile, and the refresh's result was
+ * discarded.
  */
 export type RefreshOutcome =
     | {

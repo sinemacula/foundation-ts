@@ -610,7 +610,7 @@ describe('hydrateSession', () => {
 });
 
 describe('loginWithCredentials', () => {
-    it('signs in, loads the user, then persists the session', async () => {
+    it('signs in, persists the session, then loads the user', async () => {
         const { state, api, persistence, context } = fixture();
         api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
         api.users.push(ALICE);
@@ -626,7 +626,7 @@ describe('loginWithCredentials', () => {
         expect(state).toStrictEqual({ ...tokens('a'), user: ALICE });
     });
 
-    it('holds the tokens in state while the user loads, without the previous user', async () => {
+    it('holds the persisted tokens in state while the user loads, without the previous user', async () => {
         const { state, api, persistence, context } = await signedIn(tokens('old'));
         const user = deferred<SessionUser>();
         api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
@@ -637,7 +637,7 @@ describe('loginWithCredentials', () => {
         await flush();
 
         expect(state).toStrictEqual({ ...tokens('a'), user: null });
-        expect(persistence.snapshot.tokens).toStrictEqual(tokens('old'));
+        expect(persistence.snapshot.tokens).toStrictEqual(tokens('a'));
 
         user.resolve(BOB);
         await login;
@@ -684,15 +684,16 @@ describe('loginWithCredentials', () => {
 
     it('writes over a session another context persisted meanwhile', async () => {
         const { state, api, persistence, context } = fixture();
-        const user = deferred<SessionUser>();
+        const gate = deferred<undefined>();
         api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
-        api.users.push(user.promise);
+        api.users.push(ALICE);
+        persistence.saveGate = gate.promise;
 
         const login = loginWithCredentials(state, context, CREDENTIALS);
 
         await flush();
         persistence.write(tokens('elsewhere'));
-        user.resolve(ALICE);
+        gate.resolve(undefined);
 
         await expect(login).resolves.toStrictEqual({ kind: 'authenticated' });
         expect(persistence.operations).toStrictEqual(['save@0:access-a', 'save@1:access-a']);
@@ -711,8 +712,8 @@ describe('loginWithCredentials', () => {
         await expect(loginWithCredentials(state, context, CREDENTIALS)).rejects.toThrow('offline');
 
         expect(state).toStrictEqual(createInitialSessionState());
-        expect(persistence.operations).toStrictEqual(['clear@1']);
-        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: null });
+        expect(persistence.operations).toStrictEqual(['save@1:access-a', 'clear@2']);
+        expect(persistence.snapshot).toStrictEqual({ revision: 3, tokens: null });
     });
 
     it('rolls the session back when it cannot be persisted', async () => {
@@ -753,7 +754,7 @@ describe('loginWithCredentials', () => {
         expect(persistence.operations).toStrictEqual(['clear@0']);
     });
 
-    it('is superseded by a sign-out while the user loads, persisting nothing', async () => {
+    it('is superseded by a sign-out while the user loads, which clears the persisted session', async () => {
         const { state, api, persistence, context } = fixture();
         const user = deferred<SessionUser>();
         api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
@@ -767,7 +768,7 @@ describe('loginWithCredentials', () => {
 
         await expect(login).resolves.toStrictEqual({ kind: 'superseded' });
         expect(state).toStrictEqual(createInitialSessionState());
-        expect(persistence.operations).toStrictEqual(['clear@0']);
+        expect(persistence.operations).toStrictEqual(['save@0:access-a', 'clear@1']);
         expect(api.logoutCalls).toStrictEqual(['refresh-a']);
     });
 
@@ -800,6 +801,8 @@ describe('loginWithCredentials', () => {
         api.users.push(ALICE);
 
         const hydrate = hydrateSession(state, context);
+
+        await flush();
         const login = loginWithCredentials(state, context, CREDENTIALS);
 
         await flush();
@@ -828,8 +831,131 @@ describe('loginWithCredentials', () => {
 
         await expect(first).rejects.toThrow('first failed');
         expect(state).toStrictEqual({ ...tokens('b'), user: BOB });
-        expect(persistence.snapshot).toStrictEqual({ revision: 1, tokens: tokens('b') });
+        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: tokens('b') });
+        expect(persistence.operations).toStrictEqual(['save@0:access-a', 'save@1:access-b']);
+    });
+
+    it('lets the later of two overlapping sign-ins win when the earlier answers first', async () => {
+        const { state, api, persistence, context } = fixture();
+        const earlier = deferred<LoginResult>();
+        const later = deferred<LoginResult>();
+        api.logins.push(earlier.promise, later.promise);
+        api.users.push(BOB);
+
+        const first = loginWithCredentials(state, context, CREDENTIALS);
+        const second = loginWithCredentials(state, context, CREDENTIALS);
+
+        earlier.resolve({ kind: 'authenticated', tokens: tokens('a') });
+
+        await expect(first).resolves.toStrictEqual({ kind: 'superseded' });
+
+        later.resolve({ kind: 'authenticated', tokens: tokens('b') });
+
+        await expect(second).resolves.toStrictEqual({ kind: 'authenticated' });
+        expect(state).toStrictEqual({ ...tokens('b'), user: BOB });
         expect(persistence.operations).toStrictEqual(['save@0:access-b']);
+    });
+
+    it('keeps the pair a refresh rotated while the user loads', async () => {
+        const { state, api, persistence, context } = fixture();
+        const user = deferred<SessionUser>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(user.promise);
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'refreshed' });
+
+        user.resolve(ALICE);
+
+        await expect(login).resolves.toStrictEqual({ kind: 'authenticated' });
+        expect(api.refreshCalls).toStrictEqual(['refresh-a']);
+        expect(state).toStrictEqual({ ...tokens('b'), user: ALICE });
+        expect(persistence.operations).toStrictEqual(['save@0:access-a', 'save@1:access-b']);
+        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: tokens('b') });
+    });
+
+    it('stops writing over another context once a sign-out overtakes it', async () => {
+        const { state, api, persistence, context } = fixture();
+        const gate = deferred<undefined>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        persistence.saveGate = gate.promise;
+
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+        persistence.write(tokens('elsewhere'));
+        const logout = logoutSession(state, context);
+
+        gate.resolve(undefined);
+        await logout;
+
+        await expect(login).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(persistence.operations).toStrictEqual(['save@0:access-a', 'clear@0', 'clear@1']);
+        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: null });
+    });
+
+    it('is superseded when its session is refused while the user loads', async () => {
+        const { state, api, persistence, context } = fixture();
+        const user = deferred<SessionUser>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(user.promise);
+        api.refreshes.push(REJECTED);
+
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual(REJECTED);
+
+        user.resolve(ALICE);
+
+        await expect(login).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: null });
+    });
+
+    it('is superseded by a later sign-in that starts while the user loads', async () => {
+        const { state, api, context } = fixture();
+        const user = deferred<SessionUser>();
+        const later = deferred<LoginResult>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') }, later.promise);
+        api.users.push(user.promise, BOB);
+
+        const first = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+        const second = loginWithCredentials(state, context, CREDENTIALS);
+
+        user.resolve(ALICE);
+
+        await expect(first).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state.user).toBeNull();
+
+        later.resolve({ kind: 'authenticated', tokens: tokens('b') });
+
+        await expect(second).resolves.toStrictEqual({ kind: 'authenticated' });
+        expect(state).toStrictEqual({ ...tokens('b'), user: BOB });
+    });
+
+    it('is superseded when another context replaced its session while the user loads', async () => {
+        const { state, api, persistence, context } = fixture();
+        const user = deferred<SessionUser>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(user.promise);
+
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+        persistence.write(tokens('elsewhere'));
+        await hydrateSession(state, context);
+        user.resolve(ALICE);
+
+        await expect(login).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual({ ...tokens('elsewhere'), user: null });
     });
 });
 
@@ -875,7 +1001,7 @@ describe('refreshSession', () => {
         expect(persistence.snapshot).toStrictEqual({ revision: 1, tokens: tokens('a') });
     });
 
-    it('persists the next rotation over the spent pair after a failed save', async () => {
+    it('persists the unsaved pair, then the next rotation over it', async () => {
         const { state, api, persistence, context } = await signedIn(tokens('a'));
         api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
         api.refreshes.push({ kind: 'refreshed', tokens: tokens('c') });
@@ -884,14 +1010,76 @@ describe('refreshSession', () => {
 
         await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'refreshed' });
         expect(api.refreshCalls).toStrictEqual(['refresh-a', 'refresh-b']);
-        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: tokens('c') });
+        expect(persistence.snapshot).toStrictEqual({ revision: 3, tokens: tokens('c') });
 
         await hydrateSession(state, context);
 
         expect(persistence.operations.at(-1)).toBe('load');
     });
 
-    it('clears a refused session after a failed save rather than adopting the spent pair', async () => {
+    it('persists a pair a failed save left unsaved before asking the server again', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const error = new NetworkError('offline');
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+        api.refreshes.push({ kind: 'retryable', error });
+        persistence.saveFailure = new Error('quota');
+        await refreshSession(state, context);
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'retryable', error });
+        expect(api.refreshCalls).toStrictEqual(['refresh-a', 'refresh-b']);
+        expect(persistence.operations).toStrictEqual(['save@1:access-b', 'save@1:access-b']);
+        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: tokens('b') });
+
+        await hydrateSession(state, context);
+
+        expect(persistence.operations.at(-1)).toBe('load');
+    });
+
+    it('reports a pair that still cannot be persisted without asking the server', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const failure = new Error('still full');
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+        persistence.saveFailure = new Error('quota');
+        await refreshSession(state, context);
+        persistence.saveFailure = failure;
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'failed', error: failure });
+        expect(api.refreshCalls).toStrictEqual(['refresh-a']);
+        expect(state).toStrictEqual({ ...tokens('b'), user: ALICE });
+    });
+
+    it('adopts a newer session instead of persisting an unsaved pair, without asking the server', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+        persistence.saveFailure = new Error('quota');
+        await refreshSession(state, context);
+        persistence.write(tokens('c'));
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'refreshed' });
+        expect(api.refreshCalls).toStrictEqual(['refresh-a']);
+        expect(state).toStrictEqual({ ...tokens('c'), user: null });
+    });
+
+    it('asks the server once a queued hydration has persisted the unsaved pair', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const gate = deferred<undefined>();
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('c') });
+        persistence.saveFailure = new Error('quota');
+        await refreshSession(state, context);
+        persistence.saveGate = gate.promise;
+
+        const hydrate = hydrateSession(state, context);
+        const refresh = refreshSession(state, context);
+
+        gate.resolve(undefined);
+        await hydrate;
+
+        await expect(refresh).resolves.toStrictEqual({ kind: 'refreshed' });
+        expect(persistence.operations).toStrictEqual(['save@1:access-b', 'save@1:access-b', 'save@2:access-c']);
+    });
+
+    it('clears a refused session at the revision its retried save produced', async () => {
         const { state, api, persistence, context } = await signedIn(tokens('a'));
         api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
         api.refreshes.push(REJECTED);
@@ -900,8 +1088,8 @@ describe('refreshSession', () => {
 
         await expect(refreshSession(state, context)).resolves.toStrictEqual(REJECTED);
         expect(state).toStrictEqual(createInitialSessionState());
-        expect(persistence.operations).toStrictEqual(['save@1:access-b', 'clear@1']);
-        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: null });
+        expect(persistence.operations).toStrictEqual(['save@1:access-b', 'save@1:access-b', 'clear@2']);
+        expect(persistence.snapshot).toStrictEqual({ revision: 3, tokens: null });
     });
 
     it('adopts the session another context persisted while the rotation waited', async () => {
@@ -1023,12 +1211,16 @@ describe('refreshSession', () => {
         expect(persistence.operations).toStrictEqual(['clear@0', 'save@1:access-a']);
     });
 
-    it('still reports the rejection when persistence cannot be cleared, never re-adopting the refused pair', async () => {
+    it.each([
+        ['a rejection', REJECTED],
+        ['a return to pending', { kind: 'interactionRequired', pending: PENDING }],
+    ] as const)('reports a failure when persistence cannot be cleared on %s, never re-adopting the refused pair', async (_label, result) => {
         const { state, api, persistence, context } = await signedIn(tokens('a'));
-        persistence.clearFailure = new Error('unavailable');
-        api.refreshes.push(REJECTED);
+        const failure = new Error('unavailable');
+        persistence.clearFailure = failure;
+        api.refreshes.push(result);
 
-        await expect(refreshSession(state, context)).resolves.toStrictEqual(REJECTED);
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'failed', error: failure });
         expect(state).toStrictEqual(createInitialSessionState());
 
         await hydrateSession(state, context);
@@ -1166,6 +1358,26 @@ describe('refreshSession', () => {
         expect(persistence.operations).toStrictEqual(['clear@1', 'clear@1', 'clear@2']);
     });
 
+    it('is superseded by a sign-out while the refused session fails to clear', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const gate = deferred<undefined>();
+        api.refreshes.push(REJECTED);
+        persistence.clearGate = gate.promise;
+        persistence.clearFailure = new Error('unavailable');
+
+        const refresh = refreshSession(state, context);
+
+        await flush();
+        const logout = logoutSession(state, context);
+
+        gate.resolve(undefined);
+        await logout;
+
+        await expect(refresh).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: null });
+    });
+
     it.each([
         ['rotation', { kind: 'refreshed', tokens: tokens('b') }],
         ['refusal', REJECTED],
@@ -1237,6 +1449,73 @@ describe('logoutSession', () => {
         expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: tokens('b') });
     });
 
+    it('clears a rotation adopted from another context during the server call', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const response = deferred<undefined>();
+        api.logouts.push(response.promise);
+
+        const logout = logoutSession(state, context);
+
+        persistence.write(tokens('b'));
+        await hydrateSession(state, context);
+        response.resolve(undefined);
+        await logout;
+
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['load', 'clear@2']);
+        expect(persistence.snapshot).toStrictEqual({ revision: 3, tokens: null });
+    });
+
+    it('clears the session when a sign-in started during the server call ends pending', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const response = deferred<undefined>();
+        api.logouts.push(response.promise);
+        api.logins.push({ kind: 'interactionRequired', pending: PENDING });
+
+        const logout = logoutSession(state, context);
+
+        await loginWithCredentials(state, context, CREDENTIALS);
+        response.resolve(undefined);
+        await logout;
+
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.snapshot).toStrictEqual({ revision: 2, tokens: null });
+    });
+
+    it('leaves a sign-in started during the server call to land after the clear', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const login = deferred<LoginResult>();
+        api.logins.push(login.promise);
+        api.users.push(BOB);
+
+        const logout = logoutSession(state, context);
+        const signingIn = loginWithCredentials(state, context, CREDENTIALS);
+
+        await logout;
+        login.resolve({ kind: 'authenticated', tokens: tokens('b') });
+
+        await expect(signingIn).resolves.toStrictEqual({ kind: 'authenticated' });
+        expect(state).toStrictEqual({ ...tokens('b'), user: BOB });
+        expect(persistence.operations).toStrictEqual(['clear@1', 'save@2:access-b']);
+    });
+
+    it('clears a pair rotated during the server call', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const response = deferred<undefined>();
+        api.logouts.push(response.promise);
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+
+        const logout = logoutSession(state, context);
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'refreshed' });
+
+        response.resolve(undefined);
+        await logout;
+
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['save@1:access-b', 'clear@2']);
+    });
+
     it('propagates a persistence failure after clearing the state', async () => {
         const { state, persistence, context } = await signedIn(tokens('a'));
         persistence.clearFailure = new Error('unavailable');
@@ -1264,6 +1543,25 @@ describe('clearSession', () => {
         persistence.clearFailure = new Error('unavailable');
 
         await expect(clearSession(state, context)).rejects.toThrow('unavailable');
+    });
+
+    it('stops clearing over another context once a sign-in lands', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const gate = deferred<undefined>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('b') });
+        api.users.push(BOB);
+        persistence.clearGate = gate.promise;
+
+        const clear = clearSession(state, context);
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+        persistence.write(tokens('elsewhere'));
+        gate.resolve(undefined);
+        await clear;
+
+        await expect(login).resolves.toStrictEqual({ kind: 'authenticated' });
+        expect(persistence.operations).toStrictEqual(['clear@1', 'save@1:access-b', 'save@2:access-b']);
     });
 });
 
