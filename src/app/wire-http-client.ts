@@ -10,14 +10,22 @@
  * the error with request context; otherwise unexpected failures are captured
  * only. Module response-error handlers always run after the resolved handler,
  * in registry order, and the toast and reporting services are read lazily on
- * every invocation.
+ * every invocation. Each handler, and each step of the default handler, runs in
+ * isolation: a throwing step is captured and never skips the others. Reported
+ * URLs are stripped of their query string and fragment.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 
-import { FetchHttpClient } from '../http/fetch-http-client';
-import type { HttpClient, RequestInterceptor, ResponseErrorHandler, UnauthorizedHandler } from '../http/http-client';
+import { FetchHttpClient, stripQueryAndFragment } from '../http/fetch-http-client';
+import type {
+    HttpClient,
+    HttpRequest,
+    RequestInterceptor,
+    ResponseErrorHandler,
+    UnauthorizedHandler,
+} from '../http/http-client';
 import { HttpError, HttpValidationError } from '../http/http-error';
 import type { ModuleHttpContributions } from '../http/module-http-contributions';
 import { installApi, reporting, toasts } from './services';
@@ -120,10 +128,10 @@ function composeResponseErrorHandler<T extends FoundationConfig>(options: WireHt
     const moduleHandlers = options.contributions.responseErrorHandlers;
 
     return (error, request) => {
-        preset(error, request);
-
-        for (const handler of moduleHandlers) {
-            handler(error, request);
+        for (const handler of [preset, ...moduleHandlers]) {
+            runIsolated(request, () => {
+                handler(error, request);
+            });
         }
     };
 }
@@ -146,9 +154,54 @@ function createDefaultResponseErrorHandler(toastKey: string | undefined): Respon
         }
 
         if (toastKey !== undefined) {
-            toasts().error(toastKey);
+            runIsolated(request, () => {
+                toasts().error(toastKey);
+            });
         }
 
-        reporting().captureError(error, { source: 'http', method: request.method, url: request.url });
+        runIsolated(request, () => {
+            reporting().captureError(error, { source: 'http', ...describeRequest(request) });
+        });
     };
+}
+
+/**
+ * Run one response-error step, capturing a failure instead of letting it skip
+ * the remaining steps. A failure to capture is dropped, since the reporter is
+ * the only place left to send it.
+ *
+ * @param request - the failed request, for the failure's context
+ * @param step - the step to run
+ */
+function runIsolated(request: HttpRequest, step: () => void): void {
+    try {
+        step();
+    } catch (failure) {
+        try {
+            reporting().captureError(failure, { source: 'http-response-error-handler', ...describeRequest(request) });
+        } catch {
+            // The reporter is unavailable or failing; nothing is left to tell.
+        }
+    }
+}
+
+/**
+ * The request context attached to a report.
+ */
+interface ReportedRequest {
+    /** The request's HTTP method. */
+    readonly method: string;
+
+    /** The request URL without its query string or fragment. */
+    readonly url: string;
+}
+
+/**
+ * Describe a request for a report, without the query string or fragment.
+ *
+ * @param request - the failed request
+ * @returns the method and stripped URL
+ */
+function describeRequest(request: HttpRequest): ReportedRequest {
+    return { method: request.method, url: stripQueryAndFragment(request.url) };
 }
