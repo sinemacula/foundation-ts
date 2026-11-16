@@ -207,31 +207,36 @@ export class WebSocketConnection implements RealtimeConnection {
     }
 
     /**
-     * Open a fresh WebSocket and wire its lifecycle handlers. The state only
-     * moves to connecting once the socket exists, so a throwing `url()` builder
-     * or factory leaves it untouched.
+     * Open a fresh WebSocket and own it before announcing the connecting state,
+     * so a subscriber that disconnects in response closes it. A throwing
+     * `url()` builder or factory leaves the state untouched.
      */
     #openSocket(): void {
         const url = typeof this.#url === 'function' ? this.#url() : this.#url;
         const socket = this.#factory(url, this.#protocols);
 
-        this.#setState('connecting');
-
         socket.onopen = () => {
-            this.#attempt = 0;
-            this.#setState('open');
+            if (this.#socket === socket) {
+                this.#attempt = 0;
+                this.#setState('open');
+            }
         };
 
         socket.onmessage = (event: MessageEvent) => {
-            this.#dispatchFrame(String(event.data));
+            if (this.#socket === socket) {
+                this.#dispatchFrame(String(event.data));
+            }
         };
 
         socket.onclose = () => {
-            this.#socket = null;
-            this.#scheduleReconnect();
+            if (this.#socket === socket) {
+                this.#socket = null;
+                this.#scheduleReconnect();
+            }
         };
 
         this.#socket = socket;
+        this.#setState('connecting');
     }
 
     /**
@@ -273,18 +278,19 @@ export class WebSocketConnection implements RealtimeConnection {
     }
 
     /**
-     * Enter the connecting state and schedule the next reconnect after the
-     * backoff delay for the current attempt.
+     * Schedule the next reconnect after the backoff delay for the current
+     * attempt, then enter the connecting state. The timer is stored first so a
+     * subscriber that disconnects in response cancels it.
      */
     #scheduleReconnect(): void {
         const delay = this.#backoff.delayFor(this.#attempt++);
-
-        this.#setState('connecting');
 
         this.#reconnectTimer = setTimeout(() => {
             this.#reconnectTimer = undefined;
             void this.#runReconnect();
         }, delay);
+
+        this.#setState('connecting');
     }
 
     /**
@@ -317,16 +323,14 @@ export class WebSocketConnection implements RealtimeConnection {
     }
 
     /**
-     * Detach the lifecycle handlers from the active socket and close it.
+     * Release the active socket and close it. Ownership goes first, so its
+     * handlers ignore the close event and anything else it still delivers.
      */
     #closeSocket(): void {
-        if (this.#socket !== null) {
-            this.#socket.onopen = null;
-            this.#socket.onmessage = null;
-            this.#socket.onclose = null;
-            this.#socket.close();
-            this.#socket = null;
-        }
+        const socket = this.#socket;
+
+        this.#socket = null;
+        socket?.close();
     }
 
     /**

@@ -12,31 +12,6 @@ import { RealtimeError } from './realtime-error';
 import { describeRealtimeContract, type RealtimeContractHarness } from './test-support/realtime-connection-contract';
 import { WebSocketConnection, type WebSocketFactory } from './web-socket-connection';
 
-/** A promise plus its externally callable resolve. */
-interface Deferred<T> {
-    /** The controlled promise. */
-    readonly promise: Promise<T>;
-
-    /** Settle the promise successfully. */
-    readonly resolve: (value: T) => void;
-}
-
-/**
- * Create a promise whose resolution is controlled from the test body, for
- * gating a pending hook.
- *
- * @returns the promise and its resolve function
- */
-function deferred<T = void>(): Deferred<T> {
-    let resolve!: (value: T) => void;
-
-    const promise = new Promise<T>(res => {
-        resolve = res;
-    });
-
-    return { promise, resolve };
-}
-
 /** Minimal fake WebSocket for injection via the factory. */
 class FakeWebSocket {
     /** The URL the socket was opened with. */
@@ -524,40 +499,69 @@ describe('WebSocketConnection', () => {
         });
     });
 
-    describe('reconnect race', () => {
-        it('abandons a reconnect superseded by a disconnect and fresh connect, leaving one live socket', async () => {
-            const gate = deferred<void>();
+    describe('socket ownership', () => {
+        it('closes the new socket when a state subscriber disconnects as it starts connecting', () => {
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
+
+            conn.onStateChange(state => {
+                if (state === 'connecting') {
+                    conn.disconnect();
+                }
+            });
+            conn.connect();
+            sockets.at(0)?.emitOpen();
+
+            expect(sockets.at(0)?.closeCalls).toBe(1);
+            expect(conn.state).toBe('closed');
+        });
+
+        it('cancels the reconnect when a state subscriber disconnects as it is scheduled', async () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({
                 url: 'ws://test',
                 backoff: fixedBackoff(100),
-                beforeReconnect: () => gate.promise,
                 webSocketFactory: factory,
             });
 
             conn.connect();
             sockets.at(0)?.emitOpen();
+            conn.onStateChange(state => {
+                if (state === 'connecting') {
+                    conn.disconnect();
+                }
+            });
             sockets.at(0)?.emitClose();
 
-            // The backoff timer fires: the reconnect hook is now awaiting.
-            await vi.advanceTimersByTimeAsync(100);
-            expect(sockets).toHaveLength(1);
+            expect(vi.getTimerCount()).toBe(0);
 
-            // Tear down and reconnect while the hook is still pending.
+            await vi.advanceTimersByTimeAsync(10_000);
+
+            expect(sockets).toHaveLength(1);
+            expect(conn.state).toBe('closed');
+        });
+
+        it('ignores events from a socket it has released', () => {
+            const received: string[] = [];
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
+
+            conn.on('message', msg => received.push(msg.data));
+            conn.connect();
             conn.disconnect();
             conn.connect();
+
+            sockets.at(0)?.emitOpen();
+            sockets.at(0)?.emitMessage('stale');
+            sockets.at(0)?.emitClose();
+
+            expect(conn.state).toBe('connecting');
+            expect(received).toEqual([]);
+            expect(vi.getTimerCount()).toBe(0);
+
             sockets.at(1)?.emitOpen();
-            expect(sockets).toHaveLength(2);
-
-            // The stale reconnect settles: it must not open a third socket.
-            gate.resolve();
-            await gate.promise;
-
-            expect(sockets).toHaveLength(2);
-
-            // The socket the fresh connect opened is still the live one - the
-            // stale attempt neither replaced it nor detached its handlers.
             conn.send('ping');
+
             expect(sockets.at(1)?.sentMessages).toEqual(['ping']);
         });
     });
@@ -686,7 +690,10 @@ describe('WebSocketConnection', () => {
 
     describe('beforeReconnect resolving false', () => {
         it('abandons the attempt without opening a socket and retries through backoff', async () => {
-            const beforeReconnect = vi.fn<() => Promise<unknown>>().mockResolvedValueOnce(false).mockResolvedValue(true);
+            const beforeReconnect = vi
+                .fn<() => Promise<unknown>>()
+                .mockResolvedValueOnce(false)
+                .mockResolvedValue(true);
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({
                 url: 'ws://test',
