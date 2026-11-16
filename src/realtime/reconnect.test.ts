@@ -14,39 +14,39 @@ describe('runReconnect', () => {
         const reopen = vi.fn();
         const reschedule = vi.fn();
 
-        await runReconnect({ beforeReconnect: undefined, isClosed: () => false, reopen, reschedule });
+        await runReconnect({ beforeReconnect: undefined, isStale: () => false, reopen, reschedule });
 
         expect(reopen).toHaveBeenCalledOnce();
         expect(reschedule).not.toHaveBeenCalled();
     });
 
-    it('reopens after the hook resolves when still open', async () => {
+    it('reopens after the hook resolves when the attempt is still current', async () => {
         const reopen = vi.fn();
         const reschedule = vi.fn();
 
-        await runReconnect({ beforeReconnect: () => Promise.resolve(), isClosed: () => false, reopen, reschedule });
+        await runReconnect({ beforeReconnect: () => Promise.resolve(), isStale: () => false, reopen, reschedule });
 
         expect(reopen).toHaveBeenCalledOnce();
         expect(reschedule).not.toHaveBeenCalled();
     });
 
-    it('does not reopen when the connection closed while the hook was pending', async () => {
+    it('does not reopen when the attempt was superseded while the hook was pending', async () => {
         const reopen = vi.fn();
         const reschedule = vi.fn();
 
-        await runReconnect({ beforeReconnect: () => Promise.resolve(), isClosed: () => true, reopen, reschedule });
+        await runReconnect({ beforeReconnect: () => Promise.resolve(), isStale: () => true, reopen, reschedule });
 
         expect(reopen).not.toHaveBeenCalled();
         expect(reschedule).not.toHaveBeenCalled();
     });
 
-    it('reschedules when the hook rejects and the connection is still open', async () => {
+    it('reschedules when the hook rejects and the attempt is still current', async () => {
         const reopen = vi.fn();
         const reschedule = vi.fn();
 
         await runReconnect({
             beforeReconnect: () => Promise.reject(new Error('refresh failed')),
-            isClosed: () => false,
+            isStale: () => false,
             reopen,
             reschedule,
         });
@@ -55,13 +55,13 @@ describe('runReconnect', () => {
         expect(reopen).not.toHaveBeenCalled();
     });
 
-    it('does not reschedule when the hook rejects after the connection closed', async () => {
+    it('does not reschedule when the hook rejects after the attempt was superseded', async () => {
         const reopen = vi.fn();
         const reschedule = vi.fn();
 
         await runReconnect({
             beforeReconnect: () => Promise.reject(new Error('refresh failed')),
-            isClosed: () => true,
+            isStale: () => true,
             reopen,
             reschedule,
         });

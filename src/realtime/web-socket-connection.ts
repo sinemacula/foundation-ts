@@ -92,6 +92,9 @@ export class WebSocketConnection implements RealtimeConnection {
     /** The pending reconnect timer, or null when none. */
     #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
+    /** Advanced on every disconnect so a reconnect attempt whose beforeReconnect hook is still pending across the disconnect can detect it has been superseded and abandon itself, rather than racing the socket a later connect() opened. */
+    #generation: number = 0;
+
     /**
      * Construct a new WebSocket connection.
      *
@@ -128,6 +131,7 @@ export class WebSocketConnection implements RealtimeConnection {
      * Close the connection permanently, cancelling any pending reconnect.
      */
     disconnect(): void {
+        this.#generation += 1;
         this.#cancelReconnect();
         this.#closeSocket();
         this.#setState('closed');
@@ -268,12 +272,17 @@ export class WebSocketConnection implements RealtimeConnection {
     /**
      * Run one reconnect attempt, awaiting the optional beforeReconnect hook
      * first. A disconnect that lands while the hook is pending must leave no
-     * trace once it settles, so the closed state is re-checked afterwards.
+     * trace once it settles, so the generation captured at the start of the
+     * attempt is re-checked afterwards.
      */
     async #runReconnect(): Promise<void> {
+        const generation = this.#generation;
+
         await runReconnect({
             beforeReconnect: this.#beforeReconnect,
-            isClosed: () => this.#state === 'closed',
+            // A disconnect only ever advances the generation, so a higher live
+            // value means this attempt has been superseded.
+            isStale: () => this.#generation > generation,
             reopen: () => this.#openSocket(),
             reschedule: () => this.#scheduleReconnect(),
         });

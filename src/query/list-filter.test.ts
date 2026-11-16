@@ -290,6 +290,54 @@ describe('filter', () => {
 
             expect(parsedFilters(q)).toEqual(wire([['$or', wire([['email', wire([['$like', 'test']])]])]]));
         });
+
+        it('matches every field when several target the same relation', () => {
+            const q = filter
+                .searchAcross(['author.first_name', 'author.last_name'])
+                .apply(ApiQuery.create(), 'alice');
+
+            expect(parsedFilters(q)).toEqual(
+                wire([
+                    [
+                        '$or',
+                        wire([
+                            [
+                                'author',
+                                wire([
+                                    ['first_name', wire([['$like', 'alice']])],
+                                    ['last_name', wire([['$like', 'alice']])],
+                                ]),
+                            ],
+                        ]),
+                    ],
+                ]),
+            );
+        });
+
+        it('matches every field when several target the same deeply nested relation', () => {
+            const q = filter
+                .searchAcross(['posts.author.first_name', 'posts.author.last_name'])
+                .apply(ApiQuery.create(), 'bob');
+
+            expect(parsedFilters(q)).toEqual(
+                wire([
+                    [
+                        '$or',
+                        wire([
+                            [
+                                'posts',
+                                {
+                                    author: wire([
+                                        ['first_name', wire([['$like', 'bob']])],
+                                        ['last_name', wire([['$like', 'bob']])],
+                                    ]),
+                                },
+                            ],
+                        ]),
+                    ],
+                ]),
+            );
+        });
     });
 
     // -------------------------------------------------------------------------

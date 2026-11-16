@@ -13,6 +13,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
+import { HttpError } from '../http/http-error';
 import type { KeyValueStorage } from '../storage/key-value-storage';
 import type { SessionApi, SessionDevice } from './session-api';
 import type { SessionState } from './session-state';
@@ -91,8 +92,11 @@ export async function loginWithCredentials(
  *
  * @param state - the mutable session state
  * @param context - the session core context
- * @returns true when the session was refreshed; false (with the session
- * cleared) when no refresh token exists or the request fails
+ * @returns true when the session was refreshed; false when no refresh token
+ * exists or the refresh fails. A failed refresh clears the session only when the
+ * server authoritatively rejects the refresh token (a 401 or 403 response); a
+ * transport failure or a cancellation leaves the tokens in place so a later
+ * attempt can still succeed.
  */
 export async function refreshSession(state: SessionState, context: SessionCoreContext): Promise<boolean> {
     if (state.refreshToken === null) {
@@ -103,11 +107,26 @@ export async function refreshSession(state: SessionState, context: SessionCoreCo
         applySession(state, context, await context.api.refresh(state.refreshToken));
 
         return true;
-    } catch {
-        clearSession(state, context);
+    } catch (error) {
+        // Only the server refusing the token clears the session; a transient
+        // failure (offline or timeout) must not force a logout.
+        if (isRefreshRejected(error)) {
+            clearSession(state, context);
+        }
 
         return false;
     }
+}
+
+/**
+ * Report whether a refresh rejection is the server authoritatively refusing the
+ * refresh token, as opposed to a transport failure or a cancellation.
+ *
+ * @param error - the rejection thrown by the refresh call
+ * @returns true when the error is a 401 or 403 HTTP response
+ */
+function isRefreshRejected(error: unknown): boolean {
+    return error instanceof HttpError && (error.status === 401 || error.status === 403);
 }
 
 /**

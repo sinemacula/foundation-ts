@@ -15,8 +15,8 @@ export interface ReconnectSteps {
     /** The optional pre-reconnect hook, for example a token refresh. */
     readonly beforeReconnect: (() => Promise<void>) | undefined;
 
-    /** Report whether the connection has since been closed. */
-    readonly isClosed: () => boolean;
+    /** Report whether this attempt has been superseded since it began - for example by a disconnect while the hook was still pending. */
+    readonly isStale: () => boolean;
 
     /** Open a fresh transport. */
     readonly reopen: () => void;
@@ -29,7 +29,10 @@ export interface ReconnectSteps {
  * Run one reconnect attempt, awaiting the optional beforeReconnect hook first.
  *
  * A disconnect that lands while the hook is pending must leave no trace once it
- * settles, so the closed state is re-checked before reopening or rescheduling.
+ * settles, so staleness is re-checked before reopening or rescheduling. A
+ * closed-state check is not enough: a disconnect followed by a fresh connect
+ * leaves the connection open again, so the attempt tracks a generation token
+ * that the disconnect advances rather than reading the live state.
  *
  * @param steps - the transport-specific reconnect callbacks
  */
@@ -43,14 +46,14 @@ export async function runReconnect(steps: ReconnectSteps): Promise<void> {
     try {
         await steps.beforeReconnect();
     } catch {
-        if (!steps.isClosed()) {
+        if (!steps.isStale()) {
             steps.reschedule();
         }
 
         return;
     }
 
-    if (!steps.isClosed()) {
+    if (!steps.isStale()) {
         steps.reopen();
     }
 }

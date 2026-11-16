@@ -7,6 +7,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import { CancelledError, HttpError, NetworkError } from '../http/http-error';
 import { MemoryStorage } from '../storage/memory-storage';
 import type { SessionApi, SessionDevice } from './session-api';
 import type { SessionCoreContext } from './session-core';
@@ -322,6 +323,36 @@ describe('session core', () => {
     });
 
     describe('refreshSession', () => {
+        /** A signed-in session persisted to storage, ready for a refresh attempt. */
+        function signedIn(): SessionState {
+            storage.set(ACCESS_TOKEN_KEY, 'old-token');
+            storage.set(REFRESH_TOKEN_KEY, 'old-refresh');
+            storage.set(EXPIRES_AT_KEY, '1782820800000');
+
+            return { accessToken: 'old-token', refreshToken: 'old-refresh', expiresAtEpochMs: 1_782_820_800_000, user: user() };
+        }
+
+        /** Assert the persisted session survived a transient failure untouched. */
+        function expectSessionKept(state: SessionState): void {
+            expect(state).toStrictEqual({
+                accessToken: 'old-token',
+                refreshToken: 'old-refresh',
+                expiresAtEpochMs: 1_782_820_800_000,
+                user: user(),
+            });
+            expect(storage.get(ACCESS_TOKEN_KEY)).toBe('old-token');
+            expect(storage.get(REFRESH_TOKEN_KEY)).toBe('old-refresh');
+            expect(storage.get(EXPIRES_AT_KEY)).toBe('1782820800000');
+        }
+
+        /** Assert the session was fully cleared from state and storage. */
+        function expectSessionCleared(state: SessionState): void {
+            expect(state).toStrictEqual(emptyState());
+            expect(storage.get(ACCESS_TOKEN_KEY)).toBeNull();
+            expect(storage.get(REFRESH_TOKEN_KEY)).toBeNull();
+            expect(storage.get(EXPIRES_AT_KEY)).toBeNull();
+        }
+
         it('returns false immediately when no refresh token is in state', async () => {
             const result = await refreshSession(emptyState(), context());
 
@@ -345,25 +376,50 @@ describe('session core', () => {
             expect(storage.get(EXPIRES_AT_KEY)).toBe('1798761599000');
         });
 
-        it('clears the session and returns false when the refresh request fails', async () => {
-            storage.set(ACCESS_TOKEN_KEY, 'old-token');
-            storage.set(REFRESH_TOKEN_KEY, 'old-refresh');
-            storage.set(EXPIRES_AT_KEY, '1782820800000');
-            fake.queueSession(new Error('401 Unauthorized'));
+        it('clears the session and returns false when the server rejects the token with 401', async () => {
+            fake.queueSession(new HttpError(401, 'Unauthorized'));
 
-            const state: SessionState = {
-                accessToken: 'old-token',
-                refreshToken: 'old-refresh',
-                expiresAtEpochMs: 1_782_820_800_000,
-                user: user(),
-            };
+            const state = signedIn();
             const result = await refreshSession(state, context());
 
             expect(result).toBe(false);
-            expect(state).toStrictEqual(emptyState());
-            expect(storage.get(ACCESS_TOKEN_KEY)).toBeNull();
-            expect(storage.get(REFRESH_TOKEN_KEY)).toBeNull();
-            expect(storage.get(EXPIRES_AT_KEY)).toBeNull();
+            expectSessionCleared(state);
+        });
+
+        it('clears the session and returns false when the server rejects the token with 403', async () => {
+            fake.queueSession(new HttpError(403, 'Forbidden'));
+
+            const state = signedIn();
+
+            expect(await refreshSession(state, context())).toBe(false);
+            expectSessionCleared(state);
+        });
+
+        it('keeps the session and returns false when a proactive refresh fails offline', async () => {
+            fake.queueSession(new NetworkError('offline'));
+
+            const state = signedIn();
+
+            expect(await refreshSession(state, context())).toBe(false);
+            expectSessionKept(state);
+        });
+
+        it('keeps the session and returns false when the refresh is cancelled by a timeout', async () => {
+            fake.queueSession(new CancelledError('request timed out'));
+
+            const state = signedIn();
+
+            expect(await refreshSession(state, context())).toBe(false);
+            expectSessionKept(state);
+        });
+
+        it('keeps the session and returns false when the server errors without rejecting the token', async () => {
+            fake.queueSession(new HttpError(500, 'Server error'));
+
+            const state = signedIn();
+
+            expect(await refreshSession(state, context())).toBe(false);
+            expectSessionKept(state);
         });
     });
 

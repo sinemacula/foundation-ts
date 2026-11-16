@@ -7,8 +7,20 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ExponentialBackoff } from './exponential-backoff';
 import { describeRealtimeContract, type RealtimeContractHarness } from './test-support/realtime-connection-contract';
 import { WebSocketConnection, type WebSocketFactory } from './web-socket-connection';
+
+/** A promise plus its externally callable resolve, for gating a pending hook. */
+function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+    let resolve!: (value: T) => void;
+
+    const promise = new Promise<T>(res => {
+        resolve = res;
+    });
+
+    return { promise, resolve };
+}
 
 /** Minimal fake WebSocket for injection via the factory. */
 class FakeWebSocket {
@@ -421,6 +433,44 @@ describe('WebSocketConnection', () => {
             conn.disconnect();
 
             expect(() => conn.send('msg')).toThrow('Cannot send: WebSocket is not open.');
+        });
+    });
+
+    describe('reconnect race', () => {
+        it('abandons a reconnect superseded by a disconnect and fresh connect, leaving one live socket', async () => {
+            const gate = deferred<void>();
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({
+                url: 'ws://test',
+                backoff: new ExponentialBackoff({ initialDelay: 100, multiplier: 1, maxDelay: 100 }),
+                beforeReconnect: () => gate.promise,
+                webSocketFactory: factory,
+            });
+
+            conn.connect();
+            sockets.at(0)?.emitOpen();
+            sockets.at(0)?.emitClose();
+
+            // The backoff timer fires: the reconnect hook is now awaiting.
+            await vi.advanceTimersByTimeAsync(100);
+            expect(sockets).toHaveLength(1);
+
+            // Tear down and reconnect while the hook is still pending.
+            conn.disconnect();
+            conn.connect();
+            sockets.at(1)?.emitOpen();
+            expect(sockets).toHaveLength(2);
+
+            // The stale reconnect settles: it must not open a third socket.
+            gate.resolve();
+            await gate.promise;
+
+            expect(sockets).toHaveLength(2);
+
+            // The socket the fresh connect opened is still the live one - the
+            // stale attempt neither replaced it nor detached its handlers.
+            conn.send('ping');
+            expect(sockets.at(1)?.sentMessages).toEqual(['ping']);
         });
     });
 });

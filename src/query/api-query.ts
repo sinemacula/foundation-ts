@@ -23,6 +23,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
+import { isRecord } from '../support/is-record';
 import type { QueryParameters } from '../http/http-client';
 import type { FilterOperators, FilterScalar, FilterTree } from './filter-expression';
 
@@ -112,7 +113,7 @@ const EMPTY_STATE: QueryState = {
  * @returns the merged or replaced operator map
  */
 function mergeOperators(existing: unknown, patch: FilterOperators): FilterOperators {
-    if (existing !== null && typeof existing === 'object' && !Array.isArray(existing)) {
+    if (isRecord(existing)) {
         return { ...(existing as FilterOperators), ...patch };
     }
 
@@ -131,21 +132,33 @@ function operatorPatch(operator: string, value: unknown): FilterOperators {
 }
 
 /**
- * Merge a nested object map entry.
+ * Recursively merge a relation sub-tree into the existing relation entry.
  *
- * Used to combine repeated `$and` / `$or` group calls and `$has` / `$hasnt`
- * named-form calls into a single object rather than overwriting.
+ * Record nodes under the same key merge field by field, so repeated conditions
+ * on a relation accumulate at any depth instead of the later call replacing the
+ * earlier - the toolkit allows each field only once inside a relation object,
+ * so accumulation must merge into that one object. A non-record collision (a
+ * scalar, or an array such as a `$has` list or `$in` operand) is replaced by
+ * the incoming value, matching repeated writes on a plain field.
  *
- * @param existing - the current value stored under the group key
- * @param patch - the new fields to add into the group
- * @returns the merged group object
+ * @param existing - the current value stored under the relation key
+ * @param patch - the sub-tree to merge in
+ * @returns the deeply merged sub-tree
  */
-function mergeGroup(existing: unknown, patch: FilterTree): FilterTree {
-    if (existing !== null && typeof existing === 'object' && !Array.isArray(existing)) {
-        return { ...(existing as FilterTree), ...patch };
+function deepMergeTree(existing: unknown, patch: FilterTree): FilterTree {
+    if (!isRecord(existing)) {
+        return patch;
     }
 
-    return patch;
+    const merged: Record<string, unknown> = { ...existing };
+
+    for (const [key, value] of Object.entries(patch)) {
+        const current = merged[key];
+
+        merged[key] = isRecord(current) && isRecord(value) ? deepMergeTree(current, value) : value;
+    }
+
+    return merged;
 }
 
 /**
@@ -277,6 +290,10 @@ export class ApiQuery {
      * // → { posts: { published: true } }
      * ```
      *
+     * Repeated calls for the same relation deep-merge their filter trees into
+     * the existing entry rather than replacing it, so conditions on a nested
+     * relation path (as `searchAcross` builds) all survive at any depth.
+     *
      * @param relation - the relation name
      * @param build - callback that receives a fresh query and returns the built
      * query
@@ -285,7 +302,7 @@ export class ApiQuery {
     whereRelation(relation: string, build: (query: ApiQuery) => ApiQuery): ApiQuery {
         const sub = build(ApiQuery.create());
 
-        return this.#withFilter(relation, sub.#state.filters);
+        return this.#withMergedFilter(relation, sub.#state.filters);
     }
 
     /**
@@ -323,8 +340,9 @@ export class ApiQuery {
     /**
      * Add an `$and` group containing the filters built by `build`.
      *
-     * Repeated calls merge into the existing `$and` object rather than
-     * replacing it.
+     * Repeated calls merge deeply into the existing `$and` object rather than
+     * replacing it, so conditions the calls place on the same nested relation
+     * accumulate.
      *
      * @param build - callback that receives a fresh query and returns the built
      * query
@@ -332,16 +350,16 @@ export class ApiQuery {
      */
     andWhere(build: (query: ApiQuery) => ApiQuery): ApiQuery {
         const sub = build(ApiQuery.create());
-        const merged = mergeGroup(this.#state.filters['$and'], sub.#state.filters);
 
-        return this.#withFilter('$and', merged);
+        return this.#withMergedFilter('$and', sub.#state.filters);
     }
 
     /**
      * Add an `$or` group containing the filters built by `build`.
      *
-     * Repeated calls merge into the existing `$or` object rather than replacing
-     * it.
+     * Repeated calls merge deeply into the existing `$or` object rather than
+     * replacing it, so conditions the calls place on the same nested relation
+     * accumulate.
      *
      * @param build - callback that receives a fresh query and returns the built
      * query
@@ -349,9 +367,8 @@ export class ApiQuery {
      */
     orWhere(build: (query: ApiQuery) => ApiQuery): ApiQuery {
         const sub = build(ApiQuery.create());
-        const merged = mergeGroup(this.#state.filters['$or'], sub.#state.filters);
 
-        return this.#withFilter('$or', merged);
+        return this.#withMergedFilter('$or', sub.#state.filters);
     }
 
     // -------------------------------------------------------------------------
@@ -684,12 +701,29 @@ export class ApiQuery {
     }
 
     /**
+     * Return a new `ApiQuery` with `patch` deeply merged into the sub-tree
+     * already stored under `field`.
+     *
+     * Shared by the relation, logical-group, and existence builders so repeated
+     * conditions on the same key accumulate at any depth rather than the later
+     * call replacing the earlier.
+     *
+     * @param field - the filter tree key
+     * @param patch - the sub-tree to merge into the current value
+     * @returns a new `ApiQuery` with the merged sub-tree stored under `field`
+     */
+    #withMergedFilter(field: string, patch: FilterTree): ApiQuery {
+        return this.#withFilter(field, deepMergeTree(this.#state.filters[field], patch));
+    }
+
+    /**
      * Apply a `$has` or `$hasnt` condition.
      *
      * Bare relations (no build callback) are tracked separately so that when
      * the first conditioned relation is added, all bare relations are promoted
      * to the object form with `{}` entries. Once the object form is in use,
-     * subsequent bare additions also use `{}`.
+     * subsequent bare additions also use `{}`, and conditions asserted again on
+     * a relation already present merge into its entry rather than replacing it.
      *
      * @param key - either `'$has'` or `'$hasnt'`
      * @param relation - the relation name
@@ -702,12 +736,9 @@ export class ApiQuery {
 
         // If the existing value is already an object (named form), stay in that
         // form. Bare additions use {} as their condition entry; conditioned
-        // additions use their tree.
-        if (existing !== null && typeof existing === 'object' && !Array.isArray(existing)) {
-            const entry: FilterTree = conditionTree ?? {};
-            const merged = { ...(existing as FilterTree), [relation]: entry };
-
-            return this.#withFilter(key, merged);
+        // additions merge their tree into any entry already present.
+        if (isRecord(existing)) {
+            return this.#withMergedFilter(key, { [relation]: conditionTree ?? {} });
         }
 
         // No existing entry: bare relation starts the array form.

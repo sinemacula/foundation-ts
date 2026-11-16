@@ -318,6 +318,103 @@ describe('ApiQuery', () => {
                 ]),
             );
         });
+
+        it('merges repeated calls on the same relation rather than replacing', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .whereRelation('author', q => q.where('first_name', '$like', 'a'))
+                    .whereRelation('author', q => q.where('last_name', '$like', 'a')),
+            );
+
+            expect(result).toEqual(
+                wire([
+                    [
+                        'author',
+                        wire([
+                            ['first_name', wire([['$like', 'a']])],
+                            ['last_name', wire([['$like', 'a']])],
+                        ]),
+                    ],
+                ]),
+            );
+        });
+
+        it('replaces a scalar collision on the relation key rather than merging into it', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .where('author', 'stray')
+                    .whereRelation('author', q => q.where('name', 'Alice')),
+            );
+
+            expect(result).toEqual(wire([['author', wire([['name', 'Alice']])]]));
+        });
+
+        it('merges repeated calls that target the same nested relation at any depth', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .whereRelation('posts', p => p.whereRelation('author', a => a.where('first_name', '$like', 'x')))
+                    .whereRelation('posts', p => p.whereRelation('author', a => a.where('last_name', '$like', 'x'))),
+            );
+
+            expect(result).toEqual(
+                wire([
+                    [
+                        'posts',
+                        {
+                            author: wire([
+                                ['first_name', wire([['$like', 'x']])],
+                                ['last_name', wire([['$like', 'x']])],
+                            ]),
+                        },
+                    ],
+                ]),
+            );
+        });
+
+        it('merges operator maps on the same relation field across separate calls', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .whereRelation('author', a => a.where('age', '$ge', 18))
+                    .whereRelation('author', a => a.where('age', '$le', 65)),
+            );
+
+            expect(result).toEqual(
+                wire([
+                    [
+                        'author',
+                        wire([
+                            [
+                                'age',
+                                wire([
+                                    ['$ge', 18],
+                                    ['$le', 65],
+                                ]),
+                            ],
+                        ]),
+                    ],
+                ]),
+            );
+        });
+
+        it('replaces an earlier operator map on a relation field with a later scalar', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .whereRelation('author', a => a.where('bio', '$like', 'x'))
+                    .whereRelation('author', a => a.where('bio', 'exact')),
+            );
+
+            expect(result).toEqual(wire([['author', wire([['bio', 'exact']])]]));
+        });
+
+        it('replaces an array operand on a relation field rather than concatenating it', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .whereRelation('author', a => a.whereIn('role', ['admin']))
+                    .whereRelation('author', a => a.whereIn('role', ['editor'])),
+            );
+
+            expect(result).toEqual(wire([['author', wire([['role', wire([['$in', ['editor']]])]])]]));
+        });
     });
 
     // -------------------------------------------------------------------------
@@ -401,6 +498,31 @@ describe('ApiQuery', () => {
                 ]),
             );
         });
+
+        it('merges conditions when the same relation is asserted twice', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .whereHas('posts', q => q.where('published', true))
+                    .whereHas('posts', q => q.where('featured', true)),
+            );
+
+            expect(result).toEqual(
+                wire([
+                    [
+                        '$has',
+                        wire([
+                            [
+                                'posts',
+                                wire([
+                                    ['published', true],
+                                    ['featured', true],
+                                ]),
+                            ],
+                        ]),
+                    ],
+                ]),
+            );
+        });
     });
 
     describe('whereHasNot', () => {
@@ -430,6 +552,31 @@ describe('ApiQuery', () => {
                         wire([
                             ['comments', {}],
                             ['posts', wire([['spam', true]])],
+                        ]),
+                    ],
+                ]),
+            );
+        });
+
+        it('merges conditions when the same relation is refused twice', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .whereHasNot('posts', q => q.where('spam', true))
+                    .whereHasNot('posts', q => q.where('flagged', true)),
+            );
+
+            expect(result).toEqual(
+                wire([
+                    [
+                        '$hasnt',
+                        wire([
+                            [
+                                'posts',
+                                wire([
+                                    ['spam', true],
+                                    ['flagged', true],
+                                ]),
+                            ],
                         ]),
                     ],
                 ]),
@@ -488,6 +635,28 @@ describe('ApiQuery', () => {
                 ]),
             );
         });
+
+        it('deep-merges repeated calls that nest the same relation', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .andWhere(q => q.whereRelation('author', a => a.where('first_name', '$like', 'x')))
+                    .andWhere(q => q.whereRelation('author', a => a.where('last_name', '$like', 'x'))),
+            );
+
+            expect(result).toEqual(
+                wire([
+                    [
+                        '$and',
+                        {
+                            author: wire([
+                                ['first_name', wire([['$like', 'x']])],
+                                ['last_name', wire([['$like', 'x']])],
+                            ]),
+                        },
+                    ],
+                ]),
+            );
+        });
     });
 
     describe('orWhere', () => {
@@ -524,6 +693,28 @@ describe('ApiQuery', () => {
                             ['name', wire([['$like', 'alice']])],
                             ['email', wire([['$like', 'alice']])],
                         ]),
+                    ],
+                ]),
+            );
+        });
+
+        it('deep-merges repeated calls that nest the same relation', () => {
+            const result = parsedFilters(
+                ApiQuery.create()
+                    .orWhere(q => q.whereRelation('author', a => a.where('first_name', '$like', 'x')))
+                    .orWhere(q => q.whereRelation('author', a => a.where('last_name', '$like', 'x'))),
+            );
+
+            expect(result).toEqual(
+                wire([
+                    [
+                        '$or',
+                        {
+                            author: wire([
+                                ['first_name', wire([['$like', 'x']])],
+                                ['last_name', wire([['$like', 'x']])],
+                            ]),
+                        },
                     ],
                 ]),
             );
