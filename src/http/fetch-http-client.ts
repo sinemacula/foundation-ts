@@ -383,7 +383,7 @@ export class FetchHttpClient implements HttpClient {
      * @param request - the fully-resolved request to send
      * @param sendRequest - the request descriptor, carrying the caller signal
      * and parse mode
-     * @returns the parsed response body on success
+     * @returns the parsed response body, typed as the caller declared it
      */
     async #exchange<T>(request: HttpRequest, sendRequest: SendRequest): Promise<T> {
         const scope = openAbortScope(this.#timeout, sendRequest.options?.signal);
@@ -397,7 +397,7 @@ export class FetchHttpClient implements HttpClient {
                 throw toResponseError(response.status, text);
             }
 
-            return await this.#parseResponseBody<T>(response, request, scope, sendRequest.parse);
+            return (await this.#parseResponseBody(response, request, scope, sendRequest.parse)) as T;
         } finally {
             scope.dispose();
         }
@@ -515,40 +515,28 @@ export class FetchHttpClient implements HttpClient {
      * falls back to raw text, or undefined for an empty body
      * @returns the parsed payload, matching the requested parse mode
      */
-    async #parseResponseBody<T>(
+    async #parseResponseBody(
         response: Response,
         request: HttpRequest,
         scope: AbortScope,
         parse: BodyParseMode,
-    ): Promise<T> {
+    ): Promise<unknown> {
         if (parse === 'blob') {
-            // Cast justified: 'blob' mode is only selected by
-            // FetchHttpClient#download, whose public signature guarantees T is
-            // Blob.
-            return (await this.#readBody(response, request, scope, read => read.blob())) as T;
+            return await this.#readBody(response, request, scope, read => read.blob());
         }
 
         const text = await this.#readBody(response, request, scope, read => read.text());
 
         if (text === '') {
-            // Caller-declared response typing is the port's contract; an empty
-            // body maps to undefined which callers type as void or undefined
-            // explicitly.
-            return undefined as T;
+            return undefined;
         }
 
         if (!isJsonResponse(response)) {
-            // Caller-declared response typing is the port's contract; the
-            // caller types plain-text responses as string when using a non-JSON
-            // endpoint.
-            return text as T;
+            return text;
         }
 
         try {
-            // Caller-declared response typing is the port's contract;
-            // validation happens at module gateway boundaries, not inside the
-            // transport.
-            return JSON.parse(text) as T;
+            return JSON.parse(text);
         } catch (error) {
             throw new ResponseParseError(
                 response.status,
