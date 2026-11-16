@@ -481,8 +481,9 @@ export class ApiQuery {
      * Append a sort entry for `column`.
      *
      * If `column` already appears in the order list its previous entry is
-     * removed before the new entry is appended at the end. Any cursor is
-     * cleared, as a cursor only seeks within the order it was issued for.
+     * removed before the new entry is appended at the end. Any cursor token is
+     * dropped, as it only seeks within the order it was issued for, but a
+     * cursor-paginated query stays cursor-paginated.
      *
      * @param column - the column name to sort by
      * @param direction - sort direction; defaults to `'asc'`
@@ -490,9 +491,14 @@ export class ApiQuery {
      * @throws {@link QueryError} when random order meets cursor pagination
      */
     orderBy(column: string, direction: SortDirection = 'asc'): ApiQuery {
-        const order = [...this.#state.order.filter(e => e.column !== column), { column, direction }];
+        const { order, cursorToken, cursorPagination } = this.#state;
 
-        return ApiQuery.#guarded({ ...this.#state, order, cursorToken: undefined });
+        return ApiQuery.#guarded({
+            ...this.#state,
+            order: [...order.filter(e => e.column !== column), { column, direction }],
+            cursorToken: undefined,
+            cursorPagination: cursorPagination || cursorToken !== undefined,
+        });
     }
 
     /**

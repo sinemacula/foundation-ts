@@ -842,6 +842,18 @@ describe('ApiQuery', () => {
 
             expect(query.toQueryParameters()).toEqual({ order: 'name', pagination: 'cursor' });
         });
+
+        it('keeps a query paginated by a cursor token alone in cursor mode', () => {
+            const query = ApiQuery.create().cursor('tok').orderBy('name');
+
+            expect(query.toQueryParameters()).toEqual({ order: 'name', pagination: 'cursor' });
+        });
+
+        it('leaves an offset-paginated query offset-paginated', () => {
+            const query = ApiQuery.create().page(2).orderBy('name');
+
+            expect(query.toQueryParameters()).toEqual({ order: 'name', page: 2 });
+        });
     });
 
     describe('orderByRandom', () => {
@@ -863,10 +875,10 @@ describe('ApiQuery', () => {
             expect(params['order']).toBe('random');
         });
 
-        it('drops a cursor token and stays offset-paginated', () => {
-            const query = ApiQuery.create().cursor('tok').orderByRandom();
-
-            expect(query.toQueryParameters()).toEqual({ order: 'random' });
+        it('refuses random order on a query paginated by a cursor token', () => {
+            expect(() => ApiQuery.create().cursor('tok').orderByRandom()).toThrow(
+                new QueryError('Random order cannot be combined with cursor pagination.'),
+            );
         });
 
         it('refuses random order under forced cursor pagination', () => {
