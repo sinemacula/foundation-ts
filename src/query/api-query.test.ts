@@ -620,6 +620,68 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"$hasnt":{"comments":{"approved":false},"posts":{}}}');
         });
 
+        it('lets a bare relation absorb conditioned documents already separated into $and', () => {
+            const query = ApiQuery.create()
+                .whereHasNot('posts', q => q.where('spam', true))
+                .whereHasNot('posts', q => q.where('flagged', true))
+                .whereHasNot('posts');
+
+            expect(filtersParam(query)).toBe('{"$hasnt":["posts"]}');
+        });
+
+        it('keeps the other $and documents when a bare relation absorbs a separated one', () => {
+            const query = ApiQuery.create()
+                .andWhere([q => q.where('status', 'active').whereHasNot('posts', p => p.where('draft', true))])
+                .whereHasNot('posts', q => q.where('spam', true))
+                .whereHasNot('posts', q => q.where('flagged', true))
+                .whereHasNot('comments', q => q.where('approved', false))
+                .whereHasNot('comments', q => q.where('hidden', true))
+                .whereHasNot('posts');
+
+            expect(filtersParam(query)).toBe(
+                '{"$and":[{"status":"active","$hasnt":{"posts":{"draft":true}}},{"$hasnt":{"comments":{"hidden":true}}}],"$hasnt":{"posts":{},"comments":{"approved":false}}}',
+            );
+        });
+
+        it('keeps an $and document that also refuses a relation the bare one leaves conditioned', () => {
+            const query = ApiQuery.create()
+                .andWhere([
+                    q => q.whereHasNot('posts', p => p.where('spam', true)).whereHasNot('tags', t => t.where('x', 1)),
+                ])
+                .whereHasNot('posts');
+
+            expect(filtersParam(query)).toBe(
+                '{"$and":[{"$hasnt":{"posts":{"spam":true},"tags":{"x":1}}}],"$hasnt":["posts"]}',
+            );
+        });
+
+        it('keeps separated documents when another conditioned one arrives', () => {
+            const query = ApiQuery.create()
+                .whereHasNot('posts', q => q.where('spam', true))
+                .whereHasNot('posts', q => q.where('flagged', true))
+                .whereHasNot('posts', q => q.where('draft', true));
+
+            expect(filtersParam(query)).toBe(
+                '{"$hasnt":{"posts":{"spam":true}},"$and":[{"$hasnt":{"posts":{"flagged":true}}},{"$hasnt":{"posts":{"draft":true}}}]}',
+            );
+        });
+
+        it('leaves a malformed $and value alone when a merge has nothing to change in it', () => {
+            const query = ApiQuery.create().where('$and', 'stray').whereHasNot('posts');
+
+            expect(filtersParam(query)).toBe('{"$and":"stray","$hasnt":["posts"]}');
+        });
+
+        it('lets a nested bare relation absorb documents separated into the relation document', () => {
+            const query = ApiQuery.create()
+                .andWhere([q => q.where('a', 1)])
+                .whereRelation('author', a => a.whereHasNot('posts', p => p.where('spam', true)))
+                .whereRelation('author', a => a.whereHasNot('posts', p => p.where('x', 1)))
+                .whereRelation('author', a => a.whereHasNot('posts'));
+
+            expect(filtersParam(query)).toBe('{"$and":[{"a":1}],"author":{"$hasnt":["posts"]}}');
+        });
+
         it('treats a build with no conditions as bare', () => {
             const query = ApiQuery.create()
                 .whereHasNot('posts', q => q.where('spam', true))

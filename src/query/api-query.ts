@@ -144,6 +144,24 @@ function existenceEntries(value: unknown): Array<[string, FilterTree]> {
 }
 
 /**
+ * Determine whether a document only refuses relations now refused outright, as
+ * a conditioned `$hasnt` separated into an `$and` list does.
+ *
+ * @param document - an `$and` document
+ * @param bare - the relations a bare `$hasnt` refuses
+ * @returns true when the bare relations imply the document
+ */
+function refusedOutright(document: unknown, bare: readonly string[]): boolean {
+    if (!isRecord(document) || Object.keys(document).length !== 1) {
+        return false;
+    }
+
+    const entries = existenceEntries(document['$hasnt']);
+
+    return entries.length > 0 && entries.every(([relation]) => bare.includes(relation));
+}
+
+/**
  * Merge an existence value into the one a document already holds.
  *
  * `$has` documents on one relation merge, as every condition must hold for the
@@ -189,8 +207,9 @@ function mergeExistence(key: ExistenceKey, existing: unknown, patch: unknown): [
  * Fields and relation documents merge key by key, existence values merge per
  * relation, and `$and` lists concatenate. Group documents never merge into each
  * other: a second `$or`, like a second conditioned `$hasnt` on a relation,
- * joins the `$and` list as its own document so both keep their meaning. Any
- * other collision is replaced.
+ * joins the `$and` list as its own document so both keep their meaning. A bare
+ * `$hasnt` drops the `$and` documents it implies. Any other collision is
+ * replaced.
  *
  * @param existing - the document already stored
  * @param patch - the document to merge in
@@ -217,11 +236,37 @@ function mergeDocument(existing: FilterTree, patch: FilterTree): FilterTree {
         }
     }
 
-    if (apart.length > 0) {
-        merged['$and'] = [...asList(merged['$and']), ...apart];
-    }
+    settleAnd(merged, patch, apart);
 
     return merged;
+}
+
+/**
+ * Drop the `$and` documents a bare `$hasnt` in the patch implies, append the
+ * documents that must stand apart, and remove the list once it is empty.
+ *
+ * @param merged - the merged document, updated in place
+ * @param patch - the document merged in
+ * @param apart - the documents that must stand apart
+ */
+function settleAnd(merged: Record<string, unknown>, patch: FilterTree, apart: readonly FilterTree[]): void {
+    const bare = existenceEntries(patch['$hasnt'])
+        .filter(([, document]) => isEmpty(document))
+        .map(([relation]) => relation);
+    const and = asList(merged['$and']);
+    const kept = and.filter(document => !refusedOutright(document, bare));
+
+    if (kept.length === and.length && apart.length === 0) {
+        return;
+    }
+
+    kept.push(...apart);
+
+    if (kept.length > 0) {
+        merged['$and'] = kept;
+    } else {
+        delete merged['$and'];
+    }
 }
 
 /**
