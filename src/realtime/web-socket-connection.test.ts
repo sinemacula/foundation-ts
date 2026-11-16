@@ -8,11 +8,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExponentialBackoff } from './exponential-backoff';
+import { RealtimeError } from './realtime-error';
 import { describeRealtimeContract, type RealtimeContractHarness } from './test-support/realtime-connection-contract';
 import { WebSocketConnection, type WebSocketFactory } from './web-socket-connection';
 
-/** A promise plus its externally callable resolve, for gating a pending hook. */
-function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => void } {
+/** A promise plus its externally callable resolve. */
+interface Deferred<T> {
+    /** The controlled promise. */
+    readonly promise: Promise<T>;
+
+    /** Settle the promise successfully. */
+    readonly resolve: (value: T) => void;
+}
+
+/**
+ * Create a promise whose resolution is controlled from the test body, for
+ * gating a pending hook.
+ *
+ * @returns the promise and its resolve function
+ */
+function deferred<T = void>(): Deferred<T> {
     let resolve!: (value: T) => void;
 
     const promise = new Promise<T>(res => {
@@ -24,42 +39,73 @@ function deferred<T = void>(): { promise: Promise<T>; resolve: (value: T) => voi
 
 /** Minimal fake WebSocket for injection via the factory. */
 class FakeWebSocket {
+    /** The URL the socket was opened with. */
     readonly url: string;
+
+    /** The subprotocol(s) the socket was opened with. */
     readonly protocols: string | readonly string[] | undefined;
+
+    /** The open handler the connection installs. */
     onopen: ((event: Event) => void) | null = null;
+
+    /** The message handler the connection installs. */
     onmessage: ((event: MessageEvent) => void) | null = null;
+
+    /** The close handler the connection installs. */
     onclose: ((event: CloseEvent) => void) | null = null;
 
-    #closed: boolean = false;
+    /** How many times close() was called. */
     closeCalls: number = 0;
+
+    /** Every frame passed to send(), in order. */
     sentMessages: string[] = [];
 
+    /**
+     * Record the construction arguments.
+     *
+     * @param url - the WebSocket endpoint URL
+     * @param protocols - optional subprotocol(s)
+     */
     constructor(url: string, protocols?: string | readonly string[]) {
         this.url = url;
         this.protocols = protocols;
     }
 
+    /**
+     * Record an outbound frame.
+     *
+     * @param data - the frame text
+     */
     send(data: string): void {
         this.sentMessages.push(data);
     }
 
+    /**
+     * Record a close call.
+     */
     close(): void {
-        this.#closed = true;
         this.closeCalls++;
     }
 
-    get closed(): boolean {
-        return this.#closed;
-    }
-
+    /**
+     * Simulate the socket opening.
+     */
     emitOpen(): void {
         this.onopen?.(new Event('open'));
     }
 
+    /**
+     * Simulate an incoming text frame.
+     *
+     * @param data - the frame text
+     */
     emitMessage(data: string): void {
         this.onmessage?.(new MessageEvent('message', { data }));
     }
 
+    /**
+     * Simulate the socket closing.
+     */
     emitClose(): void {
         // Not the DOM CloseEvent: that global only exists from node 23, and the
         // connection's close handler never reads the event anyway.
@@ -67,15 +113,41 @@ class FakeWebSocket {
     }
 }
 
-/**
- * Creates a typed {@link WebSocketFactory} that records each fake it creates.
- * The cast to `WebSocket` is confined to a single line inside the closure so
- * every test body can use the strongly-typed {@link FakeWebSocket} directly.
- */
-function makeFactory(): { sockets: FakeWebSocket[]; factory: WebSocketFactory } {
-    const sockets: FakeWebSocket[] = [];
+/** A recording factory and the fakes it has created so far. */
+interface RecordingFactory {
+    /** Every fake socket created, in order. */
+    readonly sockets: FakeWebSocket[];
 
+    /** The factory to inject into the connection. */
+    readonly factory: WebSocketFactory;
+}
+
+/**
+ * Create a typed {@link WebSocketFactory} that records each fake it creates.
+ * The cast to `WebSocket` is confined to the closure so every test body can use
+ * the strongly-typed {@link FakeWebSocket} directly.
+ *
+ * @param failures - how many leading calls throw instead of creating a socket
+ * @returns the recorded sockets and the factory
+ */
+function makeFactory(failures: number = 0): RecordingFactory {
+    const sockets: FakeWebSocket[] = [];
+    let remainingFailures = failures;
+
+    /**
+     * Create and record a fake socket, or throw while failures remain.
+     *
+     * @param url - the WebSocket endpoint URL
+     * @param protocols - optional subprotocol(s)
+     * @returns the fake, typed as a WebSocket
+     */
     const factory: WebSocketFactory = (url, protocols) => {
+        if (remainingFailures > 0) {
+            remainingFailures--;
+
+            throw new Error('factory failed');
+        }
+
         const socket = new FakeWebSocket(url, protocols);
 
         sockets.push(socket);
@@ -84,6 +156,16 @@ function makeFactory(): { sockets: FakeWebSocket[]; factory: WebSocketFactory } 
     };
 
     return { sockets, factory };
+}
+
+/**
+ * Fixed-delay backoff for deterministic reconnect assertions.
+ *
+ * @param delay - the delay in milliseconds for every attempt
+ * @returns the backoff strategy
+ */
+function fixedBackoff(delay: number): ExponentialBackoff {
+    return new ExponentialBackoff({ initialDelay: delay, multiplier: 1, maxDelay: delay });
 }
 
 /** Adapts the WebSocket adapter and its fake to the shared realtime contract. */
@@ -132,14 +214,19 @@ function makeWsContractHarness(): RealtimeContractHarness {
 function stubGlobalWebSocket(): unknown[][] {
     const calls: unknown[][] = [];
 
-    vi.stubGlobal(
-        'WebSocket',
-        class {
-            constructor(...args: unknown[]) {
-                calls.push(args);
-            }
-        },
-    );
+    /** Records every construction instead of opening a socket. */
+    class RecordingWebSocket {
+        /**
+         * Record the construction arguments.
+         *
+         * @param args - the arguments the constructor received
+         */
+        constructor(...args: unknown[]) {
+            calls.push(args);
+        }
+    }
+
+    vi.stubGlobal('WebSocket', RecordingWebSocket);
 
     return calls;
 }
@@ -372,7 +459,7 @@ describe('WebSocketConnection', () => {
             expect(() => sockets.at(0)?.emitMessage('hello')).not.toThrow();
         });
 
-        it('does not treat a JSON primitive frame as an envelope', () => {
+        it('does not treat a JSON primitive or null frame as an envelope', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -387,9 +474,10 @@ describe('WebSocketConnection', () => {
             // A frame that is valid JSON but not an object is not an envelope;
             // it is delivered only as the raw message frame.
             sockets.at(0)?.emitMessage('42');
+            sockets.at(0)?.emitMessage('null');
 
             expect(namedReceived).toEqual([]);
-            expect(messageReceived).toEqual(['42']);
+            expect(messageReceived).toEqual(['42', 'null']);
         });
     });
 
@@ -442,7 +530,7 @@ describe('WebSocketConnection', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({
                 url: 'ws://test',
-                backoff: new ExponentialBackoff({ initialDelay: 100, multiplier: 1, maxDelay: 100 }),
+                backoff: fixedBackoff(100),
                 beforeReconnect: () => gate.promise,
                 webSocketFactory: factory,
             });
@@ -471,6 +559,208 @@ describe('WebSocketConnection', () => {
             // stale attempt neither replaced it nor detached its handlers.
             conn.send('ping');
             expect(sockets.at(1)?.sentMessages).toEqual(['ping']);
+        });
+    });
+
+    describe('open failures', () => {
+        it('throws a RealtimeError carrying the cause and leaves the state idle when the factory throws on connect()', () => {
+            const { sockets, factory } = makeFactory(1);
+            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
+            const states: string[] = [];
+
+            conn.onStateChange(state => states.push(state));
+
+            let thrown: unknown;
+
+            try {
+                conn.connect();
+            } catch (error) {
+                thrown = error;
+            }
+
+            expect(thrown).toBeInstanceOf(RealtimeError);
+            expect((thrown as RealtimeError).message).toBe('Cannot connect: the WebSocket could not be opened.');
+            expect((thrown as RealtimeError).cause).toEqual(new Error('factory failed'));
+            expect(conn.state).toBe('idle');
+            expect(states).toEqual([]);
+            expect(vi.getTimerCount()).toBe(0);
+
+            conn.connect();
+
+            expect(sockets).toHaveLength(1);
+            expect(conn.state).toBe('connecting');
+        });
+
+        it('leaves the state closed when the url builder throws on a connect() after disconnect()', () => {
+            const cause = new Error('no token');
+            let fail = false;
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({
+                url: () => {
+                    if (fail) {
+                        throw cause;
+                    }
+
+                    return 'ws://test';
+                },
+                webSocketFactory: factory,
+            });
+
+            conn.connect();
+            conn.disconnect();
+            fail = true;
+
+            expect(() => conn.connect()).toThrow(expect.objectContaining({ name: 'RealtimeError', cause }));
+            expect(conn.state).toBe('closed');
+            expect(sockets).toHaveLength(1);
+        });
+
+        it('reschedules with backoff and reports the error when the factory throws on a reconnect', async () => {
+            const errors: unknown[] = [];
+            const { sockets, factory } = makeFactory();
+            let failing = false;
+            const conn = new WebSocketConnection({
+                url: 'ws://test',
+                backoff: new ExponentialBackoff({ initialDelay: 100, multiplier: 2, maxDelay: 10_000 }),
+                webSocketFactory: (url, protocols) => {
+                    if (failing) {
+                        throw new Error('factory failed');
+                    }
+
+                    return factory(url, protocols);
+                },
+                onError: error => errors.push(error),
+            });
+
+            conn.connect();
+            sockets.at(0)?.emitClose();
+            failing = true;
+
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(errors).toEqual([new Error('factory failed')]);
+            expect(conn.state).toBe('connecting');
+            expect(vi.getTimerCount()).toBe(1);
+
+            failing = false;
+
+            // Attempt 1 waits 200 ms: the failed attempt advanced the backoff.
+            await vi.advanceTimersByTimeAsync(199);
+            expect(sockets).toHaveLength(1);
+
+            await vi.advanceTimersByTimeAsync(1);
+            expect(sockets).toHaveLength(2);
+
+            sockets.at(1)?.emitOpen();
+            expect(conn.state).toBe('open');
+        });
+
+        it('reschedules without an onError sink when the url builder throws on a reconnect', async () => {
+            let calls = 0;
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({
+                url: () => {
+                    if (++calls === 2) {
+                        throw new Error('no token');
+                    }
+
+                    return 'ws://test';
+                },
+                backoff: fixedBackoff(100),
+                webSocketFactory: factory,
+            });
+
+            conn.connect();
+            sockets.at(0)?.emitClose();
+
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(sockets).toHaveLength(1);
+            expect(conn.state).toBe('connecting');
+
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(sockets).toHaveLength(2);
+        });
+    });
+
+    describe('beforeReconnect resolving false', () => {
+        it('abandons the attempt without opening a socket and retries through backoff', async () => {
+            const beforeReconnect = vi.fn<() => Promise<unknown>>().mockResolvedValueOnce(false).mockResolvedValue(true);
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({
+                url: 'ws://test',
+                backoff: fixedBackoff(100),
+                beforeReconnect,
+                webSocketFactory: factory,
+            });
+
+            conn.connect();
+            sockets.at(0)?.emitClose();
+
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(sockets).toHaveLength(1);
+            expect(conn.state).toBe('connecting');
+            expect(vi.getTimerCount()).toBe(1);
+
+            await vi.advanceTimersByTimeAsync(100);
+
+            expect(beforeReconnect).toHaveBeenCalledTimes(2);
+            expect(sockets).toHaveLength(2);
+        });
+    });
+
+    describe('onError', () => {
+        it('receives errors thrown by message and state subscribers', () => {
+            const errors: unknown[] = [];
+            const messageError = new Error('message subscriber');
+            const stateError = new Error('state subscriber');
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({
+                url: 'ws://test',
+                webSocketFactory: factory,
+                onError: error => errors.push(error),
+            });
+
+            conn.on('message', () => {
+                throw messageError;
+            });
+            conn.onStateChange(() => {
+                throw stateError;
+            });
+            conn.connect();
+            sockets.at(0)?.emitMessage('hello');
+
+            expect(errors).toEqual([stateError, messageError]);
+        });
+
+        it('keeps delivering to remaining subscribers when the sink itself throws', () => {
+            const received: string[] = [];
+            const states: string[] = [];
+            const { sockets, factory } = makeFactory();
+            const conn = new WebSocketConnection({
+                url: 'ws://test',
+                webSocketFactory: factory,
+                onError: () => {
+                    throw new Error('sink exploded');
+                },
+            });
+
+            conn.on('message', () => {
+                throw new Error('subscriber exploded');
+            });
+            conn.on('message', msg => received.push(msg.data));
+            conn.onStateChange(() => {
+                throw new Error('subscriber exploded');
+            });
+            conn.onStateChange(state => states.push(state));
+            conn.connect();
+            sockets.at(0)?.emitOpen();
+            sockets.at(0)?.emitMessage('hello');
+
+            expect(received).toEqual(['hello']);
+            expect(states).toEqual(['connecting', 'open']);
         });
     });
 });
