@@ -306,6 +306,31 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
                 expect(transports).toHaveLength(4);
             });
 
+            it('restarts the backoff sequence after a disconnect', () => {
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: new ExponentialBackoff({ initialDelay: 100, multiplier: 2, maxDelay: 10_000 }),
+                });
+
+                connection.connect();
+                transports.at(0)?.fail();
+                vi.advanceTimersByTime(100);
+                transports.at(1)?.fail();
+                vi.advanceTimersByTime(200);
+                transports.at(2)?.fail();
+
+                connection.disconnect();
+                connection.connect();
+                transports.at(3)?.fail();
+
+                // Attempt 0 again, not the 400 ms the third failure had earned.
+                vi.advanceTimersByTime(99);
+                expect(transports).toHaveLength(4);
+
+                vi.advanceTimersByTime(1);
+                expect(transports).toHaveLength(5);
+            });
+
             it('uses the url function on each reconnect', () => {
                 let counter = 0;
                 const { connection, transports } = harness.create({
