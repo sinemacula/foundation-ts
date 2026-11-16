@@ -233,8 +233,6 @@ export function featureFlags(): FeatureFlags {
     return featureFlagsHolder.resolve();
 }
 
-
-
 /**
  * Install the colour-scheme service. Called once at boot.
  *

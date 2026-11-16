@@ -1,19 +1,8 @@
 {
     "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
     "testRunner": "vitest",
-    "ignorePatterns": [
-        ".idea",
-        ".qlty",
-        ".sinemacula",
-        "build",
-        "coverage",
-        "dist"
-    ],
-    "mutate": [
-        "src/**/*.ts",
-        "!**/*.test.ts",
-        "!**/test-support/**"
-    ],
+    "ignorePatterns": [".idea", ".qlty", ".sinemacula", "build", "coverage", "dist"],
+    "mutate": ["src/**/*.ts", "!**/*.test.ts", "!**/test-support/**"],
     "thresholds": {
         "high": 95,
         "low": 90,
