@@ -27,6 +27,7 @@ class FakeWebSocket {
     /** The close handler the connection installs. */
     onclose: ((event: CloseEvent) => void) | null = null;
 
+    /** Whether close() has been called. */
     #closed: boolean = false;
 
     /** How many times close() was called. */
@@ -63,6 +64,9 @@ class FakeWebSocket {
         this.closeCalls++;
     }
 
+    /**
+     * Whether close() has been called.
+     */
     get closed(): boolean {
         return this.#closed;
     }
@@ -93,14 +97,24 @@ class FakeWebSocket {
     }
 }
 
+/** A WebSocket factory plus every fake it has created. */
+interface RecordingFactory {
+    /** Every fake socket created, in order. */
+    readonly sockets: FakeWebSocket[];
+
+    /** The factory handed to the connection. */
+    readonly factory: WebSocketFactory;
+}
+
 /**
  * Creates a typed {@link WebSocketFactory} that records each fake it creates.
  * The cast to `WebSocket` is confined to a single line inside the closure so
  * every test body can use the strongly-typed {@link FakeWebSocket} directly.
  */
-function makeFactory(): { sockets: FakeWebSocket[]; factory: WebSocketFactory } {
+function makeFactory(): RecordingFactory {
     const sockets: FakeWebSocket[] = [];
 
+    /** Create and record a fake socket, typed as the real one. */
     const factory: WebSocketFactory = (url, protocols) => {
         const socket = new FakeWebSocket(url, protocols);
 
@@ -158,14 +172,19 @@ function makeWsContractHarness(): RealtimeContractHarness {
 function stubGlobalWebSocket(): unknown[][] {
     const calls: unknown[][] = [];
 
-    vi.stubGlobal(
-        'WebSocket',
-        class {
-            constructor(...args: unknown[]) {
-                calls.push(args);
-            }
-        },
-    );
+    /** Records every construction instead of opening a socket. */
+    class RecordingWebSocket {
+        /**
+         * Record the construction arguments.
+         *
+         * @param args - the arguments the constructor received
+         */
+        constructor(...args: unknown[]) {
+            calls.push(args);
+        }
+    }
+
+    vi.stubGlobal('WebSocket', RecordingWebSocket);
 
     return calls;
 }

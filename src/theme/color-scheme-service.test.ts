@@ -60,9 +60,19 @@ function makeSource(dark = false): StubSource {
     return source;
 }
 
+/** One recorded apply() invocation. */
+interface ApplyCall {
+    /** The resolved scheme applied. */
+    readonly resolved: ResolvedColorScheme;
+
+    /** The preference it was resolved from. */
+    readonly preference: ColorSchemePreference;
+}
+
 /** A colour-scheme applier that records every call. */
 interface StubApplier extends ColorSchemeApplier {
-    calls: Array<{ resolved: ResolvedColorScheme; preference: ColorSchemePreference }>;
+    /** Every apply() invocation, in order. */
+    calls: ApplyCall[];
 }
 
 /**
@@ -81,12 +91,43 @@ function makeApplier(): StubApplier {
     };
 }
 
-function makeService(options?: {
-    dark?: boolean;
-    initialStored?: string;
-    storageKey?: string;
-    defaultPreference?: ColorSchemePreference;
-}): { service: ColorSchemeService; storage: MemoryStorage; source: StubSource; applier: StubApplier } {
+/** Options shaping the service under test. */
+interface ServiceOptions {
+    /** Whether the system starts out preferring dark. */
+    readonly dark?: boolean;
+
+    /** A preference already persisted before the service starts. */
+    readonly initialStored?: string;
+
+    /** The storage key the preference is persisted under. */
+    readonly storageKey?: string;
+
+    /** The preference used when nothing is stored. */
+    readonly defaultPreference?: ColorSchemePreference;
+}
+
+/** The service under test and its collaborators. */
+interface ServiceFixture {
+    /** The colour-scheme service. */
+    readonly service: ColorSchemeService;
+
+    /** The storage the service persists to. */
+    readonly storage: MemoryStorage;
+
+    /** The stub system source. */
+    readonly source: StubSource;
+
+    /** The recording applier. */
+    readonly applier: StubApplier;
+}
+
+/**
+ * Build a colour-scheme service over stub collaborators.
+ *
+ * @param options - options overriding the defaults
+ * @returns the service and its collaborators
+ */
+function makeService(options?: ServiceOptions): ServiceFixture {
     const storage = new MemoryStorage();
 
     if (options?.initialStored !== undefined) {

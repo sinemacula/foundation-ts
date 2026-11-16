@@ -182,8 +182,17 @@ function mapWidget(raw: RawRecord): Widget {
     return { id: raw['id'], name: raw['name'] };
 }
 
+/** The fake transport and the resource client bound to it. */
+interface ResourceFixture {
+    /** The recording fake transport. */
+    readonly client: FakeHttpClient;
+
+    /** The resource client under test. */
+    readonly resource: ResourceClient<Widget>;
+}
+
 /** Build a `ResourceClient<Widget>` wired against a fresh `FakeHttpClient`. */
-function createResource(path = 'widgets'): { client: FakeHttpClient; resource: ResourceClient<Widget> } {
+function createResource(path = 'widgets'): ResourceFixture {
     const client = new FakeHttpClient();
     const resource = new ResourceClient({ client, path, map: mapWidget });
 

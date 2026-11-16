@@ -11,6 +11,27 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FetchHttpClient } from './fetch-http-client';
 import { CancelledError, HttpError, NetworkError } from './http-error';
 
+/** The body a retried request resolves with. */
+interface RetriedBody {
+    /** Whether the response came from the retry. */
+    readonly retried: boolean;
+}
+
+/** The body the global fetch stub resolves with. */
+interface GlobalBody {
+    /** Whether the global fetch served the request. */
+    readonly global: boolean;
+}
+
+/** The optional AbortSignal statics the client feature-detects. */
+interface AbortSignalStatics {
+    /** AbortSignal.timeout, when the runtime provides it. */
+    timeout: typeof AbortSignal.timeout | undefined;
+
+    /** AbortSignal.any, when the runtime provides it. */
+    any: typeof AbortSignal.any | undefined;
+}
+
 // ---------------------------------------------------------------------------
 // Stub type
 // ---------------------------------------------------------------------------
@@ -91,6 +112,7 @@ function makeAbortAwareFetch(): ReturnType<typeof makeFetch> {
                     return;
                 }
 
+                /** Reject with the reason the signal aborted with. */
                 const rejectWithReason = (): void => {
                     reject(signal.reason);
                 };
@@ -192,17 +214,17 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
-        const result = await client.get<{ retried: boolean }>('/secure');
+        const result = await client.get<RetriedBody>('/secure');
 
         expect(fetchFn).toHaveBeenCalledTimes(2);
         expect(result).toStrictEqual({ retried: true });
     });
 
     it.each([
-        ['post', (client: FetchHttpClient) => client.post<{ retried: boolean }>('/secure', { a: 1 })],
-        ['put', (client: FetchHttpClient) => client.put<{ retried: boolean }>('/secure', { a: 1 })],
-        ['patch', (client: FetchHttpClient) => client.patch<{ retried: boolean }>('/secure', { a: 1 })],
-        ['delete', (client: FetchHttpClient) => client.delete<{ retried: boolean }>('/secure')],
+        ['post', (client: FetchHttpClient) => client.post<RetriedBody>('/secure', { a: 1 })],
+        ['put', (client: FetchHttpClient) => client.put<RetriedBody>('/secure', { a: 1 })],
+        ['patch', (client: FetchHttpClient) => client.patch<RetriedBody>('/secure', { a: 1 })],
+        ['delete', (client: FetchHttpClient) => client.delete<RetriedBody>('/secure')],
     ] as const)('retries a %s once through the handler and resolves the parsed body', async (_verb, invoke) => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
@@ -547,7 +569,7 @@ describe('FetchHttpClient - default fetchFn', () => {
 
         const client = new FetchHttpClient({ baseUrl: 'https://api.example.com' });
 
-        const result = await client.get<{ global: boolean }>('/test');
+        const result = await client.get<GlobalBody>('/test');
 
         expect(stub).toHaveBeenCalledOnce();
         expect(result).toStrictEqual({ global: true });
@@ -580,7 +602,7 @@ describe('FetchHttpClient - runtime fallbacks', () => {
     it('skips the timeout signal when AbortSignal.timeout is unavailable', async () => {
         const original = AbortSignal.timeout;
 
-        (AbortSignal as unknown as { timeout: typeof original | undefined }).timeout = undefined;
+        (AbortSignal as unknown as AbortSignalStatics).timeout = undefined;
 
         try {
             const fetchFn = makeFetch(async () => jsonResponse({}));
@@ -590,14 +612,14 @@ describe('FetchHttpClient - runtime fallbacks', () => {
 
             expect(lastInit(fetchFn).signal).toBeNull();
         } finally {
-            (AbortSignal as unknown as { timeout: typeof original }).timeout = original;
+            (AbortSignal as unknown as AbortSignalStatics).timeout = original;
         }
     });
 
     it('falls back to the caller signal when AbortSignal.any is unavailable', async () => {
         const original = AbortSignal.any;
 
-        (AbortSignal as unknown as { any: typeof original | undefined }).any = undefined;
+        (AbortSignal as unknown as AbortSignalStatics).any = undefined;
 
         try {
             const fetchFn = makeFetch(async () => jsonResponse({}));
@@ -608,7 +630,7 @@ describe('FetchHttpClient - runtime fallbacks', () => {
 
             expect(lastInit(fetchFn).signal).toBe(controller.signal);
         } finally {
-            (AbortSignal as unknown as { any: typeof original }).any = original;
+            (AbortSignal as unknown as AbortSignalStatics).any = original;
         }
     });
 });

@@ -32,6 +32,21 @@ const EXPIRES_AT_KEY = 'auth.expires_at';
  */
 const SESSION_EXPIRY_EPOCH_MS = 1_798_761_599_000;
 
+/** One recorded login() invocation. */
+interface LoginCall {
+    /** The credentials passed. */
+    readonly credentials: unknown;
+
+    /** The device passed. */
+    readonly device: SessionDevice;
+}
+
+/** Overrides for the core context under test. */
+interface ContextOverrides {
+    /** Replacement wire-timestamp parser. */
+    readonly parseTimestamp?: (value: string) => number | null;
+}
+
 /**
  * An in-memory {@link SessionApi} fake that records every call and replays
  * queued outcomes in order.
@@ -39,11 +54,20 @@ const SESSION_EXPIRY_EPOCH_MS = 1_798_761_599_000;
 class FakeSessionApi implements SessionApi {
     /** The calls made, by method name. */
     readonly calls: string[] = [];
-    readonly loginCalls: Array<{ credentials: unknown; device: SessionDevice }> = [];
+
+    /** Every login() invocation, in order. */
+    readonly loginCalls: LoginCall[] = [];
+
+    /** The refresh token of every refresh() call, in order. */
     readonly refreshCalls: string[] = [];
 
+    /** Queued login and refresh outcomes, consumed in order. */
     readonly #sessions: Array<SessionTokens | Error> = [];
+
+    /** Queued currentUser outcomes, consumed in order. */
     readonly #users: Array<SessionUser | Error> = [];
+
+    /** The error the next logout rejects with, if any. */
     #logoutError: Error | null = null;
 
     /**
@@ -73,6 +97,13 @@ class FakeSessionApi implements SessionApi {
         this.#logoutError = error;
     }
 
+    /**
+     * Record a login and replay the next session outcome.
+     *
+     * @param credentials - the credentials passed
+     * @param device - the device passed
+     * @returns the next queued session outcome
+     */
     login(credentials: unknown, device: SessionDevice): Promise<SessionTokens> {
         this.calls.push('login');
         this.loginCalls.push({ credentials, device });
@@ -80,6 +111,12 @@ class FakeSessionApi implements SessionApi {
         return take(this.#sessions);
     }
 
+    /**
+     * Record a refresh and replay the next session outcome.
+     *
+     * @param refreshToken - the refresh token passed
+     * @returns the next queued session outcome
+     */
     refresh(refreshToken: string): Promise<SessionTokens> {
         this.calls.push('refresh');
         this.refreshCalls.push(refreshToken);
@@ -87,12 +124,22 @@ class FakeSessionApi implements SessionApi {
         return take(this.#sessions);
     }
 
+    /**
+     * Record a logout, rejecting when failLogout() armed an error.
+     *
+     * @returns a promise settling with the logout outcome
+     */
     logout(): Promise<void> {
         this.calls.push('logout');
 
         return this.#logoutError === null ? Promise.resolve() : Promise.reject(this.#logoutError);
     }
 
+    /**
+     * Record a user fetch and replay the next user outcome.
+     *
+     * @returns the next queued user outcome
+     */
     currentUser(): Promise<SessionUser> {
         this.calls.push('currentUser');
 
@@ -142,7 +189,7 @@ describe('session core', () => {
      * @param overrides - optional context overrides
      * @returns the assembled context
      */
-    function context(overrides: { parseTimestamp?: (value: string) => number | null } = {}): SessionCoreContext {
+    function context(overrides: ContextOverrides = {}): SessionCoreContext {
         return {
             storage,
             storageKeys: {

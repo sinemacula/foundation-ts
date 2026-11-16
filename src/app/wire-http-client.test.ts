@@ -18,6 +18,12 @@ import type { FoundationConfig } from './foundation-config';
 import type { WireHttpClientOptions, WireHttpClientTools } from './wire-http-client';
 import { wireHttpClient } from './wire-http-client';
 
+/** The body of a successful stub response. */
+interface OkBody {
+    /** Whether the request succeeded. */
+    readonly ok: boolean;
+}
+
 /**
  * Build a minimal contract-satisfying configuration fixture.
  *
@@ -68,9 +74,19 @@ function createHttpClientStub(): HttpClient {
     return { get: fail, post: fail, put: fail, patch: fail, delete: fail, download: fail };
 }
 
+/** One recorded captureError invocation. */
+interface CapturedError {
+    /** The captured error. */
+    readonly error: unknown;
+
+    /** The context the error was captured with. */
+    readonly context: Readonly<Record<string, unknown>> | undefined;
+}
+
 /** An error reporter recording every captureError invocation. */
 interface RecordingReporter extends ErrorReporter {
-    readonly captured: { error: unknown; context: Readonly<Record<string, unknown>> | undefined }[];
+    /** Every captured error, in capture order. */
+    readonly captured: CapturedError[];
 }
 
 /** Build an error reporter that records captured errors with their context. */
@@ -188,8 +204,14 @@ interface RecordedToast {
     readonly message: string;
 }
 
+/** A Toaster that records raised toasts. */
+interface RecordingToaster extends Toaster {
+    /** Every raised toast, in order. */
+    readonly recorded: RecordedToast[];
+}
+
 /** A Toaster that records raised toasts for assertion. */
-function createRecordingToaster(): Toaster & { readonly recorded: RecordedToast[] } {
+function createRecordingToaster(): RecordingToaster {
     const recorded: RecordedToast[] = [];
 
     return {
@@ -232,7 +254,7 @@ describe('wireHttpClient', () => {
                 contributions: createContributions(),
             });
 
-            const result = await client.get<{ ok: boolean }>('ping');
+            const result = await client.get<OkBody>('ping');
 
             expect(result).toEqual({ ok: true });
             expect(stub.urls).toEqual(['https://api.example.com/ping']);
@@ -297,7 +319,7 @@ describe('wireHttpClient', () => {
                 }),
             });
 
-            const result = await client.get<{ ok: boolean }>('secure');
+            const result = await client.get<OkBody>('secure');
 
             expect(result).toEqual({ ok: true });
             expect(refreshes).toBe(1);
@@ -362,8 +384,14 @@ describe('wireHttpClient', () => {
 
         it('threads the merged construction inputs to the factory', () => {
             const config = createConfig();
+
+            /** Pass the request through unchanged as the preset. */
             const presetInterceptor: RequestInterceptor = request => request;
+
+            /** Pass the request through unchanged as the module's. */
             const moduleInterceptor: RequestInterceptor = request => request;
+
+            /** Report every 401 as recovered. */
             const onUnauthorized: UnauthorizedHandler = () => Promise.resolve(true);
 
             const tools = captureTools({

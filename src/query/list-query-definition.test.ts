@@ -41,6 +41,7 @@ describe('defineListQuery', () => {
     });
 
     it('preserves the base function', () => {
+        /** Narrow the query to the id and name fields. */
         const base = (q: ApiQuery) => q.fields(['id', 'name']);
         const definition = defineListQuery({ base });
 

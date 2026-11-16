@@ -11,6 +11,15 @@ import { describe, expect, it, vi } from 'vitest';
 import { FetchHttpClient } from './fetch-http-client';
 import { HttpError, HttpValidationError } from './http-error';
 
+/** A user body parsed from JSON. */
+interface UserBody {
+    /** The user identifier. */
+    readonly id: number;
+
+    /** The user name. */
+    readonly name: string;
+}
+
 // ---------------------------------------------------------------------------
 // Stub type
 // ---------------------------------------------------------------------------
@@ -118,7 +127,7 @@ describe('FetchHttpClient - success response parsing', () => {
         const fetchFn = makeFetch(async () => jsonResponse({ id: 1, name: 'Alice' }));
         const client = makeClient(fetchFn);
 
-        const result = await client.get<{ id: number; name: string }>('/users/1');
+        const result = await client.get<UserBody>('/users/1');
 
         expect(result).toStrictEqual({ id: 1, name: 'Alice' });
     });

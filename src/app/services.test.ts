@@ -83,6 +83,30 @@ function createRealtimeConnectionStub(): RealtimeConnection {
     };
 }
 
+/** Application settings carrying only a name. */
+interface NamedApp {
+    /** The application name. */
+    readonly name: string;
+}
+
+/** Application settings carrying a name and a version. */
+interface VersionedApp extends NamedApp {
+    /** The application version. */
+    readonly version: string;
+}
+
+/** A configuration tree holding named application settings. */
+interface NamedAppConfig {
+    /** The application settings. */
+    readonly app: NamedApp;
+}
+
+/** A configuration tree holding versioned application settings. */
+interface VersionedAppConfig {
+    /** The application settings. */
+    readonly app: VersionedApp;
+}
+
 /** One service accessor and how to install what it resolves. */
 interface ServiceCase {
     /** The accessor's name, for the test title. */
@@ -313,7 +337,7 @@ describe('foundation services', () => {
         it('returns a deep-frozen tree', () => {
             installConfig(new ConfigRepository({ app: { name: 'playground' } }));
 
-            const tree = appConfig<{ app: { name: string } }>();
+            const tree = appConfig<NamedAppConfig>();
 
             expect(Object.isFrozen(tree)).toBe(true);
             expect(Object.isFrozen(tree.app)).toBe(true);
@@ -322,7 +346,7 @@ describe('foundation services', () => {
         it('exposes the configured values through the typed cast', () => {
             installConfig(new ConfigRepository({ app: { name: 'playground', version: '1.2.3' } }));
 
-            const tree = appConfig<{ app: { name: string; version: string } }>();
+            const tree = appConfig<VersionedAppConfig>();
 
             expect(tree.app.name).toBe('playground');
             expect(tree.app.version).toBe('1.2.3');

@@ -130,8 +130,14 @@ function createSequencedFetch(...apiResponses: ReadonlyArray<() => Response>): S
     return { fetchFn, urls, inits };
 }
 
+/** A Toaster that keeps every error message it is asked to raise. */
+interface RecordingToaster extends Toaster {
+    /** Every error message raised, in order. */
+    readonly errors: string[];
+}
+
 /** Build a Toaster that records every error message it is asked to raise. */
-function createRecordingToaster(): Toaster & { readonly errors: string[] } {
+function createRecordingToaster(): RecordingToaster {
     const errors: string[] = [];
 
     return {
@@ -147,6 +153,39 @@ function createRecordingToaster(): Toaster & { readonly errors: string[] } {
 
 /** Build an environment that defines no keys. */
 const environmentOf = (): Environment => new Environment(new ObjectEnvironmentSource({}));
+
+/** What the registration bridge saw when it ran. */
+interface RegistrationObservation {
+    /** The configuration handed to the bridge. */
+    readonly config: unknown;
+
+    /** Whether storage was already installed. */
+    readonly storageOk: boolean;
+
+    /** Whether feature flags were already installed. */
+    readonly flagsOk: boolean;
+}
+
+/** The http options threaded into the default client. */
+interface HttpOptionsUnderTest {
+    /** Preset interceptors run before every request. */
+    readonly interceptors?: readonly RequestInterceptor[];
+
+    /** Replacement response-error handler. */
+    readonly onResponseError?: (error: unknown, request: HttpRequest) => void;
+
+    /** Arms the default handler's toast. */
+    readonly unexpectedErrorToastKey?: string;
+}
+
+/** One response error routed to the supplied handler. */
+interface ResponseFailure {
+    /** The error raised. */
+    readonly error: unknown;
+
+    /** The request that failed. */
+    readonly request: HttpRequest;
+}
 
 describe('bootFoundationCore', () => {
     afterEach(() => {
@@ -214,7 +253,7 @@ describe('bootFoundationCore', () => {
 
     it('invokes the registration bridge once, after installs, with the repository and environment', async () => {
         const environment = environmentOf();
-        const observed: { config: unknown; storageOk: boolean; flagsOk: boolean }[] = [];
+        const observed: RegistrationObservation[] = [];
         const interceptor = vi.fn();
 
         const core = await bootFoundationCore(
@@ -311,11 +350,7 @@ describe('bootFoundationCore', () => {
          */
         function bootWithHttp(
             fetch: SequencedFetch,
-            http: {
-                interceptors?: readonly RequestInterceptor[];
-                onResponseError?: (error: unknown, request: HttpRequest) => void;
-                unexpectedErrorToastKey?: string;
-            },
+            http: HttpOptionsUnderTest,
             toaster: Toaster = createToasterStub(),
         ): ReturnType<typeof bootFoundationCore<FoundationConfig>> {
             return bootFoundationCore(
@@ -350,7 +385,7 @@ describe('bootFoundationCore', () => {
         });
 
         it('routes response errors to the supplied handler', async () => {
-            const failures: Array<{ error: unknown; request: HttpRequest }> = [];
+            const failures: ResponseFailure[] = [];
             const fetch = createSequencedFetch(() => new Response('{}', { status: 500 }));
 
             const core = await bootWithHttp(fetch, {

@@ -33,6 +33,8 @@ interface RecordedCall {
 class FakeHttpClient implements HttpClient {
     /** Every call made, in order. */
     readonly calls: RecordedCall[] = [];
+
+    /** The queued response payloads, consumed in order. */
     readonly #queue: unknown[] = [];
 
     /**
@@ -686,7 +688,9 @@ describe('createDefaultSessionApi', () => {
         });
 
         it('passes the unwrapped payload to a custom mapUser and returns its result', async () => {
+            /** A session user carrying a role. */
             interface AdminUser extends SessionUser {
+                /** The user's role. */
                 readonly role: string;
             }
 
