@@ -129,18 +129,13 @@ describe('ResourceClient', () => {
             const { client, resource } = createResource();
             client.queueResponse({
                 data: [widgetRecord('w1', 'Widget One')],
-                meta: wire([
-                    ['current_page', 1],
-                    ['last_page', 1],
-                    ['per_page', 10],
-                    ['total', 1],
-                ]),
+                meta: { total: 1, count: 1, continue: false },
             });
 
             const result = await resource.list();
 
             expect(result.items).toEqual([{ id: 'w1', name: 'Widget One' }]);
-            expect(result.meta).toEqual({ currentPage: 1, lastPage: 1, perPage: 10, total: 1 });
+            expect(result.meta).toEqual({ mode: 'length-aware', total: 1, count: 1, hasMore: false });
         });
 
         it('sends a GET request to the resource path', async () => {
