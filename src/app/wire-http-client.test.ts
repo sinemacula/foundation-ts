@@ -5,7 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FetchHttpClient } from '../http/fetch-http-client';
 import type { HttpClient, HttpRequest, RequestInterceptor, UnauthorizedHandler } from '../http/http-client';
@@ -334,10 +334,10 @@ describe('wireHttpClient', () => {
                 contributions: createContributions(),
             });
 
-            const thrown = await client.get('secure').catch((error: unknown) => error);
+            const pending = client.get('secure');
 
-            expect(thrown).toBeInstanceOf(HttpError);
-            expect((thrown as HttpError).status).toBe(401);
+            await expect(pending).rejects.toBeInstanceOf(HttpError);
+            await expect(pending).rejects.toHaveProperty('status', 401);
             expect(stub.urls).toHaveLength(1);
         });
 
@@ -384,30 +384,9 @@ describe('wireHttpClient', () => {
 
         it('threads the merged construction inputs to the factory', () => {
             const config = createConfig();
-
-            /**
-             * Pass the request through unchanged.
-             *
-             * @param request - the outgoing request
-             * @returns the same request
-             */
-            const presetInterceptor: RequestInterceptor = request => request;
-
-            /**
-             * Pass the request through unchanged.
-             *
-             * @param request - the outgoing request
-             * @returns the same request
-             */
-            const moduleInterceptor: RequestInterceptor = request => request;
-
-            /**
-             * Report a successful refresh.
-             *
-             * @returns true
-             */
-            const onUnauthorized: UnauthorizedHandler = () => Promise.resolve(true);
-
+            const presetInterceptor = vi.fn<RequestInterceptor>();
+            const moduleInterceptor = vi.fn<RequestInterceptor>();
+            const onUnauthorized = vi.fn<UnauthorizedHandler>();
             const tools = captureTools({
                 config,
                 fetchFn: failingFetch,

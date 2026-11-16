@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExponentialBackoff } from '../realtime/exponential-backoff';
 import { FetchHttpClient } from './fetch-http-client';
-import { CancelledError, HttpError, MaintenanceError } from './http-error';
+import type { RequestInterceptor } from './http-client';
+import { CancelledError, HttpError, MaintenanceError, NetworkError } from './http-error';
 
 /** The body a recovered retry resolves with. */
 interface RecoveredBody {
@@ -23,6 +24,9 @@ interface RecoveredBody {
 
 /** Explicit overload signature so mock.calls carries a typed tuple, not []. */
 type FetchArgs = [input: Request | string | URL, init?: RequestInit];
+
+/** A constructor of the error type a rejection is expected to have. */
+type ErrorType<E extends Error> = new (...args: never[]) => E;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -54,6 +58,21 @@ function makeClient(
     extra: Partial<ConstructorParameters<typeof FetchHttpClient>[0]> = {},
 ): FetchHttpClient {
     return new FetchHttpClient({ baseUrl: 'https://api.example.com', fetchFn, ...extra });
+}
+
+/**
+ * Await a request expected to reject with a given error type.
+ *
+ * @param promise - the pending request
+ * @param type - the error type the rejection must have
+ * @returns the rejection
+ */
+async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: ErrorType<E>): Promise<E> {
+    const error = await promise.catch((rejection: unknown) => rejection);
+
+    expect(error).toBeInstanceOf(type);
+
+    return error as E;
 }
 
 /** Fixed-delay backoff for deterministic retry-delay assertions. */
@@ -133,14 +152,13 @@ describe('FetchHttpClient - transient retry', () => {
             onResponseError,
         });
 
-        const pending = client.get('/items').catch(error => error);
+        const pending = rejectionOf(client.get('/items'), HttpError);
 
         await vi.advanceTimersByTimeAsync(10);
 
         const error = await pending;
 
-        expect(error).toBeInstanceOf(HttpError);
-        expect((error as HttpError).status).toBe(503);
+        expect(error.status).toBe(503);
         expect(fetchFn).toHaveBeenCalledTimes(2);
         expect(onResponseError).toHaveBeenCalledTimes(1);
         expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
@@ -235,24 +253,65 @@ describe('FetchHttpClient - transient retry', () => {
         expect(fetchFn).toHaveBeenCalledTimes(2);
     });
 
-    it('stops immediately when a CancelledError occurs mid-retry, without a further attempt or notification', async () => {
+    it('retries a transport failure an interceptor throws before the request resolves', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockResolvedValueOnce(jsonResponse({ recovered: true }));
+        const interceptor = vi
+            .fn<RequestInterceptor>()
+            .mockImplementationOnce(() => {
+                throw new NetworkError('token refresh failed');
+            })
+            .mockImplementationOnce(request => request);
+        const client = makeClient(fetchFn, {
+            retry: { attempts: 1, backoff: fixedBackoff(10) },
+            requestInterceptors: [interceptor],
+        });
+
+        const pending = client.get<RecoveredBody>('/items');
+
+        await vi.advanceTimersByTimeAsync(10);
+
+        await expect(pending).resolves.toStrictEqual({ recovered: true });
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries an AbortError the caller did not cause as a transport failure', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'))
+            .mockResolvedValueOnce(jsonResponse({ recovered: true }));
+        const client = makeClient(fetchFn, { retry: { attempts: 2, backoff: fixedBackoff(10) } });
+
+        const pending = client.get<RecoveredBody>('/items');
+
+        await vi.advanceTimersByTimeAsync(10);
+
+        await expect(pending).resolves.toStrictEqual({ recovered: true });
+        expect(fetchFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops when the caller aborts a retried attempt, without a further attempt or notification', async () => {
+        const caller = new AbortController();
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockResolvedValueOnce(jsonResponse({}, 503))
-            .mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'));
+            .mockImplementationOnce(() => {
+                caller.abort();
+
+                return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, {
             retry: { attempts: 2, backoff: fixedBackoff(10) },
             onResponseError,
         });
 
-        const pending = client.get('/items').catch(error => error);
+        const pending = rejectionOf(client.get('/items', { signal: caller.signal }), CancelledError);
 
         await vi.advanceTimersByTimeAsync(10);
 
-        const error = await pending;
-
-        expect(error).toBeInstanceOf(CancelledError);
+        await pending;
         expect(fetchFn).toHaveBeenCalledTimes(2);
         expect(onResponseError).not.toHaveBeenCalled();
     });

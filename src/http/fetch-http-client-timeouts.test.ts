@@ -17,6 +17,9 @@ type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 /** A typed fetch stub. */
 type FetchStub = ReturnType<typeof vi.fn<(...args: FetchArgs) => Promise<Response>>>;
 
+/** A constructor of the error type a rejection is expected to have. */
+type ErrorType<E extends Error> = new (...args: never[]) => E;
+
 /**
  * Build a JSON response.
  *
@@ -70,6 +73,21 @@ function makeClient(
 }
 
 /**
+ * Await a request expected to reject with a given error type.
+ *
+ * @param promise - the pending request
+ * @param type - the error type the rejection must have
+ * @returns the rejection
+ */
+async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: ErrorType<E>): Promise<E> {
+    const error = await promise.catch((rejection: unknown) => rejection);
+
+    expect(error).toBeInstanceOf(type);
+
+    return error as E;
+}
+
+/**
  * Read the signal handed to the most recent fetch call.
  *
  * @param fn - the fetch stub
@@ -80,32 +98,46 @@ function lastSignal(fn: FetchStub): AbortSignal | null | undefined {
 }
 
 /**
- * A fetch stub that mimics real fetch's abort behaviour: it rejects with the
- * signal's reason as soon as its signal aborts, and otherwise never settles.
+ * A fetch implementation that mimics real fetch's abort behaviour: it rejects
+ * with the signal's reason as soon as its signal aborts, and otherwise never
+ * settles.
  *
- * @returns the fetch stub
+ * @param _input - the request URL, unused
+ * @param init - the request init carrying the signal
+ * @returns a response promise that only ever rejects
  */
-function makeAbortAwareFetch(): FetchStub {
-    return makeFetch(
-        (_input, init) =>
-            new Promise<Response>((_resolve, reject) => {
-                const signal = init?.signal;
+function hangUntilAborted(_input: FetchArgs[0], init?: RequestInit): Promise<Response> {
+    const signal = init?.signal;
 
-                if (signal === undefined || signal === null) {
-                    return;
-                }
+    return new Promise<Response>((_resolve, reject) => {
+        if (signal === undefined || signal === null) {
+            return;
+        }
 
-                if (signal.aborted) {
-                    reject(signal.reason);
+        if (signal.aborted) {
+            reject(signal.reason);
 
-                    return;
-                }
+            return;
+        }
 
-                signal.addEventListener('abort', () => {
-                    reject(signal.reason);
-                });
-            }),
-    );
+        signal.addEventListener('abort', () => {
+            reject(signal.reason);
+        });
+    });
+}
+
+/**
+ * A fetch implementation that ignores its signal and fails as a dropped
+ * connection after a delay.
+ *
+ * @returns a response promise that rejects after ten seconds
+ */
+function failAfterTenSeconds(): Promise<Response> {
+    return new Promise<Response>((_resolve, reject) => {
+        setTimeout(() => {
+            reject(new TypeError('Failed to fetch'));
+        }, 10_000);
+    });
 }
 
 /**
@@ -190,11 +222,11 @@ describe('FetchHttpClient - request timeout', () => {
     });
 
     it('rejects with a TimeoutError, a NetworkError subtype, once the timeout elapses', async () => {
-        const fetchFn = makeAbortAwareFetch();
+        const fetchFn = makeFetch(hangUntilAborted);
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, { timeout: 5_000, onResponseError });
 
-        const pending = client.get('/items?token=secret').catch((error: unknown) => error);
+        const pending = rejectionOf(client.get('/items?token=secret'), TimeoutError);
 
         await vi.advanceTimersByTimeAsync(4_999);
         expect(lastSignal(fetchFn)?.aborted).toBe(false);
@@ -203,13 +235,10 @@ describe('FetchHttpClient - request timeout', () => {
 
         const error = await pending;
 
-        expect(error).toBeInstanceOf(TimeoutError);
         expect(error).toBeInstanceOf(NetworkError);
-        expect(error).not.toBeInstanceOf(CancelledError);
-        // Cast proven safe: toBeInstanceOf(TimeoutError) guards the type.
-        expect((error as TimeoutError).name).toBe('TimeoutError');
-        expect((error as TimeoutError).message).toBe('GET https://api.example.com/items timed out after 5000ms.');
-        expect((error as TimeoutError).cause).toBe(lastSignal(fetchFn)?.reason);
+        expect(error.name).toBe('TimeoutError');
+        expect(error.message).toBe('GET https://api.example.com/items timed out after 5000ms.');
+        expect(error.cause).toBe(lastSignal(fetchFn)?.reason);
         expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
     });
 
@@ -222,15 +251,14 @@ describe('FetchHttpClient - request timeout', () => {
         mutable.any = undefined;
 
         try {
-            const fetchFn = makeAbortAwareFetch();
-            const client = makeClient(fetchFn, { timeout: 1_000 });
+            const client = makeClient(makeFetch(hangUntilAborted), { timeout: 1_000 });
             const caller = new AbortController();
 
-            const pending = client.get('/items', { signal: caller.signal }).catch((error: unknown) => error);
+            const pending = rejectionOf(client.get('/items', { signal: caller.signal }), TimeoutError);
 
             await vi.advanceTimersByTimeAsync(1_000);
 
-            expect(await pending).toBeInstanceOf(TimeoutError);
+            await pending;
             expect(caller.signal.aborted).toBe(false);
         } finally {
             mutable.timeout = originalTimeout;
@@ -239,54 +267,66 @@ describe('FetchHttpClient - request timeout', () => {
     });
 
     it('rejects with a CancelledError carrying the caller reason when the caller aborts first', async () => {
-        const fetchFn = makeAbortAwareFetch();
         const onResponseError = vi.fn();
-        const client = makeClient(fetchFn, { timeout: 5_000, onResponseError });
+        const client = makeClient(makeFetch(hangUntilAborted), { timeout: 5_000, onResponseError });
         const caller = new AbortController();
         const reason = new Error('navigated away');
 
-        const pending = client.get('/items', { signal: caller.signal }).catch((error: unknown) => error);
+        const pending = rejectionOf(client.get('/items', { signal: caller.signal }), CancelledError);
 
         await vi.advanceTimersByTimeAsync(10);
         caller.abort(reason);
 
-        const error = await pending;
-
-        expect(error).toBeInstanceOf(CancelledError);
-        // Cast proven safe: toBeInstanceOf(CancelledError) guards the type.
-        expect((error as CancelledError).cause).toBe(reason);
+        expect((await pending).cause).toBe(reason);
         expect(onResponseError).not.toHaveBeenCalled();
     });
 
     it('rejects with a CancelledError when the caller signal had already aborted', async () => {
-        const fetchFn = makeAbortAwareFetch();
+        const fetchFn = makeFetch(hangUntilAborted);
         const client = makeClient(fetchFn, { timeout: 5_000 });
 
-        const error = await client.get('/items', { signal: AbortSignal.abort() }).catch((error: unknown) => error);
+        await rejectionOf(client.get('/items', { signal: AbortSignal.abort() }), CancelledError);
 
-        expect(error).toBeInstanceOf(CancelledError);
         expect(lastSignal(fetchFn)?.aborted).toBe(true);
     });
 
     it('keeps a caller abort a CancelledError when the timeout elapses before fetch settles', async () => {
-        const fetchFn = makeFetch(
-            () =>
-                new Promise<Response>((_resolve, reject) => {
-                    setTimeout(() => {
-                        reject(new TypeError('Failed to fetch'));
-                    }, 10_000);
-                }),
-        );
-        const client = makeClient(fetchFn, { timeout: 5_000 });
+        const client = makeClient(makeFetch(failAfterTenSeconds), { timeout: 5_000 });
         const caller = new AbortController();
 
-        const pending = client.get('/items', { signal: caller.signal }).catch((error: unknown) => error);
+        const pending = rejectionOf(client.get('/items', { signal: caller.signal }), CancelledError);
 
         await vi.advanceTimersByTimeAsync(1_000);
         caller.abort();
         await vi.advanceTimersByTimeAsync(9_000);
 
-        expect(await pending).toBeInstanceOf(CancelledError);
+        await pending;
+    });
+
+    it('keeps a timeout a TimeoutError when the caller aborts before fetch settles', async () => {
+        const client = makeClient(makeFetch(failAfterTenSeconds), { timeout: 5_000 });
+        const caller = new AbortController();
+
+        const pending = rejectionOf(client.get('/items', { signal: caller.signal }), TimeoutError);
+
+        await vi.advanceTimersByTimeAsync(6_000);
+        caller.abort();
+        await vi.advanceTimersByTimeAsync(4_000);
+
+        await pending;
+    });
+
+    it('maps an AbortError that neither the timeout nor the caller caused to a NetworkError', async () => {
+        const cause = new DOMException('The operation was aborted.', 'AbortError');
+        const client = makeClient(
+            makeFetch(() => Promise.reject(cause)),
+            { timeout: 5_000 },
+        );
+
+        const error = await rejectionOf(client.get('/items', { signal: new AbortController().signal }), NetworkError);
+
+        expect(error).not.toBeInstanceOf(TimeoutError);
+        expect(error.cause).toBe(cause);
     });
 
     it('clears the timer and detaches from the caller signal once the body is read', async () => {
@@ -304,40 +344,33 @@ describe('FetchHttpClient - request timeout', () => {
     });
 
     it('covers the body read, rejecting with a TimeoutError when the body stalls', async () => {
-        const fetchFn = makeHangingBodyFetch();
-        const client = makeClient(fetchFn, { timeout: 5_000 });
+        const client = makeClient(makeHangingBodyFetch(), { timeout: 5_000 });
 
-        const pending = client.get('/items').catch((error: unknown) => error);
+        const pending = rejectionOf(client.get('/items'), TimeoutError);
 
         await vi.advanceTimersByTimeAsync(5_000);
 
-        expect(await pending).toBeInstanceOf(TimeoutError);
+        await pending;
     });
 
     it('rejects with a CancelledError when the caller aborts while the body is read', async () => {
-        const fetchFn = makeHangingBodyFetch();
-        const client = makeClient(fetchFn, { timeout: 5_000 });
+        const client = makeClient(makeHangingBodyFetch(), { timeout: 5_000 });
         const caller = new AbortController();
 
-        const pending = client.download('/files/1', { signal: caller.signal }).catch((error: unknown) => error);
+        const pending = rejectionOf(client.download('/files/1', { signal: caller.signal }), CancelledError);
 
         await vi.advanceTimersByTimeAsync(10);
         caller.abort();
 
-        expect(await pending).toBeInstanceOf(CancelledError);
+        await pending;
     });
 
     it('retries a timed-out GET under the retry policy', async () => {
-        const fetchFn = makeAbortAwareFetch().mockImplementationOnce(async () => jsonResponse({}, 503));
-        fetchFn.mockImplementationOnce(
-            (_input, init) =>
-                new Promise<Response>((_resolve, reject) => {
-                    init?.signal?.addEventListener('abort', () => {
-                        reject(init.signal?.reason);
-                    });
-                }),
-        );
-        fetchFn.mockImplementationOnce(async () => jsonResponse({ recovered: true }));
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockResolvedValueOnce(jsonResponse({}, 503))
+            .mockImplementationOnce(hangUntilAborted)
+            .mockResolvedValueOnce(jsonResponse({ recovered: true }));
         const backoff = { delayFor: (): number => 100 };
         const client = makeClient(fetchFn, { timeout: 1_000, retry: { attempts: 2, backoff } });
 
@@ -352,34 +385,26 @@ describe('FetchHttpClient - request timeout', () => {
 
 describe('FetchHttpClient - body read failures', () => {
     it('maps a connection reset mid-body to a NetworkError', async () => {
-        const fetchFn = makeFetch(async () => resetBodyResponse());
-        const client = makeClient(fetchFn);
+        const client = makeClient(makeFetch(async () => resetBodyResponse()));
 
-        const error = await client.get('/items?page=2#top').catch((error: unknown) => error);
+        const error = await rejectionOf(client.get('/items?page=2#top'), NetworkError);
 
-        expect(error).toBeInstanceOf(NetworkError);
         expect(error).not.toBeInstanceOf(TimeoutError);
-        // Cast proven safe: toBeInstanceOf(NetworkError) guards the type.
-        expect((error as NetworkError).message).toBe(
-            'GET https://api.example.com/items failed while reading the response body.',
-        );
-        expect((error as NetworkError).cause).toBeInstanceOf(TypeError);
+        expect(error.message).toBe('GET https://api.example.com/items failed while reading the response body.');
+        expect(error.cause).toBeInstanceOf(TypeError);
     });
 
     it('maps a connection reset while reading a download to a NetworkError', async () => {
-        const fetchFn = makeFetch(async () => resetBodyResponse());
-        const client = makeClient(fetchFn);
+        const client = makeClient(makeFetch(async () => resetBodyResponse()));
 
         await expect(client.download('/files/1')).rejects.toBeInstanceOf(NetworkError);
     });
 
     it('maps a connection reset while reading an error body to a NetworkError', async () => {
-        const fetchFn = makeFetch(async () => resetBodyResponse(500));
-        const client = makeClient(fetchFn);
+        const client = makeClient(makeFetch(async () => resetBodyResponse(500)));
 
-        const error = await client.get('/items').catch((error: unknown) => error);
+        const error = await rejectionOf(client.get('/items'), NetworkError);
 
-        expect(error).toBeInstanceOf(NetworkError);
         expect(error).not.toBeInstanceOf(HttpError);
     });
 
@@ -394,15 +419,11 @@ describe('FetchHttpClient - body read failures', () => {
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, { onResponseError, retry: { attempts: 2 } });
 
-        const error = await client.get('/items?token=secret').catch((error: unknown) => error);
+        const error = await rejectionOf(client.get('/items?token=secret'), ResponseParseError);
 
-        expect(error).toBeInstanceOf(ResponseParseError);
-        // Cast proven safe: toBeInstanceOf(ResponseParseError) guards the type.
-        expect((error as ResponseParseError).status).toBe(200);
-        expect((error as ResponseParseError).message).toBe(
-            'GET https://api.example.com/items returned a JSON body that could not be parsed.',
-        );
-        expect((error as ResponseParseError).cause).toBeInstanceOf(SyntaxError);
+        expect(error.status).toBe(200);
+        expect(error.message).toBe('GET https://api.example.com/items returned a JSON body that could not be parsed.');
+        expect(error.cause).toBeInstanceOf(SyntaxError);
         expect(fetchFn).toHaveBeenCalledTimes(1);
         expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
     });
@@ -425,20 +446,42 @@ describe('FetchHttpClient - cancellation during retry backoff', () => {
         const caller = new AbortController();
         const reason = new Error('left the page');
 
-        const pending = client.get('/items', { signal: caller.signal }).catch((error: unknown) => error);
+        const pending = rejectionOf(client.get('/items?token=secret', { signal: caller.signal }), CancelledError);
 
         await vi.advanceTimersByTimeAsync(100);
         caller.abort(reason);
 
         const error = await pending;
 
-        expect(error).toBeInstanceOf(CancelledError);
-        // Cast proven safe: toBeInstanceOf(CancelledError) guards the type.
-        expect((error as CancelledError).message).toBe('GET /items was cancelled before its retry.');
-        expect((error as CancelledError).cause).toBe(reason);
+        expect(error.message).toBe('GET https://api.example.com/items was cancelled before its retry.');
+        expect(error.cause).toBe(reason);
         expect(vi.getTimerCount()).toBe(0);
         expect(fetchFn).toHaveBeenCalledTimes(1);
         expect(onResponseError).not.toHaveBeenCalled();
+    });
+
+    it('names the redacted request URL when an interceptor failed before the request resolved', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const caller = new AbortController();
+        const client = makeClient(fetchFn, {
+            retry: { attempts: 2, backoff: { delayFor: (): number => 10_000 } },
+            requestInterceptors: [
+                () => {
+                    throw new NetworkError('token refresh failed');
+                },
+            ],
+        });
+
+        const pending = rejectionOf(
+            client.get('/reset?token=secret', { query: { page: 2 }, signal: caller.signal }),
+            CancelledError,
+        );
+
+        await vi.advanceTimersByTimeAsync(100);
+        caller.abort();
+
+        expect((await pending).message).toBe('GET https://api.example.com/reset was cancelled before its retry.');
+        expect(fetchFn).not.toHaveBeenCalled();
     });
 
     it('skips the backoff entirely when the caller signal aborted during the failed attempt', async () => {
@@ -450,17 +493,17 @@ describe('FetchHttpClient - cancellation during retry backoff', () => {
         });
         const client = makeClient(fetchFn, { retry: { attempts: 2, backoff: { delayFor: (): number => 10_000 } } });
 
-        const error = await client.get('/items', { signal: caller.signal }).catch((error: unknown) => error);
+        await rejectionOf(client.get('/items', { signal: caller.signal }), CancelledError);
 
-        expect(error).toBeInstanceOf(CancelledError);
         expect(vi.getTimerCount()).toBe(0);
         expect(fetchFn).toHaveBeenCalledTimes(1);
     });
 
     it('detaches from the caller signal once the backoff elapses', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}, 503));
-        fetchFn.mockImplementationOnce(async () => jsonResponse({}, 503));
-        fetchFn.mockImplementationOnce(async () => jsonResponse({ recovered: true }));
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockResolvedValueOnce(jsonResponse({}, 503))
+            .mockResolvedValueOnce(jsonResponse({ recovered: true }));
         const client = makeClient(fetchFn, { retry: { attempts: 2, backoff: { delayFor: (): number => 100 } } });
         const caller = new AbortController();
         const removeListener = vi.spyOn(caller.signal, 'removeEventListener');

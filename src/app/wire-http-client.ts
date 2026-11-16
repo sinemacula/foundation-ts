@@ -10,15 +10,15 @@
  * the error with request context; otherwise unexpected failures are captured
  * only. Module response-error handlers always run after the resolved handler,
  * in registry order, and the toast and reporting services are read lazily on
- * every invocation. Each handler, and each step of the default handler, runs in
- * isolation: a throwing step is captured and never skips the others. Reported
- * URLs are stripped of their query string and fragment.
+ * every invocation. Every handler runs in isolation, as does the default
+ * handler's toast, so a throwing step is captured and never skips the rest.
+ * Reported URLs are stripped of their query string and fragment.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 
-import { FetchHttpClient, stripQueryAndFragment } from '../http/fetch-http-client';
+import { FetchHttpClient } from '../http/fetch-http-client';
 import type {
     HttpClient,
     HttpRequest,
@@ -28,6 +28,7 @@ import type {
 } from '../http/http-client';
 import { HttpError, HttpValidationError } from '../http/http-error';
 import type { ModuleHttpContributions } from '../http/module-http-contributions';
+import { stripQueryAndFragment } from '../support/url';
 import { installApi, reporting, toasts } from './services';
 import type { FoundationConfig } from './foundation-config';
 
@@ -123,7 +124,9 @@ function buildDefaultClient<T extends FoundationConfig>(tools: WireHttpClientToo
  * @param options - the wiring inputs carrying the override, key, and handlers
  * @returns the composed response-error handler
  */
-function composeResponseErrorHandler<T extends FoundationConfig>(options: WireHttpClientOptions<T>): ResponseErrorHandler {
+function composeResponseErrorHandler<T extends FoundationConfig>(
+    options: WireHttpClientOptions<T>,
+): ResponseErrorHandler {
     const preset = options.onResponseError ?? createDefaultResponseErrorHandler(options.unexpectedErrorToastKey);
     const moduleHandlers = options.contributions.responseErrorHandlers;
 
@@ -159,9 +162,7 @@ function createDefaultResponseErrorHandler(toastKey: string | undefined): Respon
             });
         }
 
-        runIsolated(request, () => {
-            reporting().captureError(error, { source: 'http', ...describeRequest(request) });
-        });
+        reporting().captureError(error, reportContext('http', request));
     };
 }
 
@@ -178,7 +179,7 @@ function runIsolated(request: HttpRequest, step: () => void): void {
         step();
     } catch (failure) {
         try {
-            reporting().captureError(failure, { source: 'http-response-error-handler', ...describeRequest(request) });
+            reporting().captureError(failure, reportContext('http-response-error-handler', request));
         } catch {
             // The reporter is unavailable or failing; nothing is left to tell.
         }
@@ -186,22 +187,13 @@ function runIsolated(request: HttpRequest, step: () => void): void {
 }
 
 /**
- * The request context attached to a report.
- */
-interface ReportedRequest {
-    /** The request's HTTP method. */
-    readonly method: string;
-
-    /** The request URL without its query string or fragment. */
-    readonly url: string;
-}
-
-/**
- * Describe a request for a report, without the query string or fragment.
+ * Build the context a failure is reported with, its URL stripped of the query
+ * string and fragment.
  *
+ * @param source - what reported the failure
  * @param request - the failed request
- * @returns the method and stripped URL
+ * @returns the report context
  */
-function describeRequest(request: HttpRequest): ReportedRequest {
-    return { method: request.method, url: stripQueryAndFragment(request.url) };
+function reportContext(source: string, request: HttpRequest): Readonly<Record<string, string>> {
+    return { source, method: request.method, url: stripQueryAndFragment(request.url) };
 }
