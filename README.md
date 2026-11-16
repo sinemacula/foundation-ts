@@ -78,14 +78,14 @@ Everything the core installs is reachable afterwards through the service accesso
 ## Realtime
 
 `@sinemacula/foundation/realtime/web-socket-connection` is the WebSocket adapter for the `RealtimeConnection` port.
-It reconnects with exponential backoff after any close it did not initiate, and `disconnect()` stops it and resets
-the backoff. Wire the token refresh into `beforeReconnect`: a hook that resolves `false` or rejects skips that
-attempt and retries after the next backoff delay, so a failed refresh never reconnects with stale credentials.
+It reconnects with exponential backoff after any close it did not initiate, and `disconnect()` stops it until the next
+`connect()`, which restarts the backoff. `beforeReconnect` runs before each reconnect and skips the attempt when it
+resolves `false` or rejects, so map the refresh outcome to that decision explicitly:
 
 ```ts
 const connection = new WebSocketConnection({
     url: () => `wss://example.test/realtime?token=${readAccessToken()}`,
-    beforeReconnect: () => coordinator.refresh(),
+    beforeReconnect: async () => (await coordinator.refresh()).kind === 'refreshed',
     onError: error => reporter.captureError(error),
 });
 

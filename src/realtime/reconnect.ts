@@ -13,14 +13,17 @@
 /**
  * Awaited before each reconnect attempt opens a fresh transport.
  *
- * Resolving `false` or rejecting abandons the attempt and schedules the next
- * one through backoff, so a refresh that reports failure by resolving `false`
- * (such as `TokenRefreshCoordinator.refresh`) can be wired in directly. Any
- * other result proceeds with the reconnect.
+ * Resolving `false` or rejecting skips the attempt and reschedules it through
+ * backoff; any other result proceeds. Map a classified refresh explicitly:
  *
- * @returns a promise settling once the attempt may proceed
+ * `async () => (await coordinator.refresh()).kind === 'refreshed'`
+ *
+ * On a terminal outcome (sign-out, pending authentication) call `disconnect()`
+ * instead of skipping attempts.
+ *
+ * @returns `false` to skip this attempt
  */
-export type BeforeReconnectHook = () => Promise<unknown>;
+export type BeforeReconnectHook = () => Promise<boolean | undefined> | Promise<void>;
 
 /** The transport-specific callbacks one reconnect attempt drives. */
 export interface ReconnectSteps {

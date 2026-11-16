@@ -16,6 +16,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExponentialBackoff } from '../exponential-backoff';
 import type { RealtimeConnection } from '../realtime-connection';
+import { RealtimeError } from '../realtime-error';
+import type { BeforeReconnectHook } from '../reconnect';
 
 /** The contract-relevant construction options a harness forwards to its adapter. */
 export interface ContractConnectionOptions {
@@ -26,7 +28,7 @@ export interface ContractConnectionOptions {
     readonly backoff?: ExponentialBackoff;
 
     /** Optional hook awaited before each reconnect attempt. */
-    readonly beforeReconnect?: () => Promise<void>;
+    readonly beforeReconnect?: BeforeReconnectHook;
 }
 
 /** One fake transport, adapted to a transport-agnostic surface. */
@@ -194,6 +196,44 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
                 vi.advanceTimersByTime(1);
                 expect(transports).toHaveLength(2);
             });
+
+            it('throws a RealtimeError carrying the cause and leaves the state unchanged when the transport cannot be opened', () => {
+                const cause = new Error('no token');
+                let failing = true;
+                const { connection, transports } = harness.create({
+                    url: () => {
+                        if (failing) {
+                            throw cause;
+                        }
+
+                        return 'realtime://test';
+                    },
+                });
+                const states: string[] = [];
+
+                connection.onStateChange(state => states.push(state));
+
+                let thrown: unknown;
+
+                try {
+                    connection.connect();
+                } catch (error) {
+                    thrown = error;
+                }
+
+                expect(thrown).toBeInstanceOf(RealtimeError);
+                expect(thrown).toHaveProperty('cause', cause);
+                expect(connection.state).toBe('idle');
+                expect(states).toEqual([]);
+                expect(transports).toHaveLength(0);
+                expect(vi.getTimerCount()).toBe(0);
+
+                failing = false;
+                connection.connect();
+
+                expect(transports).toHaveLength(1);
+                expect(connection.state).toBe('connecting');
+            });
         });
 
         describe('disconnect()', () => {
@@ -216,7 +256,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
             });
 
             it('cancels a pending reconnect timer', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(500) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(500),
+                });
 
                 connection.connect();
                 transports.at(0)?.fail();
@@ -231,7 +274,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
             });
 
             it('does not reconnect after disconnect', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(100) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(100),
+                });
 
                 connection.connect();
                 connection.disconnect();
@@ -244,7 +290,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
 
         describe('reconnect', () => {
             it('schedules a reconnect after a failure', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(200) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(200),
+                });
 
                 connection.connect();
                 transports.at(0)?.fail();
@@ -348,7 +397,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
             });
 
             it('re-delivers to a subscription registered before connect after reconnect', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(50) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(50),
+                });
 
                 const received: string[] = [];
 
@@ -428,12 +480,13 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
             });
 
             it('schedules the next backoff attempt without creating a transport when the hook rejects', async () => {
-                let calls = 0;
+                const beforeReconnect = vi
+                    .fn(() => Promise.resolve())
+                    .mockRejectedValueOnce(new Error('token refresh failed'));
                 const { connection, transports } = harness.create({
                     url: 'realtime://test',
                     backoff: fixedBackoff(100),
-                    beforeReconnect: () =>
-                        ++calls === 1 ? Promise.reject(new Error('token refresh failed')) : Promise.resolve(),
+                    beforeReconnect,
                 });
 
                 connection.connect();
@@ -450,7 +503,30 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
 
                 // Next backoff attempt: hook resolves, transport is created.
                 expect(transports).toHaveLength(2);
-                expect(calls).toBe(2);
+                expect(beforeReconnect).toHaveBeenCalledTimes(2);
+            });
+
+            it('schedules the next backoff attempt without creating a transport when the hook resolves false', async () => {
+                const beforeReconnect = vi.fn(() => Promise.resolve(true)).mockResolvedValueOnce(false);
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(100),
+                    beforeReconnect,
+                });
+
+                connection.connect();
+                transports.at(0)?.fail();
+
+                await vi.advanceTimersByTimeAsync(100);
+
+                expect(transports).toHaveLength(1);
+                expect(connection.state).toBe('connecting');
+                expect(vi.getTimerCount()).toBe(1);
+
+                await vi.advanceTimersByTimeAsync(100);
+
+                expect(beforeReconnect).toHaveBeenCalledTimes(2);
+                expect(transports).toHaveLength(2);
             });
 
             it('does not create a transport when disconnected while the hook is pending and it resolves', async () => {
@@ -681,7 +757,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
             });
 
             it('does not emit duplicate states', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(50) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(50),
+                });
 
                 const states: string[] = [];
 

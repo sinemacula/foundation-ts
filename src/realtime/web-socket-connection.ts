@@ -45,10 +45,10 @@ export interface WebSocketConnectionOptions {
     /** Override the WebSocket constructor. Defaults to `(url, protocols) => new WebSocket(url, protocols)`. */
     readonly webSocketFactory?: WebSocketFactory;
 
-    /** Awaited after the backoff delay fires and before each reconnect attempt opens a new WebSocket. Never called for the initial `connect()` or a manual `connect()` call. Wire the application's `TokenRefreshCoordinator` here (`() => coordinator.refresh()`) so an expired token is refreshed before each reconnect, and pair it with the `url()` builder reading the fresh token. Resolving `false` or rejecting abandons the attempt without opening a socket and schedules the next one through backoff, so a failed refresh never reconnects with stale credentials; call `disconnect()` to stop retrying, for example on sign-out. */
+    /** Awaited before each reconnect, never before a manual `connect()`; pair it with a `url()` builder that reads the fresh token. */
     readonly beforeReconnect?: BeforeReconnectHook;
 
-    /** Invoked with every error the connection contains rather than throws: a subscriber that threw, and a reconnect attempt whose `url()` builder or socket factory threw (that attempt is rescheduled through backoff). A throwing handler is ignored. When omitted, contained errors are dropped. */
+    /** Receives the errors the connection contains rather than throws: a throwing subscriber or a failed reconnect open. */
     readonly onError?: (error: unknown) => void;
 }
 
@@ -57,9 +57,7 @@ export interface WebSocketConnectionOptions {
  *
  * Reconnects automatically on non-client-initiated closes. All registered event
  * listeners are re-applied after every reconnect. Provides an additional
- * {@link WebSocketConnection.send} method for outbound messages. When
- * `beforeReconnect` is supplied, it is awaited before each reconnect opens a
- * new WebSocket.
+ * {@link WebSocketConnection.send} method for outbound messages.
  */
 export class WebSocketConnection implements RealtimeConnection {
     /** The endpoint URL, or a factory returning it per connect. */
@@ -142,8 +140,8 @@ export class WebSocketConnection implements RealtimeConnection {
     }
 
     /**
-     * Close the connection permanently, cancelling any pending reconnect and
-     * restarting the backoff sequence for the next `connect()`.
+     * Close the connection and cancel any pending reconnect until the next
+     * `connect()`, which restarts the backoff.
      */
     disconnect(): void {
         this.#generation += 1;

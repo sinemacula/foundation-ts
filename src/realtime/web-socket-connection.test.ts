@@ -8,7 +8,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExponentialBackoff } from './exponential-backoff';
-import { RealtimeError } from './realtime-error';
 import { describeRealtimeContract, type RealtimeContractHarness } from './test-support/realtime-connection-contract';
 import { WebSocketConnection, type WebSocketFactory } from './web-socket-connection';
 
@@ -95,6 +94,9 @@ interface RecordingFactory {
 
     /** The factory to inject into the connection. */
     readonly factory: WebSocketFactory;
+
+    /** While true, the factory throws instead of creating a socket. */
+    failing: boolean;
 }
 
 /**
@@ -102,35 +104,26 @@ interface RecordingFactory {
  * The cast to `WebSocket` is confined to the closure so every test body can use
  * the strongly-typed {@link FakeWebSocket} directly.
  *
- * @param failures - how many leading calls throw instead of creating a socket
- * @returns the recorded sockets and the factory
+ * @returns the recorded sockets, the factory and its failure switch
  */
-function makeFactory(failures: number = 0): RecordingFactory {
-    const sockets: FakeWebSocket[] = [];
-    let remainingFailures = failures;
+function makeFactory(): RecordingFactory {
+    const recording: RecordingFactory = {
+        sockets: [],
+        factory: (url, protocols) => {
+            if (recording.failing) {
+                throw new Error('factory failed');
+            }
 
-    /**
-     * Create and record a fake socket, or throw while failures remain.
-     *
-     * @param url - the WebSocket endpoint URL
-     * @param protocols - optional subprotocol(s)
-     * @returns the fake, typed as a WebSocket
-     */
-    const factory: WebSocketFactory = (url, protocols) => {
-        if (remainingFailures > 0) {
-            remainingFailures--;
+            const socket = new FakeWebSocket(url, protocols);
 
-            throw new Error('factory failed');
-        }
+            recording.sockets.push(socket);
 
-        const socket = new FakeWebSocket(url, protocols);
-
-        sockets.push(socket);
-
-        return socket as unknown as WebSocket;
+            return socket as unknown as WebSocket;
+        },
+        failing: false,
     };
 
-    return { sockets, factory };
+    return recording;
 }
 
 /**
@@ -567,32 +560,20 @@ describe('WebSocketConnection', () => {
     });
 
     describe('open failures', () => {
-        it('throws a RealtimeError carrying the cause and leaves the state idle when the factory throws on connect()', () => {
-            const { sockets, factory } = makeFactory(1);
-            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
-            const states: string[] = [];
+        it('wraps a throwing socket factory in a RealtimeError on connect()', () => {
+            const recording = makeFactory();
+            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: recording.factory });
 
-            conn.onStateChange(state => states.push(state));
+            recording.failing = true;
 
-            let thrown: unknown;
-
-            try {
-                conn.connect();
-            } catch (error) {
-                thrown = error;
-            }
-
-            expect(thrown).toBeInstanceOf(RealtimeError);
-            expect((thrown as RealtimeError).message).toBe('Cannot connect: the WebSocket could not be opened.');
-            expect((thrown as RealtimeError).cause).toEqual(new Error('factory failed'));
+            expect(() => conn.connect()).toThrow(
+                expect.objectContaining({
+                    name: 'RealtimeError',
+                    message: 'Cannot connect: the WebSocket could not be opened.',
+                    cause: new Error('factory failed'),
+                }),
+            );
             expect(conn.state).toBe('idle');
-            expect(states).toEqual([]);
-            expect(vi.getTimerCount()).toBe(0);
-
-            conn.connect();
-
-            expect(sockets).toHaveLength(1);
-            expect(conn.state).toBe('connecting');
         });
 
         it('leaves the state closed when the url builder throws on a connect() after disconnect()', () => {
@@ -621,24 +602,18 @@ describe('WebSocketConnection', () => {
 
         it('reschedules with backoff and reports the error when the factory throws on a reconnect', async () => {
             const errors: unknown[] = [];
-            const { sockets, factory } = makeFactory();
-            let failing = false;
+            const recording = makeFactory();
+            const { sockets } = recording;
             const conn = new WebSocketConnection({
                 url: 'ws://test',
                 backoff: new ExponentialBackoff({ initialDelay: 100, multiplier: 2, maxDelay: 10_000 }),
-                webSocketFactory: (url, protocols) => {
-                    if (failing) {
-                        throw new Error('factory failed');
-                    }
-
-                    return factory(url, protocols);
-                },
+                webSocketFactory: recording.factory,
                 onError: error => errors.push(error),
             });
 
             conn.connect();
             sockets.at(0)?.emitClose();
-            failing = true;
+            recording.failing = true;
 
             await vi.advanceTimersByTimeAsync(100);
 
@@ -646,7 +621,7 @@ describe('WebSocketConnection', () => {
             expect(conn.state).toBe('connecting');
             expect(vi.getTimerCount()).toBe(1);
 
-            failing = false;
+            recording.failing = false;
 
             // Attempt 1 waits 200 ms: the failed attempt advanced the backoff.
             await vi.advanceTimersByTimeAsync(199);
@@ -684,36 +659,6 @@ describe('WebSocketConnection', () => {
 
             await vi.advanceTimersByTimeAsync(100);
 
-            expect(sockets).toHaveLength(2);
-        });
-    });
-
-    describe('beforeReconnect resolving false', () => {
-        it('abandons the attempt without opening a socket and retries through backoff', async () => {
-            const beforeReconnect = vi
-                .fn<() => Promise<unknown>>()
-                .mockResolvedValueOnce(false)
-                .mockResolvedValue(true);
-            const { sockets, factory } = makeFactory();
-            const conn = new WebSocketConnection({
-                url: 'ws://test',
-                backoff: fixedBackoff(100),
-                beforeReconnect,
-                webSocketFactory: factory,
-            });
-
-            conn.connect();
-            sockets.at(0)?.emitClose();
-
-            await vi.advanceTimersByTimeAsync(100);
-
-            expect(sockets).toHaveLength(1);
-            expect(conn.state).toBe('connecting');
-            expect(vi.getTimerCount()).toBe(1);
-
-            await vi.advanceTimersByTimeAsync(100);
-
-            expect(beforeReconnect).toHaveBeenCalledTimes(2);
             expect(sockets).toHaveLength(2);
         });
     });
