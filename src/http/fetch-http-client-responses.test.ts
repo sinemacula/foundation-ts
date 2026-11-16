@@ -22,6 +22,14 @@ type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a JSON response.
+ *
+ * @param body - the value to serialise
+ * @param status - the response status
+ * @param extra - additional response headers
+ * @returns the response
+ */
 function jsonResponse(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
     return new Response(JSON.stringify(body), {
         status,
@@ -29,6 +37,13 @@ function jsonResponse(body: unknown, status = 200, extra: Record<string, string>
     });
 }
 
+/**
+ * Build a plain-text response.
+ *
+ * @param body - the response text
+ * @param status - the response status
+ * @returns the response
+ */
 function textResponse(body: string, status = 200): Response {
     return new Response(body, {
         status,
@@ -36,10 +51,22 @@ function textResponse(body: string, status = 200): Response {
     });
 }
 
+/**
+ * Build a response without a body.
+ *
+ * @param status - the response status
+ * @returns the response
+ */
 function emptyResponse(status = 204): Response {
     return new Response(null, { status });
 }
 
+/**
+ * Build an HTML error response.
+ *
+ * @param status - the response status
+ * @returns the response
+ */
 function nonJsonErrorResponse(status: number): Response {
     return new Response('<html>error</html>', {
         status,
@@ -47,12 +74,25 @@ function nonJsonErrorResponse(status: number): Response {
     });
 }
 
+/**
+ * Wrap a fetch implementation in a typed stub.
+ *
+ * @param impl - the fetch implementation
+ * @returns the stub
+ */
 function makeFetch(
     impl: (...args: FetchArgs) => Promise<Response>,
 ): ReturnType<typeof vi.fn<(...args: FetchArgs) => Promise<Response>>> {
     return vi.fn<(...args: FetchArgs) => Promise<Response>>(impl);
 }
 
+/**
+ * Build a client against the stub with optional extra options.
+ *
+ * @param fetchFn - the fetch stub
+ * @param extra - options to merge over the base URL and stub
+ * @returns the client
+ */
 function makeClient(
     fetchFn: typeof fetch,
     extra: Partial<ConstructorParameters<typeof FetchHttpClient>[0]> = {},

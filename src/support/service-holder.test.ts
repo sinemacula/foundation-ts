@@ -10,7 +10,9 @@ import { describe, expect, it } from 'vitest';
 import { createServiceHolder } from './service-holder';
 import { SupportError } from './support-error';
 
+/** A stand-in service the holder carries. */
 interface Widget {
+    /** Identifies the widget instance. */
     readonly label: string;
 }
 

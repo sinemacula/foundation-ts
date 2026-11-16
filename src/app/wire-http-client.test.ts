@@ -58,6 +58,11 @@ function createRequest(overrides: Partial<HttpRequest> = {}): HttpRequest {
 
 /** Build an HTTP client stand-in that fails loudly if any method is invoked. */
 function createHttpClientStub(): HttpClient {
+    /**
+     * Reject every call, since the stub must never be used.
+     *
+     * @returns a rejected promise
+     */
     const fail = (): Promise<never> => Promise.reject(new Error('not implemented'));
 
     return { get: fail, post: fail, put: fail, patch: fail, delete: fail, download: fail };
@@ -86,8 +91,13 @@ function createRecordingReporter(): RecordingReporter {
  * A fetch fake recording every call and replaying queued responses in order.
  */
 interface FetchStub {
+    /** The fetch seam to hand to the client. */
     readonly fetchFn: typeof fetch;
+
+    /** The URL of every call, in call order. */
     readonly urls: string[];
+
+    /** The init of every call, in call order. */
     readonly inits: (RequestInit | undefined)[];
 }
 
@@ -102,6 +112,13 @@ function createFetchStub(...responses: ReadonlyArray<() => Response>): FetchStub
     const urls: string[] = [];
     const inits: (RequestInit | undefined)[] = [];
 
+    /**
+     * Record the call and replay the next queued response.
+     *
+     * @param input - the request URL
+     * @param init - the request init
+     * @returns the queued response, or an empty 200 once exhausted
+     */
     const fetchFn: typeof fetch = (input, init) => {
         urls.push(String(input));
         inits.push(init);
@@ -162,9 +179,12 @@ function captureTools(overrides: CaptureOverrides = {}): WireHttpClientTools<Fou
     return captured;
 }
 
+/** One raised toast. */
 interface RecordedToast {
+    /** The toast variant. */
     readonly variant: string;
 
+    /** The toast message key. */
     readonly message: string;
 }
 
@@ -221,11 +241,25 @@ describe('wireHttpClient', () => {
 
         it('runs preset interceptors before module interceptors', async () => {
             const log: string[] = [];
+
+            /**
+             * Tag the request as seen by the preset.
+             *
+             * @param request - the outgoing request
+             * @returns the tagged request
+             */
             const preset: RequestInterceptor = request => {
                 log.push('preset');
 
                 return { ...request, headers: { ...request.headers, 'x-chain': 'preset' } };
             };
+
+            /**
+             * Append the module tag to the preset tag.
+             *
+             * @param request - the outgoing request
+             * @returns the tagged request
+             */
             const moduleInterceptor: RequestInterceptor = request => {
                 log.push('module');
 

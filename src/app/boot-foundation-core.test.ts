@@ -74,6 +74,11 @@ function createConfirmerStub(): Confirmer {
 
 /** Build an HTTP client stand-in that fails loudly if any method is invoked. */
 function createHttpClientStub(): HttpClient {
+    /**
+     * Reject every call, since the stub must never be used.
+     *
+     * @returns a rejected promise
+     */
     const fail = (): Promise<never> => Promise.reject(new Error('not implemented'));
 
     return { get: fail, post: fail, put: fail, patch: fail, delete: fail, download: fail };
@@ -108,6 +113,7 @@ function createSequencedFetch(...apiResponses: ReadonlyArray<() => Response>): S
     const urls: string[] = [];
     const inits: (RequestInit | undefined)[] = [];
 
+    /** Serve the runtime document, then the queued API responses in order. */
     const fetchFn: typeof fetch = (input, init) => {
         urls.push(String(input));
         inits.push(init);
@@ -139,6 +145,7 @@ function createRecordingToaster(): Toaster & { readonly errors: string[] } {
     };
 }
 
+/** Build an environment that defines no keys. */
 const environmentOf = (): Environment => new Environment(new ObjectEnvironmentSource({}));
 
 describe('bootFoundationCore', () => {
@@ -327,6 +334,7 @@ describe('bootFoundationCore', () => {
         }
 
         it('runs the preset interceptors on requests through the built client', async () => {
+            /** Stamp a preset header onto the request. */
             const stamp: RequestInterceptor = request => ({
                 ...request,
                 headers: { ...request.headers, 'x-preset': 'stamped' },

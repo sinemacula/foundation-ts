@@ -37,6 +37,7 @@ const SESSION_EXPIRY_EPOCH_MS = 1_798_761_599_000;
  * queued outcomes in order.
  */
 class FakeSessionApi implements SessionApi {
+    /** The calls made, by method name. */
     readonly calls: string[] = [];
     readonly loginCalls: Array<{ credentials: unknown; device: SessionDevice }> = [];
     readonly refreshCalls: string[] = [];

@@ -22,6 +22,13 @@ type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a JSON response.
+ *
+ * @param body - the value to serialise
+ * @param status - the response status
+ * @returns the response
+ */
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
         status,
@@ -29,12 +36,25 @@ function jsonResponse(body: unknown, status = 200): Response {
     });
 }
 
+/**
+ * Wrap a fetch implementation in a typed stub.
+ *
+ * @param impl - the fetch implementation
+ * @returns the stub
+ */
 function makeFetch(
     impl: (...args: FetchArgs) => Promise<Response>,
 ): ReturnType<typeof vi.fn<(...args: FetchArgs) => Promise<Response>>> {
     return vi.fn<(...args: FetchArgs) => Promise<Response>>(impl);
 }
 
+/**
+ * Build a client against the stub with optional extra options.
+ *
+ * @param fetchFn - the fetch stub
+ * @param extra - options to merge over the base URL and stub
+ * @returns the client
+ */
 function makeClient(
     fetchFn: typeof fetch,
     extra: Partial<ConstructorParameters<typeof FetchHttpClient>[0]> = {},

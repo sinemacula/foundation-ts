@@ -14,15 +14,25 @@ import { ResourceClient } from './resource-client';
 
 /** A minimal domain type used to exercise the resource client. */
 interface Widget {
+    /** The widget identifier. */
     readonly id: string;
+
+    /** The widget display name. */
     readonly name: string;
 }
 
 /** The shape of a single call recorded by {@link FakeHttpClient}. */
 interface RecordedCall {
+    /** The HTTP method called. */
     readonly method: string;
+
+    /** The request path. */
     readonly path: string;
+
+    /** The request body, if any. */
     readonly body: unknown;
+
+    /** The request options passed through. */
     readonly options: HttpRequestOptions | undefined;
 }
 
@@ -31,7 +41,10 @@ interface RecordedCall {
  * queued response payloads in order.
  */
 class FakeHttpClient implements HttpClient {
+    /** Every call made, in order. */
     readonly calls: RecordedCall[] = [];
+
+    /** The queued response payloads, consumed in order. */
     readonly #queue: unknown[] = [];
 
     /**
@@ -43,30 +56,84 @@ class FakeHttpClient implements HttpClient {
         this.#queue.push(value);
     }
 
+    /**
+     * Record a GET call.
+     *
+     * @param path - the request path
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     get<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('GET', path, undefined, options);
     }
 
+    /**
+     * Record a POST call.
+     *
+     * @param path - the request path
+     * @param body - the request body
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     post<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('POST', path, body, options);
     }
 
+    /**
+     * Record a PUT call.
+     *
+     * @param path - the request path
+     * @param body - the request body
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     put<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('PUT', path, body, options);
     }
 
+    /**
+     * Record a PATCH call.
+     *
+     * @param path - the request path
+     * @param body - the request body
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     patch<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('PATCH', path, body, options);
     }
 
+    /**
+     * Record a DELETE call.
+     *
+     * @param path - the request path
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     delete<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('DELETE', path, undefined, options);
     }
 
+    /**
+     * Record a download call.
+     *
+     * @param path - the request path
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     download(path: string, options?: HttpRequestOptions): Promise<Blob> {
         return this.#consume('DOWNLOAD', path, undefined, options);
     }
 
+    /**
+     * Record a call and resolve with the next queued payload.
+     *
+     * @param method - the HTTP method called
+     * @param path - the request path
+     * @param body - the request body, if any
+     * @param options - the request options
+     * @returns the next queued payload
+     */
     #consume<T>(method: string, path: string, body: unknown, options: HttpRequestOptions | undefined): Promise<T> {
         this.calls.push({ method, path, body, options });
 

@@ -12,13 +12,29 @@ import type { ColorSchemeApplier, SystemColorSchemeSource } from './color-scheme
 import { MemoryStorage } from '../storage/memory-storage';
 import type { ColorSchemePreference, ResolvedColorScheme } from './color-scheme';
 
+/** A controllable system colour-scheme source that counts subscriptions. */
 interface StubSource extends SystemColorSchemeSource {
+    /** Whether the system currently prefers dark. */
     dark: boolean;
+
+    /** How many times subscribe() was called. */
     subscribeCount: number;
+
+    /** How many times a subscription was torn down. */
     unsubscribeCount: number;
+
+    /**
+     * Notify the current subscriber that the system preference changed.
+     */
     fireChange(): void;
 }
 
+/**
+ * Build a stub system colour-scheme source.
+ *
+ * @param dark - whether the system starts out preferring dark
+ * @returns the stub source
+ */
 function makeSource(dark = false): StubSource {
     let cb: (() => void) | null = null;
 
@@ -44,10 +60,16 @@ function makeSource(dark = false): StubSource {
     return source;
 }
 
+/** A colour-scheme applier that records every call. */
 interface StubApplier extends ColorSchemeApplier {
     calls: Array<{ resolved: ResolvedColorScheme; preference: ColorSchemePreference }>;
 }
 
+/**
+ * Build a recording colour-scheme applier.
+ *
+ * @returns the stub applier
+ */
 function makeApplier(): StubApplier {
     const calls: StubApplier['calls'] = [];
 

@@ -10,7 +10,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MiddlewareContext, MiddlewareResult, RouteMiddleware } from './middleware';
 import { next, redirect, runMiddlewarePipeline } from './middleware';
 
+/** A minimal route the pipeline passes through. */
 interface StubRoute {
+    /** The route path. */
     readonly path: string;
 }
 

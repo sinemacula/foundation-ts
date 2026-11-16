@@ -12,6 +12,13 @@ import { ApiQuery } from './api-query';
 // ---------------------------------------------------------------------------
 // Helper: parse the `filters` parameter back to an object
 // ---------------------------------------------------------------------------
+
+/**
+ * Parse the `filters` parameter of a query back to an object.
+ *
+ * @param query - the query to read
+ * @returns the decoded filter tree, or an empty object when none is set
+ */
 function parsedFilters(query: ApiQuery): unknown {
     const params = query.toQueryParameters();
 
@@ -28,6 +35,14 @@ function parsedFilters(query: ApiQuery): unknown {
 // object-literal key positions in test assertions where Biome might inspect
 // them).
 // ---------------------------------------------------------------------------
+
+/**
+ * Build a wire-style object from entry tuples, keeping `$`-prefixed keys out of
+ * object-literal key positions.
+ *
+ * @param entries - key-value pairs for the record
+ * @returns a plain record
+ */
 function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string, unknown> {
     return Object.fromEntries(entries);
 }

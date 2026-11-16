@@ -47,6 +47,11 @@ import type { ColorSchemeService } from '../theme/color-scheme-service';
 
 /** Build an HTTP client stand-in that fails loudly if any method is invoked. */
 function createHttpClientStub(): HttpClient {
+    /**
+     * Reject every call, since the stub must never be used.
+     *
+     * @returns a rejected promise
+     */
     const fail = (): Promise<never> => Promise.reject(new Error('not implemented'));
 
     return { get: fail, post: fail, put: fail, patch: fail, delete: fail, download: fail };
@@ -78,10 +83,18 @@ function createRealtimeConnectionStub(): RealtimeConnection {
     };
 }
 
+/** One service accessor and how to install what it resolves. */
 interface ServiceCase {
+    /** The accessor's name, for the test title. */
     readonly accessorName: string;
+
+    /** The error message the accessor throws before install. */
     readonly message: string;
+
+    /** Install the service the accessor resolves. */
     readonly install: () => unknown;
+
+    /** Resolve the service through its accessor. */
     readonly accessor: () => unknown;
 }
 
