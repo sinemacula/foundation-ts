@@ -40,7 +40,7 @@ services on top. Everything platform-specific arrives through an injected port.
 | `src/realtime/`      | Live connections behind a port: a WebSocket adapter plus the exponential-backoff reconnect platform adapters share | `RealtimeConnection`      |
 | `src/reporting/`     | Error reporting through a swappable reporter and a breadcrumb trail                                                | `ErrorReporter`           |
 | `src/router/`        | The navigation middleware contract and pipeline, generic over each platform's route and location types             | `RouteMiddleware`         |
-| `src/session/`       | The session core: lifecycle transitions, storage keys, redirect sanitising and a default `/auth` gateway           | `SessionApi`              |
+| `src/session/`       | The session core: lifecycle, refresh outcomes, async persistence and a default auth gateway (body or cookie)       | `SessionApi`              |
 | `src/storage/`       | A synchronous key-value storage port with in-memory and key-namespacing adapters                                   | `KeyValueStorage`         |
 | `src/support/`       | Shared primitives: service holders, deep freeze and record guards                                                  | -                         |
 | `src/theme/`         | Colour-scheme state: preference resolution and the OS-source and applier ports                                     | `ColorSchemeService`      |
