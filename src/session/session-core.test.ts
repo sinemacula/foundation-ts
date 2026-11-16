@@ -1704,4 +1704,27 @@ describe('sessionIdentity', () => {
 
         expect(sessionIdentity(state)).toBeNull();
     });
+
+    it('stays the same throughout a sign-out until the session is cleared', async () => {
+        const { state, api, context } = await signedIn(tokens('a'));
+        const identity = sessionIdentity(state);
+        const response = deferred<undefined>();
+        api.logouts.push(response.promise);
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+
+        const logout = logoutSession(state, context);
+
+        expect(sessionIdentity(state)).toBe(identity);
+
+        await refreshSession(state, context);
+        state.user = ALICE;
+        await flush();
+
+        expect(sessionIdentity(state)).toBe(identity);
+
+        response.resolve(undefined);
+        await logout;
+
+        expect(sessionIdentity(state)).toBeNull();
+    });
 });

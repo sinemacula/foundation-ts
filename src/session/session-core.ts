@@ -55,8 +55,11 @@ interface Ledger {
     /** Started by every sign-in, sign-out and clear, and by adopting another context's session. */
     epoch: object;
 
-    /** The session the state holds, kept across a rotation and replaced by any other change. */
+    /** The session refreshes and user fetches belong to, kept across a rotation and replaced by any other change. */
     session: object;
+
+    /** The identity of the session the state holds, kept until that session is replaced or cleared. */
+    identity: object;
 
     /** The session the latest sign-in to land installed, or null. */
     signIn: object | null;
@@ -364,13 +367,14 @@ export async function rehydrateSessionUser<U extends SessionUser, C>(
 /**
  * Identify the session the state holds, so a consumer can tell a rotation of
  * one session from its replacement. The identity is kept across a rotation and
- * is new for every sign-in and every session adopted from another context.
+ * is new for every sign-in and every session adopted from another context. A
+ * sign-out keeps it until the session is cleared.
  *
  * @param state - the session state
  * @returns the session's identity, or null when the state holds no session
  */
 export function sessionIdentity(state: SessionState<SessionUser>): object | null {
-    return state.accessToken === null ? null : ledgerOf(state).session;
+    return state.accessToken === null ? null : ledgerOf(state).identity;
 }
 
 /**
@@ -621,6 +625,7 @@ function replaceSession(state: SessionState<SessionUser>, ledger: Ledger, tokens
     }
 
     ledger.session = {};
+    ledger.identity = ledger.session;
 
     return ledger.session;
 }
@@ -665,6 +670,7 @@ function ledgerOf(state: object): Ledger {
     const ledger: Ledger = {
         epoch: {},
         session: {},
+        identity: {},
         signIn: null,
         revision: 0,
         unsaved: null,
