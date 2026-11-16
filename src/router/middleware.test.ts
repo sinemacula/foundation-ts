@@ -10,11 +10,20 @@ import { describe, expect, it, vi } from 'vitest';
 import type { MiddlewareContext, MiddlewareResult, RouteMiddleware } from './middleware';
 import { next, redirect, runMiddlewarePipeline } from './middleware';
 
+/** A minimal route the pipeline passes through. */
 interface StubRoute {
+    /** The route path. */
     readonly path: string;
 }
 
-type StubLocation = string | { readonly name: string };
+/** A named redirect target. */
+interface NamedLocation {
+    /** The route name. */
+    readonly name: string;
+}
+
+/** A redirect target, as a path or a named route. */
+type StubLocation = string | NamedLocation;
 
 type StubMiddleware = RouteMiddleware<StubRoute, StubLocation>;
 

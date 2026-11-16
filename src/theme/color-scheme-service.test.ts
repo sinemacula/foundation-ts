@@ -12,13 +12,29 @@ import type { ColorSchemeApplier, SystemColorSchemeSource } from './color-scheme
 import { MemoryStorage } from '../storage/memory-storage';
 import type { ColorSchemePreference, ResolvedColorScheme } from './color-scheme';
 
+/** A controllable system colour-scheme source that counts subscriptions. */
 interface StubSource extends SystemColorSchemeSource {
+    /** Whether the system currently prefers dark. */
     dark: boolean;
+
+    /** How many times subscribe() was called. */
     subscribeCount: number;
+
+    /** How many times a subscription was torn down. */
     unsubscribeCount: number;
+
+    /**
+     * Notify the current subscriber that the system preference changed.
+     */
     fireChange(): void;
 }
 
+/**
+ * Build a stub system colour-scheme source.
+ *
+ * @param dark - whether the system starts out preferring dark
+ * @returns the stub source
+ */
 function makeSource(dark = false): StubSource {
     let cb: (() => void) | null = null;
 
@@ -44,10 +60,26 @@ function makeSource(dark = false): StubSource {
     return source;
 }
 
-interface StubApplier extends ColorSchemeApplier {
-    calls: Array<{ resolved: ResolvedColorScheme; preference: ColorSchemePreference }>;
+/** One recorded apply() invocation. */
+interface ApplyCall {
+    /** The resolved scheme applied. */
+    readonly resolved: ResolvedColorScheme;
+
+    /** The preference it was resolved from. */
+    readonly preference: ColorSchemePreference;
 }
 
+/** A colour-scheme applier that records every call. */
+interface StubApplier extends ColorSchemeApplier {
+    /** Every apply() invocation, in order. */
+    calls: ApplyCall[];
+}
+
+/**
+ * Build a recording colour-scheme applier.
+ *
+ * @returns the stub applier
+ */
 function makeApplier(): StubApplier {
     const calls: StubApplier['calls'] = [];
 
@@ -59,12 +91,43 @@ function makeApplier(): StubApplier {
     };
 }
 
-function makeService(options?: {
-    dark?: boolean;
-    initialStored?: string;
-    storageKey?: string;
-    defaultPreference?: ColorSchemePreference;
-}): { service: ColorSchemeService; storage: MemoryStorage; source: StubSource; applier: StubApplier } {
+/** Options shaping the service under test. */
+interface ServiceOptions {
+    /** Whether the system starts out preferring dark. */
+    readonly dark?: boolean;
+
+    /** A preference already persisted before the service starts. */
+    readonly initialStored?: string;
+
+    /** The storage key the preference is persisted under. */
+    readonly storageKey?: string;
+
+    /** The preference used when nothing is stored. */
+    readonly defaultPreference?: ColorSchemePreference;
+}
+
+/** The service under test and its collaborators. */
+interface ServiceFixture {
+    /** The colour-scheme service. */
+    readonly service: ColorSchemeService;
+
+    /** The storage the service persists to. */
+    readonly storage: MemoryStorage;
+
+    /** The stub system source. */
+    readonly source: StubSource;
+
+    /** The recording applier. */
+    readonly applier: StubApplier;
+}
+
+/**
+ * Build a colour-scheme service over stub collaborators.
+ *
+ * @param options - options overriding the defaults
+ * @returns the service and its collaborators
+ */
+function makeService(options?: ServiceOptions): ServiceFixture {
     const storage = new MemoryStorage();
 
     if (options?.initialStored !== undefined) {
@@ -104,7 +167,9 @@ describe('ColorSchemeService', () => {
         });
 
         it('returns a stored system preference over a differing default', () => {
-            expect(makeService({ initialStored: 'system', defaultPreference: 'light' }).service.preference()).toBe('system');
+            expect(makeService({ initialStored: 'system', defaultPreference: 'light' }).service.preference()).toBe(
+                'system',
+            );
         });
 
         it('falls back to the default when the stored value is garbage', () => {

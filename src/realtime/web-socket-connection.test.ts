@@ -12,42 +12,84 @@ import { WebSocketConnection, type WebSocketFactory } from './web-socket-connect
 
 /** Minimal fake WebSocket for injection via the factory. */
 class FakeWebSocket {
+    /** The URL the socket was opened with. */
     readonly url: string;
+
+    /** The subprotocol(s) the socket was opened with. */
     readonly protocols: string | readonly string[] | undefined;
+
+    /** The open handler the connection installs. */
     onopen: ((event: Event) => void) | null = null;
+
+    /** The message handler the connection installs. */
     onmessage: ((event: MessageEvent) => void) | null = null;
+
+    /** The close handler the connection installs. */
     onclose: ((event: CloseEvent) => void) | null = null;
 
+    /** Whether close() has been called. */
     #closed: boolean = false;
+
+    /** How many times close() was called. */
     closeCalls: number = 0;
+
+    /** Every frame passed to send(), in order. */
     sentMessages: string[] = [];
 
+    /**
+     * Record the construction arguments.
+     *
+     * @param url - the WebSocket endpoint URL
+     * @param protocols - optional subprotocol(s)
+     */
     constructor(url: string, protocols?: string | readonly string[]) {
         this.url = url;
         this.protocols = protocols;
     }
 
+    /**
+     * Record an outbound frame.
+     *
+     * @param data - the frame text
+     */
     send(data: string): void {
         this.sentMessages.push(data);
     }
 
+    /**
+     * Record a close call.
+     */
     close(): void {
         this.#closed = true;
         this.closeCalls++;
     }
 
+    /**
+     * Whether close() has been called.
+     */
     get closed(): boolean {
         return this.#closed;
     }
 
+    /**
+     * Simulate the socket opening.
+     */
     emitOpen(): void {
         this.onopen?.(new Event('open'));
     }
 
+    /**
+     * Simulate an incoming text frame.
+     *
+     * @param data - the frame text
+     */
     emitMessage(data: string): void {
         this.onmessage?.(new MessageEvent('message', { data }));
     }
 
+    /**
+     * Simulate the socket closing.
+     */
     emitClose(): void {
         // Not the DOM CloseEvent: that global only exists from node 23, and the
         // connection's close handler never reads the event anyway.
@@ -55,14 +97,24 @@ class FakeWebSocket {
     }
 }
 
+/** A WebSocket factory plus every fake it has created. */
+interface RecordingFactory {
+    /** Every fake socket created, in order. */
+    readonly sockets: FakeWebSocket[];
+
+    /** The factory handed to the connection. */
+    readonly factory: WebSocketFactory;
+}
+
 /**
  * Creates a typed {@link WebSocketFactory} that records each fake it creates.
  * The cast to `WebSocket` is confined to a single line inside the closure so
  * every test body can use the strongly-typed {@link FakeWebSocket} directly.
  */
-function makeFactory(): { sockets: FakeWebSocket[]; factory: WebSocketFactory } {
+function makeFactory(): RecordingFactory {
     const sockets: FakeWebSocket[] = [];
 
+    /** Create and record a fake socket, typed as the real one. */
     const factory: WebSocketFactory = (url, protocols) => {
         const socket = new FakeWebSocket(url, protocols);
 
@@ -120,14 +172,19 @@ function makeWsContractHarness(): RealtimeContractHarness {
 function stubGlobalWebSocket(): unknown[][] {
     const calls: unknown[][] = [];
 
-    vi.stubGlobal(
-        'WebSocket',
-        class {
-            constructor(...args: unknown[]) {
-                calls.push(args);
-            }
-        },
-    );
+    /** Records every construction instead of opening a socket. */
+    class RecordingWebSocket {
+        /**
+         * Record the construction arguments.
+         *
+         * @param args - the arguments the constructor received
+         */
+        constructor(...args: unknown[]) {
+            calls.push(args);
+        }
+    }
+
+    vi.stubGlobal('WebSocket', RecordingWebSocket);
 
     return calls;
 }

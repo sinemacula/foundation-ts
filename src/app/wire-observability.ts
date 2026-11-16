@@ -65,7 +65,9 @@ export interface WiredObservability {
  * @param options - the frozen configuration and optional adapter factories
  * @returns the installed instances plus the breadcrumb trail
  */
-export function wireObservability<T extends FoundationConfig>(options: WireObservabilityOptions<T>): WiredObservability {
+export function wireObservability<T extends FoundationConfig>(
+    options: WireObservabilityOptions<T>,
+): WiredObservability {
     const isLocal = options.config.app.environment === 'local';
 
     const reporter: ErrorReporter =

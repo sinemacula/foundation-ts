@@ -12,7 +12,10 @@ import { unwrapItem, unwrapList } from './envelope';
 
 /** A minimal domain type used to exercise the mapper contract. */
 interface Widget {
+    /** The widget identifier. */
     readonly id: string;
+
+    /** The widget display name. */
     readonly name: string;
 }
 

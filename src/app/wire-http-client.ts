@@ -115,7 +115,9 @@ function buildDefaultClient<T extends FoundationConfig>(tools: WireHttpClientToo
  * @param options - the wiring inputs carrying the override, key, and handlers
  * @returns the composed response-error handler
  */
-function composeResponseErrorHandler<T extends FoundationConfig>(options: WireHttpClientOptions<T>): ResponseErrorHandler {
+function composeResponseErrorHandler<T extends FoundationConfig>(
+    options: WireHttpClientOptions<T>,
+): ResponseErrorHandler {
     const preset = options.onResponseError ?? createDefaultResponseErrorHandler(options.unexpectedErrorToastKey);
     const moduleHandlers = options.contributions.responseErrorHandlers;
 

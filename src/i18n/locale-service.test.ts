@@ -10,12 +10,37 @@ import { describe, expect, it } from 'vitest';
 import { MemoryStorage } from '../storage/memory-storage';
 import { LocaleService } from './locale-service';
 
-function makeService(options?: {
-    defaultLocale?: string;
-    enabledLocales?: readonly string[];
-    storageKey?: string;
-    initialStored?: string;
-}): { service: LocaleService; storage: MemoryStorage } {
+/** Options shaping the service under test. */
+interface ServiceOptions {
+    /** The locale used when nothing else matches. */
+    readonly defaultLocale?: string;
+
+    /** The locales the service may resolve to. */
+    readonly enabledLocales?: readonly string[];
+
+    /** The storage key the locale is persisted under. */
+    readonly storageKey?: string;
+
+    /** A locale already persisted before the service starts. */
+    readonly initialStored?: string;
+}
+
+/** The service under test and the storage backing it. */
+interface ServiceFixture {
+    /** The locale service. */
+    readonly service: LocaleService;
+
+    /** The storage the service persists to. */
+    readonly storage: MemoryStorage;
+}
+
+/**
+ * Build a locale service over in-memory storage.
+ *
+ * @param options - options overriding the defaults
+ * @returns the service and its storage
+ */
+function makeService(options?: ServiceOptions): ServiceFixture {
     const storage = new MemoryStorage();
 
     if (options?.initialStored !== undefined) {

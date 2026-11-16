@@ -26,6 +26,13 @@ function wire<T>(entries: ReadonlyArray<readonly [string, T]>): Record<string, T
     return Object.fromEntries(entries);
 }
 
+/**
+ * Build a JSON response.
+ *
+ * @param payload - the body to serialise
+ * @param status - the HTTP status code
+ * @returns the response
+ */
 function jsonResponse(payload: unknown, status = 200): Response {
     return new Response(JSON.stringify(payload), {
         status,

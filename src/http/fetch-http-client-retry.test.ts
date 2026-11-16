@@ -11,6 +11,12 @@ import { ExponentialBackoff } from '../realtime/exponential-backoff';
 import { FetchHttpClient } from './fetch-http-client';
 import { CancelledError, HttpError } from './http-error';
 
+/** The body a recovered retry resolves with. */
+interface RecoveredBody {
+    /** Whether the retry recovered. */
+    readonly recovered: boolean;
+}
+
 // ---------------------------------------------------------------------------
 // Stub type
 // ---------------------------------------------------------------------------
@@ -22,6 +28,13 @@ type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a JSON response.
+ *
+ * @param body - the value to serialise
+ * @param status - the response status
+ * @returns the response
+ */
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
         status,
@@ -29,6 +42,13 @@ function jsonResponse(body: unknown, status = 200): Response {
     });
 }
 
+/**
+ * Build a client against the stub with optional extra options.
+ *
+ * @param fetchFn - the fetch stub
+ * @param extra - options to merge over the base URL and stub
+ * @returns the client
+ */
 function makeClient(
     fetchFn: typeof fetch,
     extra: Partial<ConstructorParameters<typeof FetchHttpClient>[0]> = {},
@@ -57,7 +77,7 @@ describe('FetchHttpClient - transient retry', () => {
             .mockResolvedValueOnce(jsonResponse({ recovered: true }));
         const client = makeClient(fetchFn, { retry: { attempts: 2, backoff: fixedBackoff(100) } });
 
-        const pending = client.get<{ recovered: boolean }>('/items');
+        const pending = client.get<RecoveredBody>('/items');
 
         await vi.advanceTimersByTimeAsync(99);
         expect(fetchFn).toHaveBeenCalledTimes(1);
@@ -75,7 +95,7 @@ describe('FetchHttpClient - transient retry', () => {
             .mockResolvedValueOnce(jsonResponse({ recovered: true }));
         const client = makeClient(fetchFn, { retry: { attempts: 2, backoff: fixedBackoff(50) } });
 
-        const pending = client.get<{ recovered: boolean }>('/items');
+        const pending = client.get<RecoveredBody>('/items');
 
         await vi.advanceTimersByTimeAsync(50);
 
@@ -91,7 +111,7 @@ describe('FetchHttpClient - transient retry', () => {
             .mockResolvedValueOnce(jsonResponse({ recovered: true }));
         const client = makeClient(fetchFn, { retry: {} });
 
-        const pending = client.get<{ recovered: boolean }>('/items');
+        const pending = client.get<RecoveredBody>('/items');
 
         // Default ExponentialBackoff: 1 000 ms then 2 000 ms.
         await vi.advanceTimersByTimeAsync(1_000);
