@@ -9,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExponentialBackoff } from '../realtime/exponential-backoff';
 import { FetchHttpClient } from './fetch-http-client';
-import { CancelledError, HttpError, MaintenanceError } from './http-error';
+import type { RequestInterceptor } from './http-client';
+import { CancelledError, HttpError, MaintenanceError, NetworkError } from './http-error';
 
 /** The body a recovered retry resolves with. */
 interface RecoveredBody {
@@ -250,6 +251,29 @@ describe('FetchHttpClient - transient retry', () => {
 
         expect(await result.text()).toBe('bytes');
         expect(fetchFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries a transport failure an interceptor throws before the request resolves', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockResolvedValueOnce(jsonResponse({ recovered: true }));
+        const interceptor = vi
+            .fn<RequestInterceptor>()
+            .mockImplementationOnce(() => {
+                throw new NetworkError('token refresh failed');
+            })
+            .mockImplementationOnce(request => request);
+        const client = makeClient(fetchFn, {
+            retry: { attempts: 1, backoff: fixedBackoff(10) },
+            requestInterceptors: [interceptor],
+        });
+
+        const pending = client.get<RecoveredBody>('/items');
+
+        await vi.advanceTimersByTimeAsync(10);
+
+        await expect(pending).resolves.toStrictEqual({ recovered: true });
+        expect(fetchFn).toHaveBeenCalledTimes(1);
     });
 
     it('retries an AbortError the caller did not cause as a transport failure', async () => {

@@ -302,7 +302,7 @@ export class FetchHttpClient implements HttpClient {
             return await this.#dispatchOnce<T>(sendRequest, context);
         } catch (error) {
             if (sendRequest.idempotent && attempt < this.#retryAttempts && isTransientError(error)) {
-                await this.#awaitBackoff(attempt, sendRequest);
+                await this.#awaitBackoff(attempt, sendRequest, context.request);
 
                 return this.#sendAttempt<T>(sendRequest, attempt + 1);
             }
@@ -321,10 +321,13 @@ export class FetchHttpClient implements HttpClient {
      *
      * @param attempt - zero-based attempt counter
      * @param sendRequest - the request descriptor, carrying the caller signal
+     * @param request - the failed attempt's resolved request, or null when an
+     * interceptor failed before one existed
      */
-    async #awaitBackoff(attempt: number, sendRequest: SendRequest): Promise<void> {
+    async #awaitBackoff(attempt: number, sendRequest: SendRequest, request: HttpRequest | null): Promise<void> {
+        const { method, path, options } = sendRequest;
         const delay = this.#retryBackoff.delayFor(attempt);
-        const signal = sendRequest.options?.signal;
+        const target = describeRequest(request ?? { method, url: this.#buildUrl(path, options?.query) });
 
         await new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => {
@@ -332,13 +335,9 @@ export class FetchHttpClient implements HttpClient {
                 resolve();
             }, delay);
 
-            const detach = onAbort(signal, reason => {
+            const detach = onAbort(options?.signal, reason => {
                 clearTimeout(timer);
-                reject(
-                    new CancelledError(`${sendRequest.method} ${sendRequest.path} was cancelled before its retry.`, {
-                        cause: reason,
-                    }),
-                );
+                reject(new CancelledError(`${target} was cancelled before its retry.`, { cause: reason }));
             });
         });
     }
@@ -661,7 +660,7 @@ function withDefaultAccept(headers: Record<string, string>, parse: BodyParseMode
  * @param request - the request to describe
  * @returns the method and stripped URL
  */
-function describeRequest(request: HttpRequest): string {
+function describeRequest(request: Pick<HttpRequest, 'method' | 'url'>): string {
     return `${request.method} ${stripQueryAndFragment(request.url)}`;
 }
 

@@ -446,18 +446,42 @@ describe('FetchHttpClient - cancellation during retry backoff', () => {
         const caller = new AbortController();
         const reason = new Error('left the page');
 
-        const pending = rejectionOf(client.get('/items', { signal: caller.signal }), CancelledError);
+        const pending = rejectionOf(client.get('/items?token=secret', { signal: caller.signal }), CancelledError);
 
         await vi.advanceTimersByTimeAsync(100);
         caller.abort(reason);
 
         const error = await pending;
 
-        expect(error.message).toBe('GET /items was cancelled before its retry.');
+        expect(error.message).toBe('GET https://api.example.com/items was cancelled before its retry.');
         expect(error.cause).toBe(reason);
         expect(vi.getTimerCount()).toBe(0);
         expect(fetchFn).toHaveBeenCalledTimes(1);
         expect(onResponseError).not.toHaveBeenCalled();
+    });
+
+    it('names the redacted request URL when an interceptor failed before the request resolved', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const caller = new AbortController();
+        const client = makeClient(fetchFn, {
+            retry: { attempts: 2, backoff: { delayFor: (): number => 10_000 } },
+            requestInterceptors: [
+                () => {
+                    throw new NetworkError('token refresh failed');
+                },
+            ],
+        });
+
+        const pending = rejectionOf(
+            client.get('/reset?token=secret', { query: { page: 2 }, signal: caller.signal }),
+            CancelledError,
+        );
+
+        await vi.advanceTimersByTimeAsync(100);
+        caller.abort();
+
+        expect((await pending).message).toBe('GET https://api.example.com/reset was cancelled before its retry.');
+        expect(fetchFn).not.toHaveBeenCalled();
     });
 
     it('skips the backoff entirely when the caller signal aborted during the failed attempt', async () => {
