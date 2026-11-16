@@ -460,9 +460,9 @@ export class ApiQuery {
      * Match a free-text term against the fields the resource declares
      * searchable (`search=<term>`).
      *
-     * An empty or whitespace-only term clears the search. The toolkit refuses a
-     * term with a word shorter than three characters, over 128 characters, or
-     * over 10 words.
+     * An empty or whitespace-only term clears the search. By default the
+     * toolkit refuses a term with a word shorter than three characters, over
+     * 128 characters, or over 10 words.
      *
      * @param term - the search term
      * @returns a new `ApiQuery` with the search term set or cleared
