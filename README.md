@@ -75,6 +75,42 @@ const core = await bootFoundationCore(options, { fetchFn }, runtimeUrl);
 Everything the core installs is reachable afterwards through the service accessors in
 `@sinemacula/foundation/app/services`.
 
+## Querying
+
+`ApiQuery` speaks the `sinemacula/laravel-api-toolkit` query grammar. It is immutable: every call returns a new
+query.
+
+```ts
+const query = ApiQuery.create()
+    .where('status', 'active')
+    .orWhere([q => q.where('role', 'admin').where('verified', true), q => q.where('role', 'owner')])
+    .whereHas('posts', q => q.where('published', true))
+    .search('ada')
+    .orderBy('name')
+    .limit(25)
+    .fieldsFor('user', ['id', 'name', 'aggregates'])
+    .aggregatesFor('user', ['posts_count']);
+// filters={"status":"active","$or":[{"role":"admin","verified":true},{"role":"owner"}],
+//          "$has":{"posts":{"published":true}}}&search=ada&order=name&limit=25
+//          &fields[user]=id,name,aggregates&aggregates[user]=posts_count
+```
+
+- `andWhere` / `orWhere` take one builder per document; keys inside a document AND together, and repeated calls
+  append documents to the same group. An empty group or document throws a `QueryError`.
+- Conditions on one relation, through repeated `whereRelation` or `whereHas` calls, merge into one document, so the
+  same related row must match all of them.
+- Free-text search is the `search` parameter (`search(term)`), never a filter operator.
+- Aggregates render under the record's `aggregates` field only when `aggregates` is in `fields[type]` or the
+  resource's default fields.
+- `withTrashed()` / `onlyTrashed()` set `trashed=with` / `trashed=only`.
+- Changing the order clears any cursor; random order under cursor pagination throws.
+- `ResourceClient.list` returns `meta` (`{ mode: 'length-aware', total, count, hasMore }` or
+  `{ mode: 'cursor', hasMore }`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
+
+The toolkit enforces cost caps server-side and answers a request over one with a 422. The defaults are: `limit` 100,
+3 order keys, 5 aggregates, an offset of 500000 rows, 500 `$in` items, 100 filter nodes, a filter depth of 3, and
+8192 bytes of encoded filters.
+
 ## Quality gates
 
 | Command                 | What it runs                                           |
