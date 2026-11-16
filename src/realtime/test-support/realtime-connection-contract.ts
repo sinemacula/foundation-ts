@@ -216,7 +216,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
             });
 
             it('cancels a pending reconnect timer', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(500) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(500),
+                });
 
                 connection.connect();
                 transports.at(0)?.fail();
@@ -231,7 +234,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
             });
 
             it('does not reconnect after disconnect', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(100) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(100),
+                });
 
                 connection.connect();
                 connection.disconnect();
@@ -244,7 +250,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
 
         describe('reconnect', () => {
             it('schedules a reconnect after a failure', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(200) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(200),
+                });
 
                 connection.connect();
                 transports.at(0)?.fail();
@@ -323,7 +332,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
             });
 
             it('re-delivers to a subscription registered before connect after reconnect', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(50) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(50),
+                });
 
                 const received: string[] = [];
 
@@ -587,7 +599,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
             });
 
             it('does not emit duplicate states', () => {
-                const { connection, transports } = harness.create({ url: 'realtime://test', backoff: fixedBackoff(50) });
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(50),
+                });
 
                 const states: string[] = [];
 

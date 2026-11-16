@@ -29,7 +29,17 @@
             "description": "Build and test tooling moves together, automerged when the required checks pass.",
             "matchFileNames": ["package.json"],
             "matchDepTypes": ["devDependencies"],
-            "matchPackageNames": ["vitest", "@vitest/**", "typescript", "knip", "mkdist", "publint", "@stryker-mutator/**", "@arethetypeswrong/cli", "@types/node"],
+            "matchPackageNames": [
+                "vitest",
+                "@vitest/**",
+                "typescript",
+                "knip",
+                "mkdist",
+                "publint",
+                "@stryker-mutator/**",
+                "@arethetypeswrong/cli",
+                "@types/node"
+            ],
             "matchUpdateTypes": ["minor", "patch"],
             "groupName": "build and test tooling",
             "automerge": true

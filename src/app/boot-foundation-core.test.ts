@@ -186,9 +186,7 @@ describe('bootFoundationCore', () => {
 
     it('passes the fetched runtime document into createEnvironment', async () => {
         const runtimeDocument = Object.fromEntries([['API_URL', 'https://runtime.example.com']]);
-        const fetchFn = vi
-            .fn()
-            .mockResolvedValue(new Response(JSON.stringify(runtimeDocument), { status: 200 }));
+        const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify(runtimeDocument), { status: 200 }));
         const createEnvironment = vi.fn().mockReturnValue(environmentOf());
 
         await bootFoundationCore(
@@ -363,11 +361,7 @@ describe('bootFoundationCore', () => {
             const toaster = createRecordingToaster();
             const fetch = createSequencedFetch(() => new Response('{}', { status: 500 }));
 
-            const core = await bootWithHttp(
-                fetch,
-                { unexpectedErrorToastKey: 'app.errors.unexpected' },
-                toaster,
-            );
+            const core = await bootWithHttp(fetch, { unexpectedErrorToastKey: 'app.errors.unexpected' }, toaster);
 
             await core.http.get('boom').catch(() => undefined);
 

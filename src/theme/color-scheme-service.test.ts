@@ -104,7 +104,9 @@ describe('ColorSchemeService', () => {
         });
 
         it('returns a stored system preference over a differing default', () => {
-            expect(makeService({ initialStored: 'system', defaultPreference: 'light' }).service.preference()).toBe('system');
+            expect(makeService({ initialStored: 'system', defaultPreference: 'light' }).service.preference()).toBe(
+                'system',
+            );
         });
 
         it('falls back to the default when the stored value is garbage', () => {

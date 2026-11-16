@@ -352,9 +352,7 @@ describe('FetchHttpClient - network failure', () => {
         const error = await client.get('/items').catch(error => error);
 
         expect(error).toBeInstanceOf(NetworkError);
-        expect((error as NetworkError).message).toBe(
-            'GET https://api.example.com/items failed without a response.',
-        );
+        expect((error as NetworkError).message).toBe('GET https://api.example.com/items failed without a response.');
     });
 
     it('sets the cause on NetworkError', async () => {
