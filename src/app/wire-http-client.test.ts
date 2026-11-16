@@ -245,7 +245,7 @@ describe('wireHttpClient', () => {
             await client.get('items');
 
             expect(log).toEqual(['preset', 'module']);
-            expect((stub.inits[0]?.headers as Record<string, string>)['x-chain']).toBe('preset+module');
+            expect(stub.inits[0]?.headers).toMatchObject({ 'x-chain': 'preset+module' });
         });
 
         it('retries a 401 once through the module unauthorized handler', async () => {

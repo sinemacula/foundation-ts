@@ -338,7 +338,7 @@ describe('bootFoundationCore', () => {
             await core.http.get('items');
 
             expect(fetch.urls).toStrictEqual(['/runtime-env.json', 'https://api.example.com/items']);
-            expect((fetch.inits[1]?.headers as Record<string, string>)['x-preset']).toBe('stamped');
+            expect(fetch.inits[1]?.headers).toMatchObject({ 'x-preset': 'stamped' });
         });
 
         it('routes response errors to the supplied handler', async () => {
