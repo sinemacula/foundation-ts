@@ -54,8 +54,9 @@ const EMPTY: SessionSnapshot = { revision: 0, tokens: null };
  *
  * The storage must throw when it cannot read or write: a storage that swallows
  * failures would report a lost write as saved and an unreadable session as
- * none. A stored value that is not a snapshot rejects with a
- * {@link SessionError}.
+ * none. A stored value that is not a snapshot rejects a load with a
+ * {@link SessionError}, while a conditional write treats it as an empty store
+ * at revision 0, so a sign-in or clear can replace it.
  */
 export class KeyValueSessionPersistence implements SessionPersistence {
     /** The storage adapter the snapshot is written to. */
@@ -78,7 +79,7 @@ export class KeyValueSessionPersistence implements SessionPersistence {
      */
     load(): Promise<SessionSnapshot> {
         return new Promise(resolve => {
-            resolve(this.#read());
+            resolve(this.#read(parseSnapshot));
         });
     }
 
@@ -115,7 +116,7 @@ export class KeyValueSessionPersistence implements SessionPersistence {
         return this.#lock.run(
             () =>
                 new Promise(resolve => {
-                    const current = this.#read();
+                    const current = this.#read(parseOrEmpty);
 
                     if (current.revision !== expectedRevision) {
                         resolve({ status: 'changed', current });
@@ -134,13 +135,13 @@ export class KeyValueSessionPersistence implements SessionPersistence {
     /**
      * Read the snapshot synchronously.
      *
+     * @param parse - parses a stored value
      * @returns the stored snapshot, or the empty one when none is stored
-     * @throws {@link SessionError} when the stored value is not a snapshot
      */
-    #read(): SessionSnapshot {
+    #read(parse: (raw: string) => SessionSnapshot): SessionSnapshot {
         const raw = this.#storage.get(this.#key);
 
-        return raw === null ? EMPTY : parseSnapshot(raw);
+        return raw === null ? EMPTY : parse(raw);
     }
 }
 
@@ -172,6 +173,20 @@ function parseSnapshot(raw: string): SessionSnapshot {
     }
 
     return { revision, tokens: tokens === null ? null : parseTokens(tokens) };
+}
+
+/**
+ * Parse a stored snapshot, reading a value that is not one as the empty store.
+ *
+ * @param raw - the stored value
+ * @returns the snapshot, or the empty one
+ */
+function parseOrEmpty(raw: string): SessionSnapshot {
+    try {
+        return parseSnapshot(raw);
+    } catch {
+        return EMPTY;
+    }
 }
 
 /**

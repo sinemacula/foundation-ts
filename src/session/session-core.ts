@@ -362,6 +362,18 @@ export async function rehydrateSessionUser<U extends SessionUser, C>(
 }
 
 /**
+ * Identify the session the state holds, so a consumer can tell a rotation of
+ * one session from its replacement. The identity is kept across a rotation and
+ * is new for every sign-in and every session adopted from another context.
+ *
+ * @param state - the session state
+ * @returns the session's identity, or null when the state holds no session
+ */
+export function sessionIdentity(state: SessionState<SessionUser>): object | null {
+    return state.accessToken === null ? null : ledgerOf(state).session;
+}
+
+/**
  * Fetch the current user into state, swallowing a dead-session failure and
  * discarding a user that arrives after the session was replaced.
  *

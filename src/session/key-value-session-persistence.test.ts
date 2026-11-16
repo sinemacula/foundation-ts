@@ -209,6 +209,7 @@ describe('KeyValueSessionPersistence', () => {
 
         await expect(persistence.load()).rejects.toThrow('unavailable');
         await expect(persistence.saveIf(0, TOKENS)).rejects.toThrow('unavailable');
+        await expect(persistence.clearIf(0)).rejects.toThrow('unavailable');
     });
 
     it('rejects when the storage cannot be written', async () => {
@@ -229,6 +230,46 @@ describe('KeyValueSessionPersistence', () => {
         expect(error).toBeInstanceOf(SessionError);
         expect(error).toHaveProperty('message', 'The persisted session could not be read.');
         expect(error).toHaveProperty('cause', expect.any(SyntaxError));
+    });
+
+    it.each([
+        ['not JSON', '{'],
+        ['not a snapshot', stored(0, null)],
+    ])('saves over a stored value that is %s as an empty store at revision 0', async (_label, value) => {
+        const storage = new MemoryStorage();
+        const persistence = new KeyValueSessionPersistence(storage);
+
+        storage.set('auth.session', value);
+
+        await expect(persistence.saveIf(0, TOKENS)).resolves.toStrictEqual({ status: 'saved', revision: 1 });
+        expect(storage.get('auth.session')).toBe(stored(1, TOKENS));
+    });
+
+    it('clears over a stored value that is not a snapshot as an empty store at revision 0', async () => {
+        const storage = new MemoryStorage();
+        const persistence = new KeyValueSessionPersistence(storage);
+
+        storage.set('auth.session', '{');
+
+        await expect(persistence.clearIf(0)).resolves.toStrictEqual({ status: 'cleared', revision: 1 });
+        await expect(persistence.load()).resolves.toStrictEqual({ revision: 1, tokens: null });
+    });
+
+    it('refuses a write at a later revision over a stored value that is not a snapshot', async () => {
+        const storage = new MemoryStorage();
+        const persistence = new KeyValueSessionPersistence(storage);
+
+        storage.set('auth.session', '{');
+
+        await expect(persistence.saveIf(3, TOKENS)).resolves.toStrictEqual({
+            status: 'changed',
+            current: { revision: 0, tokens: null },
+        });
+        await expect(persistence.clearIf(3)).resolves.toStrictEqual({
+            status: 'changed',
+            current: { revision: 0, tokens: null },
+        });
+        expect(storage.get('auth.session')).toBe('{');
     });
 
     it.each([

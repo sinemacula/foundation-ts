@@ -18,6 +18,7 @@ import {
     logoutSession,
     refreshSession,
     rehydrateSessionUser,
+    sessionIdentity,
 } from './session-core';
 import type { LoginResult, RefreshResult } from './session-outcomes';
 import type { SessionClearResult, SessionPersistence, SessionSaveResult, SessionSnapshot } from './session-persistence';
@@ -1649,5 +1650,58 @@ describe('rehydrateSessionUser', () => {
 
         expect(api.calls).toStrictEqual(['currentUser', 'currentUser']);
         expect(state).toStrictEqual({ ...tokens('b'), user: BOB });
+    });
+});
+
+describe('sessionIdentity', () => {
+    it('is null while the state holds no session', () => {
+        const { state } = fixture();
+
+        expect(sessionIdentity(state)).toBeNull();
+    });
+
+    it('stays the same across rotations, persisted or not', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a'));
+        const identity = sessionIdentity(state);
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('c') });
+
+        await refreshSession(state, context);
+        persistence.saveFailure = new Error('quota');
+        await refreshSession(state, context);
+
+        expect(identity).not.toBeNull();
+        expect(sessionIdentity(state)).toBe(identity);
+    });
+
+    it('changes with every sign-in', async () => {
+        const { state, api, context } = await signedIn(tokens('a'));
+        const identity = sessionIdentity(state);
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(ALICE);
+
+        await loginWithCredentials(state, context, CREDENTIALS);
+
+        expect(sessionIdentity(state)).not.toBeNull();
+        expect(sessionIdentity(state)).not.toBe(identity);
+    });
+
+    it("changes when another context's session is adopted", async () => {
+        const { state, persistence, context } = await signedIn(tokens('a'));
+        const identity = sessionIdentity(state);
+        persistence.write(tokens('a'));
+
+        await hydrateSession(state, context);
+
+        expect(sessionIdentity(state)).not.toBeNull();
+        expect(sessionIdentity(state)).not.toBe(identity);
+    });
+
+    it('is null once the session is cleared', async () => {
+        const { state, context } = await signedIn(tokens('a'));
+
+        await clearSession(state, context);
+
+        expect(sessionIdentity(state)).toBeNull();
     });
 });
