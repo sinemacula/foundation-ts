@@ -49,11 +49,15 @@ export interface RealtimeConnection {
 
     /**
      * Open the connection. No-op when already connecting or open.
+     *
+     * @throws {@link RealtimeError} when the transport cannot be opened; the
+     * state is left unchanged and the original error is the cause
      */
     connect(): void;
 
     /**
-     * Close the connection permanently and cancel any pending reconnect.
+     * Close the connection and cancel any pending reconnect until the next
+     * `connect()`, which restarts the backoff.
      */
     disconnect(): void;
 

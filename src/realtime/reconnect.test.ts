@@ -45,7 +45,7 @@ describe('runReconnect', () => {
         const reschedule = vi.fn();
 
         await runReconnect({
-            beforeReconnect: () => Promise.reject(new Error('refresh failed')),
+            beforeReconnect: vi.fn(() => Promise.reject(new Error('refresh failed'))),
             isStale: () => false,
             reopen,
             reschedule,
@@ -60,7 +60,7 @@ describe('runReconnect', () => {
         const reschedule = vi.fn();
 
         await runReconnect({
-            beforeReconnect: () => Promise.reject(new Error('refresh failed')),
+            beforeReconnect: vi.fn(() => Promise.reject(new Error('refresh failed'))),
             isStale: () => true,
             reopen,
             reschedule,
@@ -91,7 +91,7 @@ describe('runReconnect', () => {
     it('reschedules instead of reopening when the hook resolves false', async () => {
         const reopen = vi.fn();
         const reschedule = vi.fn();
-        const beforeReconnect = vi.fn<() => Promise<unknown>>().mockResolvedValue(false);
+        const beforeReconnect = vi.fn(() => Promise.resolve(false));
 
         await runReconnect({ beforeReconnect, isStale: () => false, reopen, reschedule });
 
@@ -102,7 +102,7 @@ describe('runReconnect', () => {
     it('does not reschedule when the hook resolves false after the attempt was superseded', async () => {
         const reopen = vi.fn();
         const reschedule = vi.fn();
-        const beforeReconnect = vi.fn<() => Promise<unknown>>().mockResolvedValue(false);
+        const beforeReconnect = vi.fn(() => Promise.resolve(false));
 
         await runReconnect({ beforeReconnect, isStale: () => true, reopen, reschedule });
 
@@ -113,7 +113,7 @@ describe('runReconnect', () => {
     it('reopens when the hook resolves true', async () => {
         const reopen = vi.fn();
         const reschedule = vi.fn();
-        const beforeReconnect = vi.fn<() => Promise<unknown>>().mockResolvedValue(true);
+        const beforeReconnect = vi.fn(() => Promise.resolve(true));
 
         await runReconnect({ beforeReconnect, isStale: () => false, reopen, reschedule });
 
