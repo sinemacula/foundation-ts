@@ -8,10 +8,14 @@
 import { describe, expect, it } from 'vitest';
 
 import { ApiQuery } from './api-query';
+import { QueryError } from './query-error';
 
-// ---------------------------------------------------------------------------
-// Helper: parse the `filters` parameter back to an object
-// ---------------------------------------------------------------------------
+/**
+ * Parse the `filters` parameter of a query back to an object.
+ *
+ * @param query - the query to read
+ * @returns the decoded filter tree, or an empty object when none is set
+ */
 function parsedFilters(query: ApiQuery): unknown {
     const params = query.toQueryParameters();
 
@@ -22,12 +26,23 @@ function parsedFilters(query: ApiQuery): unknown {
     return JSON.parse(String(params['filters']));
 }
 
-// ---------------------------------------------------------------------------
-// Helper: build wire-style objects from entry tuples (mirrors the wire() idiom
-// used in other tests in this repo - keeps $-prefixed keys out of
-// object-literal key positions in test assertions where Biome might inspect
-// them).
-// ---------------------------------------------------------------------------
+/**
+ * Read the raw `filters` parameter of a query, exactly as sent on the wire.
+ *
+ * @param query - the query to read
+ * @returns the JSON-encoded filter tree
+ */
+function filtersParam(query: ApiQuery): unknown {
+    return query.toQueryParameters()['filters'];
+}
+
+/**
+ * Build a wire-style object from entry tuples, keeping `$`-prefixed keys out of
+ * object-literal key positions.
+ *
+ * @param entries - key-value pairs for the record
+ * @returns a plain record
+ */
 function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string, unknown> {
     return Object.fromEntries(entries);
 }
@@ -71,11 +86,15 @@ describe('ApiQuery', () => {
         });
 
         it('replaces an existing scalar equality value with an operator map', () => {
-            const base = ApiQuery.create().where('name', 'ali');
-            const result = parsedFilters(base.where('name', '$like', 'alice'));
+            const base = ApiQuery.create().where('status', 'draft');
 
-            // biome-ignore lint/style/useNamingConvention: toolkit keys
-            expect(result).toEqual({ name: { $like: 'alice' } });
+            expect(filtersParam(base.where('status', '$neq', 'archived'))).toBe('{"status":{"$neq":"archived"}}');
+        });
+
+        it('emits falsy scalars as real equality conditions', () => {
+            const query = ApiQuery.create().where('name', '').where('count', 0).where('active', false);
+
+            expect(filtersParam(query)).toBe('{"name":"","count":0,"active":false}');
         });
     });
 
@@ -117,12 +136,6 @@ describe('ApiQuery', () => {
             const result = parsedFilters(ApiQuery.create().where('age', '$le', 65));
 
             expect(result).toEqual(wire([['age', wire([['$le', 65]])]]));
-        });
-
-        it('emits $like operator', () => {
-            const result = parsedFilters(ApiQuery.create().where('name', '$like', 'ali'));
-
-            expect(result).toEqual(wire([['name', wire([['$like', 'ali']])]]));
         });
     });
 
@@ -293,127 +306,158 @@ describe('ApiQuery', () => {
     // Relation filters
     // -------------------------------------------------------------------------
     describe('whereRelation', () => {
-        it('nests a sub-query filter under the relation key', () => {
-            const result = parsedFilters(
-                ApiQuery.create().whereRelation('posts', q => q.where('title', '$like', 'news')),
-            );
+        it('nests a sub-query document under the relation key', () => {
+            const query = ApiQuery.create().whereRelation('posts', q => q.where('title', 'News'));
 
-            expect(result).toEqual(wire([['posts', wire([['title', wire([['$like', 'news']])]])]]));
+            expect(filtersParam(query)).toBe('{"posts":{"title":"News"}}');
         });
 
-        it('nests multiple filters on the relation', () => {
-            const result = parsedFilters(
-                ApiQuery.create().whereRelation('posts', q => q.where('published', true).where('views', '$gt', 100)),
-            );
+        it('nests multiple conditions in one relation document', () => {
+            const query = ApiQuery.create().whereRelation('posts', q => q.where('published', true).where('views', '$gt', 100));
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        'posts',
-                        wire([
-                            ['published', true],
-                            ['views', wire([['$gt', 100]])],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"posts":{"published":true,"views":{"$gt":100}}}');
         });
 
-        it('merges repeated calls on the same relation rather than replacing', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereRelation('author', q => q.where('first_name', '$like', 'a'))
-                    .whereRelation('author', q => q.where('last_name', '$like', 'a')),
-            );
+        it('merges repeated calls into one document so the same related row must match', () => {
+            const query = ApiQuery.create()
+                .whereRelation('author', q => q.where('first_name', 'Ada'))
+                .whereRelation('author', q => q.where('last_name', 'Lovelace'));
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        'author',
-                        wire([
-                            ['first_name', wire([['$like', 'a']])],
-                            ['last_name', wire([['$like', 'a']])],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"author":{"first_name":"Ada","last_name":"Lovelace"}}');
         });
 
         it('replaces a scalar collision on the relation key rather than merging into it', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .where('author', 'stray')
-                    .whereRelation('author', q => q.where('name', 'Alice')),
-            );
+            const query = ApiQuery.create()
+                .where('author', 'stray')
+                .whereRelation('author', q => q.where('name', 'Alice'));
 
-            expect(result).toEqual(wire([['author', wire([['name', 'Alice']])]]));
+            expect(filtersParam(query)).toBe('{"author":{"name":"Alice"}}');
         });
 
         it('merges repeated calls that target the same nested relation at any depth', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereRelation('posts', p => p.whereRelation('author', a => a.where('first_name', '$like', 'x')))
-                    .whereRelation('posts', p => p.whereRelation('author', a => a.where('last_name', '$like', 'x'))),
-            );
+            const query = ApiQuery.create()
+                .whereRelation('posts', p => p.whereRelation('author', a => a.where('first_name', 'x')))
+                .whereRelation('posts', p => p.whereRelation('author', a => a.where('last_name', 'y')));
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        'posts',
-                        {
-                            author: wire([
-                                ['first_name', wire([['$like', 'x']])],
-                                ['last_name', wire([['$like', 'x']])],
-                            ]),
-                        },
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"posts":{"author":{"first_name":"x","last_name":"y"}}}');
         });
 
         it('merges operator maps on the same relation field across separate calls', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereRelation('author', a => a.where('age', '$ge', 18))
-                    .whereRelation('author', a => a.where('age', '$le', 65)),
-            );
+            const query = ApiQuery.create()
+                .whereRelation('author', a => a.where('age', '$ge', 18))
+                .whereRelation('author', a => a.where('age', '$le', 65));
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        'author',
-                        wire([
-                            [
-                                'age',
-                                wire([
-                                    ['$ge', 18],
-                                    ['$le', 65],
-                                ]),
-                            ],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"author":{"age":{"$ge":18,"$le":65}}}');
         });
 
         it('replaces an earlier operator map on a relation field with a later scalar', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereRelation('author', a => a.where('bio', '$like', 'x'))
-                    .whereRelation('author', a => a.where('bio', 'exact')),
-            );
+            const query = ApiQuery.create()
+                .whereRelation('author', a => a.where('bio', '$neq', 'x'))
+                .whereRelation('author', a => a.where('bio', 'exact'));
 
-            expect(result).toEqual(wire([['author', wire([['bio', 'exact']])]]));
+            expect(filtersParam(query)).toBe('{"author":{"bio":"exact"}}');
         });
 
         it('replaces an array operand on a relation field rather than concatenating it', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereRelation('author', a => a.whereIn('role', ['admin']))
-                    .whereRelation('author', a => a.whereIn('role', ['editor'])),
+            const query = ApiQuery.create()
+                .whereRelation('author', a => a.whereIn('role', ['admin']))
+                .whereRelation('author', a => a.whereIn('role', ['editor']));
+
+            expect(filtersParam(query)).toBe('{"author":{"role":{"$in":["editor"]}}}');
+        });
+
+        it('keeps a single $or inside a relation document as built', () => {
+            const query = ApiQuery.create().whereRelation('posts', p =>
+                p.orWhere([q => q.where('title', 'test'), q => q.where('id', 1)]).where('id', 7),
             );
 
-            expect(result).toEqual(wire([['author', wire([['role', wire([['$in', ['editor']]])]])]]));
+            expect(filtersParam(query)).toBe('{"posts":{"$or":[{"title":"test"},{"id":1}],"id":7}}');
+        });
+
+        it('ANDs a second $or on the same relation beside the first instead of merging the groups', () => {
+            const query = ApiQuery.create()
+                .whereRelation('posts', p => p.orWhere([q => q.where('a', 1), q => q.where('b', 2)]))
+                .whereRelation('posts', p => p.orWhere([q => q.where('c', 3), q => q.where('d', 4)]));
+
+            expect(filtersParam(query)).toBe(
+                '{"posts":{"$or":[{"a":1},{"b":2}],"$and":[{"$or":[{"c":3},{"d":4}]}]}}',
+            );
+        });
+
+        it('appends a later $or to an $and the relation document already carries', () => {
+            const query = ApiQuery.create()
+                .whereRelation('posts', p =>
+                    p.andWhere([q => q.where('x', 0)]).orWhere([q => q.where('a', 1), q => q.where('b', 2)]),
+                )
+                .whereRelation('posts', p => p.orWhere([q => q.where('c', 3), q => q.where('d', 4)]));
+
+            expect(filtersParam(query)).toBe(
+                '{"posts":{"$and":[{"x":0},{"$or":[{"c":3},{"d":4}]}],"$or":[{"a":1},{"b":2}]}}',
+            );
+        });
+
+        it('concatenates $and documents on the same relation', () => {
+            const query = ApiQuery.create()
+                .whereRelation('posts', p => p.andWhere([q => q.where('a', 1)]))
+                .whereRelation('posts', p => p.andWhere([q => q.where('b', 2)]));
+
+            expect(filtersParam(query)).toBe('{"posts":{"$and":[{"a":1},{"b":2}]}}');
+        });
+
+        it('takes an incoming $and when the relation key holds a non-list value', () => {
+            const query = ApiQuery.create()
+                .whereRelation('posts', p => p.where('$and', 'stray'))
+                .whereRelation('posts', p => p.andWhere([q => q.where('b', 2)]));
+
+            expect(filtersParam(query)).toBe('{"posts":{"$and":[{"b":2}]}}');
+        });
+
+        it('keeps a second relation $or as its own group when the first was stored as a non-list', () => {
+            const query = ApiQuery.create()
+                .whereRelation('posts', p => p.where('$or', 'stray'))
+                .whereRelation('posts', p => p.orWhere([q => q.where('c', 3)]));
+
+            expect(filtersParam(query)).toBe('{"posts":{"$or":[{"c":3}]}}');
+        });
+
+        it('keeps nested bare $has lists in list form when merged', () => {
+            const query = ApiQuery.create()
+                .whereRelation('author', a => a.whereHas('posts'))
+                .whereRelation('author', a => a.whereHas('comments'));
+
+            expect(filtersParam(query)).toBe('{"author":{"$has":["posts","comments"]}}');
+        });
+
+        it('promotes a nested $has list to the map form when a conditioned relation merges in', () => {
+            const query = ApiQuery.create()
+                .whereRelation('author', a => a.whereHas('posts'))
+                .whereRelation('author', a => a.whereHas('comments', c => c.where('approved', true)));
+
+            expect(filtersParam(query)).toBe('{"author":{"$has":{"posts":{},"comments":{"approved":true}}}}');
+        });
+
+        it('merges nested $hasnt documents on the same relation', () => {
+            const query = ApiQuery.create()
+                .whereRelation('author', a => a.whereHasNot('posts', p => p.where('spam', true)))
+                .whereRelation('author', a => a.whereHasNot('posts', p => p.where('flagged', true)));
+
+            expect(filtersParam(query)).toBe('{"author":{"$hasnt":{"posts":{"spam":true,"flagged":true}}}}');
+        });
+
+        it('merges nested bare $hasnt lists', () => {
+            const query = ApiQuery.create()
+                .whereRelation('author', a => a.whereHasNot('posts'))
+                .whereRelation('author', a => a.whereHasNot('comments'));
+
+            expect(filtersParam(query)).toBe('{"author":{"$hasnt":["posts","comments"]}}');
+        });
+
+        it('replaces a malformed nested $has value with the incoming relation list', () => {
+            const query = ApiQuery.create()
+                .whereRelation('author', a => a.where('$has', 'stray'))
+                .whereRelation('author', a => a.whereHas('posts'));
+
+            expect(filtersParam(query)).toBe('{"author":{"$has":["posts"]}}');
         });
     });
 
@@ -421,166 +465,108 @@ describe('ApiQuery', () => {
     // $has / $hasnt
     // -------------------------------------------------------------------------
     describe('whereHas', () => {
-        it('emits the bare array form with a single relation', () => {
-            const result = parsedFilters(ApiQuery.create().whereHas('posts'));
-
-            expect(result).toEqual(wire([['$has', ['posts']]]));
+        it('emits the bare list form with a single relation', () => {
+            expect(filtersParam(ApiQuery.create().whereHas('posts'))).toBe('{"$has":["posts"]}');
         });
 
-        it('emits the bare array form with multiple relations', () => {
-            const result = parsedFilters(ApiQuery.create().whereHas('posts').whereHas('comments'));
+        it('emits the bare list form with multiple relations', () => {
+            const query = ApiQuery.create().whereHas('posts').whereHas('comments');
 
-            expect(result).toEqual(wire([['$has', ['posts', 'comments']]]));
+            expect(filtersParam(query)).toBe('{"$has":["posts","comments"]}');
         });
 
-        it('emits the named form when a build callback is provided', () => {
-            const result = parsedFilters(ApiQuery.create().whereHas('posts', q => q.where('published', true)));
+        it('does not repeat a bare relation asserted twice', () => {
+            const query = ApiQuery.create().whereHas('posts').whereHas('posts');
 
-            expect(result).toEqual(wire([['$has', wire([['posts', wire([['published', true]])]])]]));
+            expect(filtersParam(query)).toBe('{"$has":["posts"]}');
         });
 
-        it('promotes bare relations to object form with {} when a conditioned relation is added', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereHas('comments')
-                    .whereHas('posts', q => q.where('published', true)),
-            );
+        it('emits the map form when a build callback is provided', () => {
+            const query = ApiQuery.create().whereHas('posts', q => q.where('published', true));
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$has',
-                        wire([
-                            ['comments', {}],
-                            ['posts', wire([['published', true]])],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"$has":{"posts":{"published":true}}}');
         });
 
-        it('appends bare relations in the object form with {} after a conditioned entry', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereHas('posts', q => q.where('published', true))
-                    .whereHas('comments'),
-            );
+        it('promotes bare relations to the map form with {} when a conditioned relation is added', () => {
+            const query = ApiQuery.create()
+                .whereHas('comments')
+                .whereHas('posts', q => q.where('published', true));
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$has',
-                        wire([
-                            ['posts', wire([['published', true]])],
-                            ['comments', {}],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"$has":{"comments":{},"posts":{"published":true}}}');
         });
 
-        it('merges multiple conditioned relations into one object', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereHas('posts', q => q.where('published', true))
-                    .whereHas('comments', q => q.where('approved', true)),
-            );
+        it('appends bare relations in the map form with {} after a conditioned entry', () => {
+            const query = ApiQuery.create()
+                .whereHas('posts', q => q.where('published', true))
+                .whereHas('comments');
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$has',
-                        wire([
-                            ['posts', wire([['published', true]])],
-                            ['comments', wire([['approved', true]])],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"$has":{"posts":{"published":true},"comments":{}}}');
+        });
+
+        it('keeps the conditions when the same relation is asserted bare afterwards', () => {
+            const query = ApiQuery.create()
+                .whereHas('posts', q => q.where('published', true))
+                .whereHas('posts');
+
+            expect(filtersParam(query)).toBe('{"$has":{"posts":{"published":true}}}');
+        });
+
+        it('adds conditions to a relation first asserted bare', () => {
+            const query = ApiQuery.create()
+                .whereHas('posts')
+                .whereHas('posts', q => q.where('published', true));
+
+            expect(filtersParam(query)).toBe('{"$has":{"posts":{"published":true}}}');
+        });
+
+        it('merges multiple conditioned relations into one map', () => {
+            const query = ApiQuery.create()
+                .whereHas('posts', q => q.where('published', true))
+                .whereHas('comments', q => q.where('approved', true));
+
+            expect(filtersParam(query)).toBe('{"$has":{"posts":{"published":true},"comments":{"approved":true}}}');
         });
 
         it('merges conditions when the same relation is asserted twice', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereHas('posts', q => q.where('published', true))
-                    .whereHas('posts', q => q.where('featured', true)),
-            );
+            const query = ApiQuery.create()
+                .whereHas('posts', q => q.where('published', true))
+                .whereHas('posts', q => q.where('featured', true));
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$has',
-                        wire([
-                            [
-                                'posts',
-                                wire([
-                                    ['published', true],
-                                    ['featured', true],
-                                ]),
-                            ],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"$has":{"posts":{"published":true,"featured":true}}}');
         });
     });
 
     describe('whereHasNot', () => {
-        it('emits the bare array form for $hasnt', () => {
-            const result = parsedFilters(ApiQuery.create().whereHasNot('posts'));
-
-            expect(result).toEqual(wire([['$hasnt', ['posts']]]));
+        it('emits the bare list form for $hasnt', () => {
+            expect(filtersParam(ApiQuery.create().whereHasNot('posts'))).toBe('{"$hasnt":["posts"]}');
         });
 
-        it('emits the named form for $hasnt', () => {
-            const result = parsedFilters(ApiQuery.create().whereHasNot('posts', q => q.where('spam', true)));
+        it('emits the map form for $hasnt', () => {
+            const query = ApiQuery.create().whereHasNot('posts', q => q.where('spam', true));
 
-            expect(result).toEqual(wire([['$hasnt', wire([['posts', wire([['spam', true]])]])]]));
+            expect(filtersParam(query)).toBe('{"$hasnt":{"posts":{"spam":true}}}');
         });
 
-        it('promotes bare $hasnt relations to object form when conditioned entry is added', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereHasNot('comments')
-                    .whereHasNot('posts', q => q.where('spam', true)),
-            );
+        it('promotes bare $hasnt relations to the map form when a conditioned entry is added', () => {
+            const query = ApiQuery.create()
+                .whereHasNot('comments')
+                .whereHasNot('posts', q => q.where('spam', true));
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$hasnt',
-                        wire([
-                            ['comments', {}],
-                            ['posts', wire([['spam', true]])],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"$hasnt":{"comments":{},"posts":{"spam":true}}}');
         });
 
         it('merges conditions when the same relation is refused twice', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .whereHasNot('posts', q => q.where('spam', true))
-                    .whereHasNot('posts', q => q.where('flagged', true)),
-            );
+            const query = ApiQuery.create()
+                .whereHasNot('posts', q => q.where('spam', true))
+                .whereHasNot('posts', q => q.where('flagged', true));
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$hasnt',
-                        wire([
-                            [
-                                'posts',
-                                wire([
-                                    ['spam', true],
-                                    ['flagged', true],
-                                ]),
-                            ],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"$hasnt":{"posts":{"spam":true,"flagged":true}}}');
+        });
+
+        it('keeps $has and $hasnt apart', () => {
+            const query = ApiQuery.create().whereHas('posts').whereHasNot('comments');
+
+            expect(filtersParam(query)).toBe('{"$has":["posts"],"$hasnt":["comments"]}');
         });
     });
 
@@ -588,136 +574,141 @@ describe('ApiQuery', () => {
     // $and / $or groups
     // -------------------------------------------------------------------------
     describe('andWhere', () => {
-        it('emits an $and group', () => {
-            const result = parsedFilters(
-                ApiQuery.create().andWhere(q => q.where('status', 'active').where('role', 'admin')),
-            );
+        it('emits an $and group with one document per builder', () => {
+            const query = ApiQuery.create().andWhere([
+                q => q.whereRelation('posts', p => p.where('a', 1)),
+                q => q.whereRelation('posts', p => p.where('b', 2)),
+            ]);
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$and',
-                        wire([
-                            ['status', 'active'],
-                            ['role', 'admin'],
-                        ]),
-                    ],
-                ]),
+            expect(filtersParam(query)).toBe('{"$and":[{"posts":{"a":1}},{"posts":{"b":2}}]}');
+        });
+
+        it('ANDs the keys inside one document', () => {
+            const query = ApiQuery.create().andWhere([q => q.where('status', 'active').where('role', 'admin')]);
+
+            expect(filtersParam(query)).toBe('{"$and":[{"status":"active","role":"admin"}]}');
+        });
+
+        it('appends repeated calls to the same group', () => {
+            const query = ApiQuery.create()
+                .andWhere([q => q.where('status', 'active')])
+                .andWhere([q => q.where('role', 'admin')]);
+
+            expect(filtersParam(query)).toBe('{"$and":[{"status":"active"},{"role":"admin"}]}');
+        });
+
+        it('nests $or groups as whole documents', () => {
+            const query = ApiQuery.create().andWhere([
+                q => q.orWhere([a => a.where('a', 1), b => b.where('b', 2)]),
+                q => q.orWhere([c => c.where('c', 3), d => d.where('d', 4)]),
+            ]);
+
+            expect(filtersParam(query)).toBe('{"$and":[{"$or":[{"a":1},{"b":2}]},{"$or":[{"c":3},{"d":4}]}]}');
+        });
+
+        it('replaces a scalar collision on the group key', () => {
+            const query = ApiQuery.create()
+                .where('$and', 'stray')
+                .andWhere([q => q.where('status', 'active')]);
+
+            expect(filtersParam(query)).toBe('{"$and":[{"status":"active"}]}');
+        });
+
+        it('rejects an empty group', () => {
+            expect(() => ApiQuery.create().andWhere([])).toThrow(
+                new QueryError('A $and group needs at least one document.'),
             );
         });
 
-        it('replaces a scalar collision on the group key rather than merging into it', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .where('$and', 'stray')
-                    .andWhere(q => q.where('status', 'active')),
-            );
-
-            expect(result).toEqual(wire([['$and', wire([['status', 'active']])]]));
-        });
-
-        it('merges repeated andWhere calls into a single $and object', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .andWhere(q => q.where('status', 'active'))
-                    .andWhere(q => q.where('role', 'admin')),
-            );
-
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$and',
-                        wire([
-                            ['status', 'active'],
-                            ['role', 'admin'],
-                        ]),
-                    ],
-                ]),
+        it('rejects a document with no conditions', () => {
+            expect(() => ApiQuery.create().andWhere([q => q.where('a', 1), q => q])).toThrow(
+                new QueryError('Every $and document needs at least one condition.'),
             );
         });
 
-        it('deep-merges repeated calls that nest the same relation', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .andWhere(q => q.whereRelation('author', a => a.where('first_name', '$like', 'x')))
-                    .andWhere(q => q.whereRelation('author', a => a.where('last_name', '$like', 'x'))),
-            );
+        it('leaves the source query untouched', () => {
+            const base = ApiQuery.create().andWhere([q => q.where('a', 1)]);
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$and',
-                        {
-                            author: wire([
-                                ['first_name', wire([['$like', 'x']])],
-                                ['last_name', wire([['$like', 'x']])],
-                            ]),
-                        },
-                    ],
-                ]),
-            );
+            base.andWhere([q => q.where('b', 2)]);
+
+            expect(filtersParam(base)).toBe('{"$and":[{"a":1}]}');
         });
     });
 
     describe('orWhere', () => {
-        it('emits an $or group', () => {
-            const result = parsedFilters(
-                ApiQuery.create().orWhere(q => q.where('status', 'active').where('role', 'admin')),
-            );
+        it('emits (a AND b) OR c from one document per builder', () => {
+            const query = ApiQuery.create().orWhere([
+                q => q.where('role', 'admin').where('status', 'active'),
+                q => q.where('role', 'owner'),
+            ]);
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$or',
-                        wire([
-                            ['status', 'active'],
-                            ['role', 'admin'],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"$or":[{"role":"admin","status":"active"},{"role":"owner"}]}');
         });
 
-        it('merges repeated orWhere calls into a single $or object', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .orWhere(q => q.where('name', '$like', 'alice'))
-                    .orWhere(q => q.where('email', '$like', 'alice')),
-            );
+        it('ANDs the group with sibling root conditions', () => {
+            const query = ApiQuery.create()
+                .where('status', 'active')
+                .orWhere([q => q.where('name', 'a'), q => q.where('email', 'b')]);
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$or',
-                        wire([
-                            ['name', wire([['$like', 'alice']])],
-                            ['email', wire([['$like', 'alice']])],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filtersParam(query)).toBe('{"status":"active","$or":[{"name":"a"},{"email":"b"}]}');
         });
 
-        it('deep-merges repeated calls that nest the same relation', () => {
-            const result = parsedFilters(
-                ApiQuery.create()
-                    .orWhere(q => q.whereRelation('author', a => a.where('first_name', '$like', 'x')))
-                    .orWhere(q => q.whereRelation('author', a => a.where('last_name', '$like', 'x'))),
-            );
+        it('appends repeated calls as further branches of the same group', () => {
+            const query = ApiQuery.create()
+                .orWhere([q => q.where('name', 'alice')])
+                .orWhere([q => q.where('email', 'alice@example.com')]);
 
-            expect(result).toEqual(
-                wire([
-                    [
-                        '$or',
-                        {
-                            author: wire([
-                                ['first_name', wire([['$like', 'x']])],
-                                ['last_name', wire([['$like', 'x']])],
-                            ]),
-                        },
-                    ],
-                ]),
+            expect(filtersParam(query)).toBe('{"$or":[{"name":"alice"},{"email":"alice@example.com"}]}');
+        });
+
+        it('keeps a relation document as one branch', () => {
+            const query = ApiQuery.create().orWhere([
+                q => q.where('name', 'a'),
+                q => q.whereRelation('posts', p => p.whereRelation('user', u => u.where('name', 'b'))),
+            ]);
+
+            expect(filtersParam(query)).toBe('{"$or":[{"name":"a"},{"posts":{"user":{"name":"b"}}}]}');
+        });
+
+        it('rejects an empty group', () => {
+            expect(() => ApiQuery.create().orWhere([])).toThrow(new QueryError('A $or group needs at least one document.'));
+        });
+
+        it('rejects a document with no conditions', () => {
+            expect(() => ApiQuery.create().orWhere([q => q])).toThrow(
+                new QueryError('Every $or document needs at least one condition.'),
             );
+        });
+    });
+
+    // -------------------------------------------------------------------------
+    // Search
+    // -------------------------------------------------------------------------
+    describe('search', () => {
+        it('emits a top-level search parameter', () => {
+            expect(ApiQuery.create().search('smith').toQueryString()).toBe('search=smith');
+        });
+
+        it('trims the term', () => {
+            expect(ApiQuery.create().search('  ada lovelace  ').toQueryParameters()).toEqual({ search: 'ada lovelace' });
+        });
+
+        it('replaces an earlier term', () => {
+            expect(ApiQuery.create().search('ada').search('grace').toQueryParameters()).toEqual({ search: 'grace' });
+        });
+
+        it('clears the term when given an empty string', () => {
+            expect(ApiQuery.create().search('ada').search('').toQueryParameters()).toEqual({});
+        });
+
+        it('clears the term when given only whitespace', () => {
+            expect(ApiQuery.create().search('ada').search(' \t ').toQueryParameters()).toEqual({});
+        });
+
+        it('emits search beside the filters rather than inside them', () => {
+            const query = ApiQuery.create().where('status', 'active').search('smith');
+
+            expect(query.toQueryParameters()).toEqual({ filters: '{"status":"active"}', search: 'smith' });
         });
     });
 
@@ -776,6 +767,12 @@ describe('ApiQuery', () => {
 
             expect(params['order']).toBe('age:desc,name:desc');
         });
+
+        it('clears the cursor, which only seeks within the order it was issued for', () => {
+            const query = ApiQuery.create().useCursorPagination().cursor('tok').orderBy('name');
+
+            expect(query.toQueryParameters()).toEqual({ order: 'name', pagination: 'cursor' });
+        });
     });
 
     describe('orderByRandom', () => {
@@ -789,6 +786,24 @@ describe('ApiQuery', () => {
             const params = ApiQuery.create().orderBy('name').orderByRandom().toQueryParameters();
 
             expect(params['order']).toBe('name,random');
+        });
+
+        it('does not repeat random when called twice', () => {
+            const params = ApiQuery.create().orderByRandom().orderByRandom().toQueryParameters();
+
+            expect(params['order']).toBe('random');
+        });
+
+        it('drops a cursor token and stays offset-paginated', () => {
+            const query = ApiQuery.create().cursor('tok').orderByRandom();
+
+            expect(query.toQueryParameters()).toEqual({ order: 'random' });
+        });
+
+        it('refuses random order under forced cursor pagination', () => {
+            expect(() => ApiQuery.create().useCursorPagination().orderByRandom()).toThrow(
+                new QueryError('Random order cannot be combined with cursor pagination.'),
+            );
         });
     });
 
@@ -817,6 +832,18 @@ describe('ApiQuery', () => {
 
             expect(params['cursor']).toBe('abc123');
         });
+
+        it('keeps a non-random order', () => {
+            const query = ApiQuery.create().orderBy('id').cursor('abc123');
+
+            expect(query.toQueryParameters()).toEqual({ order: 'id', cursor: 'abc123' });
+        });
+
+        it('refuses a cursor under random order', () => {
+            expect(() => ApiQuery.create().orderByRandom().cursor('abc123')).toThrow(
+                new QueryError('Random order cannot be combined with cursor pagination.'),
+            );
+        });
     });
 
     describe('useCursorPagination', () => {
@@ -830,6 +857,12 @@ describe('ApiQuery', () => {
             const params = ApiQuery.create().toQueryParameters();
 
             expect(params['pagination']).toBeUndefined();
+        });
+
+        it('refuses cursor pagination under random order', () => {
+            expect(() => ApiQuery.create().orderBy('name').orderByRandom().useCursorPagination()).toThrow(
+                new QueryError('Random order cannot be combined with cursor pagination.'),
+            );
         });
     });
 
@@ -845,16 +878,8 @@ describe('ApiQuery', () => {
     });
 
     // -------------------------------------------------------------------------
-    // Sparse fields
+    // Sparse fields and aggregates
     // -------------------------------------------------------------------------
-    describe('fields', () => {
-        it('emits a comma-joined global fields parameter', () => {
-            const params = ApiQuery.create().fields(['name', 'email']).toQueryParameters();
-
-            expect(params['fields']).toBe('name,email');
-        });
-    });
-
     describe('fieldsFor', () => {
         it('emits a per-resource bracket key', () => {
             const params = ApiQuery.create().fieldsFor('users', ['name', 'email']).toQueryParameters();
@@ -873,62 +898,58 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Counts
-    // -------------------------------------------------------------------------
-    describe('counts', () => {
-        it('emits a comma-joined global counts parameter', () => {
-            const params = ApiQuery.create().counts(['posts', 'comments']).toQueryParameters();
-
-            expect(params['counts']).toBe('posts,comments');
-        });
-    });
-
-    describe('countsFor', () => {
-        it('emits a per-resource bracket key for counts', () => {
-            const params = ApiQuery.create().countsFor('users', ['posts', 'comments']).toQueryParameters();
-
-            expect(params['counts[users]']).toBe('posts,comments');
-        });
-    });
-
-    // -------------------------------------------------------------------------
-    // Aggregates: sums / averages
-    // -------------------------------------------------------------------------
-    describe('sumFor', () => {
-        it('emits a double-bracket key for sums', () => {
-            const params = ApiQuery.create().sumFor('account', 'transaction', ['amount', 'fee']).toQueryParameters();
-
-            expect(params['sums[account][transaction]']).toBe('amount,fee');
-        });
-
-        it('emits multiple sums entries', () => {
+    describe('aggregatesFor', () => {
+        it('emits a per-resource aggregates bracket key', () => {
             const params = ApiQuery.create()
-                .sumFor('account', 'transaction', ['amount', 'fee'])
-                .sumFor('account', 'refund', ['amount'])
+                .aggregatesFor('user', ['posts_count', 'orders_sum_total'])
                 .toQueryParameters();
 
-            expect(params['sums[account][transaction]']).toBe('amount,fee');
-            expect(params['sums[account][refund]']).toBe('amount');
-        });
-    });
-
-    describe('averageFor', () => {
-        it('emits a double-bracket key for averages', () => {
-            const params = ApiQuery.create().averageFor('account', 'transaction', ['amount']).toQueryParameters();
-
-            expect(params['averages[account][transaction]']).toBe('amount');
+            expect(params).toEqual({ 'aggregates[user]': 'posts_count,orders_sum_total' });
         });
 
-        it('joins multiple averaged fields with commas', () => {
+        it('replaces the keys of a type requested twice', () => {
             const params = ApiQuery.create()
-                .averageFor('account', 'transaction', ['amount', 'fee'])
+                .aggregatesFor('user', ['posts_count'])
+                .aggregatesFor('user', ['posts_exists'])
                 .toQueryParameters();
 
-            expect(params['averages[account][transaction]']).toBe('amount,fee');
+            expect(params).toEqual({ 'aggregates[user]': 'posts_exists' });
+        });
+
+        it('emits the shape the toolkit renders, with aggregates in the field list', () => {
+            const query = ApiQuery.create()
+                .fieldsFor('user', ['name', 'aggregates'])
+                .aggregatesFor('user', ['posts_count', 'orders_sum_total', 'last_order_at'])
+                .aggregatesFor('post', ['comments_count']);
+
+            expect(new URLSearchParams(query.toQueryString()).toString()).toBe(
+                new URLSearchParams([
+                    ['fields[user]', 'name,aggregates'],
+                    ['aggregates[user]', 'posts_count,orders_sum_total,last_order_at'],
+                    ['aggregates[post]', 'comments_count'],
+                ]).toString(),
+            );
         });
     });
 
+    // -------------------------------------------------------------------------
+    // Soft deletes
+    // -------------------------------------------------------------------------
+    describe('withTrashed', () => {
+        it('emits trashed=with', () => {
+            expect(ApiQuery.create().withTrashed().toQueryString()).toBe('trashed=with');
+        });
+    });
+
+    describe('onlyTrashed', () => {
+        it('emits trashed=only', () => {
+            expect(ApiQuery.create().onlyTrashed().toQueryString()).toBe('trashed=only');
+        });
+
+        it('replaces an earlier visibility', () => {
+            expect(ApiQuery.create().withTrashed().onlyTrashed().toQueryString()).toBe('trashed=only');
+        });
+    });
     // -------------------------------------------------------------------------
     // Empty query → {} parameters
     // -------------------------------------------------------------------------
@@ -999,6 +1020,39 @@ describe('ApiQuery', () => {
 
             expect(parsed.get('page')).toBe('2');
             expect(parsed.get('limit')).toBe('25');
+        });
+
+        it('emits every parameter in a stable order', () => {
+            const query = ApiQuery.create()
+                .onlyTrashed()
+                .aggregatesFor('user', ['posts_count'])
+                .fieldsFor('user', ['name', 'aggregates'])
+                .useCursorPagination()
+                .limit(10)
+                .orderBy('name', 'desc')
+                .search('ada')
+                .orWhere([q => q.where('role', 'admin'), q => q.where('role', 'owner')]);
+
+            expect(query.toQueryParameters()).toEqual({
+                filters: '{"$or":[{"role":"admin"},{"role":"owner"}]}',
+                search: 'ada',
+                order: 'name:desc',
+                limit: 10,
+                pagination: 'cursor',
+                'fields[user]': 'name,aggregates',
+                'aggregates[user]': 'posts_count',
+                trashed: 'only',
+            });
+            expect(Object.keys(query.toQueryParameters())).toEqual([
+                'filters',
+                'search',
+                'order',
+                'limit',
+                'pagination',
+                'fields[user]',
+                'aggregates[user]',
+                'trashed',
+            ]);
         });
     });
 });

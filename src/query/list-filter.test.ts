@@ -10,9 +10,12 @@ import { describe, expect, it } from 'vitest';
 import { ApiQuery } from './api-query';
 import { filter } from './list-filter';
 
-// ---------------------------------------------------------------------------
-// Helper: parse the `filters` parameter back to an object
-// ---------------------------------------------------------------------------
+/**
+ * Parse the `filters` parameter of a query back to an object.
+ *
+ * @param query - the query to read
+ * @returns the decoded filter tree, or an empty object when none is set
+ */
 function parsedFilters(query: ApiQuery): unknown {
     const params = query.toQueryParameters();
 
@@ -23,10 +26,13 @@ function parsedFilters(query: ApiQuery): unknown {
     return JSON.parse(String(params['filters']));
 }
 
-// ---------------------------------------------------------------------------
-// Helper: build wire-style objects from entry tuples (keeps $-prefixed keys out
-// of object-literal key positions where Biome might inspect them).
-// ---------------------------------------------------------------------------
+/**
+ * Build a wire-style object from entry tuples, keeping `$`-prefixed keys out of
+ * object-literal key positions.
+ *
+ * @param entries - key-value pairs for the record
+ * @returns a plain record
+ */
 function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string, unknown> {
     return Object.fromEntries(entries);
 }
@@ -74,23 +80,6 @@ describe('filter', () => {
     });
 
     // -------------------------------------------------------------------------
-    // filter.text
-    // -------------------------------------------------------------------------
-    describe('text', () => {
-        it('applies a $like filter on a plain field', () => {
-            const q = filter.text('name').apply(ApiQuery.create(), 'ali');
-
-            expect(parsedFilters(q)).toEqual(wire([['name', wire([['$like', 'ali']])]]));
-        });
-
-        it('applies a $like filter on a dot-path field', () => {
-            const q = filter.text('posts.title').apply(ApiQuery.create(), 'news');
-
-            expect(parsedFilters(q)).toEqual({ posts: wire([['title', wire([['$like', 'news']])]]) });
-        });
-    });
-
-    // -------------------------------------------------------------------------
     // filter.anyOf
     // -------------------------------------------------------------------------
     describe('anyOf', () => {
@@ -104,6 +93,13 @@ describe('filter', () => {
             const q = filter.anyOf('posts.status').apply(ApiQuery.create(), ['draft', 'published']);
 
             expect(parsedFilters(q)).toEqual({ posts: wire([['status', wire([['$in', ['draft', 'published']]])]]) });
+        });
+
+        it('applies no filter for an empty list rather than an empty $in', () => {
+            const base = ApiQuery.create().where('status', 'active');
+            const q = filter.anyOf('posts.status').apply(base, []);
+
+            expect(q.toQueryParameters()).toEqual({ filters: '{"status":"active"}' });
         });
     });
 
@@ -234,109 +230,19 @@ describe('filter', () => {
     });
 
     // -------------------------------------------------------------------------
-    // filter.searchAcross
+    // filter.search
     // -------------------------------------------------------------------------
-    describe('searchAcross', () => {
-        it('emits an $or group with a $like per plain field', () => {
-            const q = filter.searchAcross(['name', 'email']).apply(ApiQuery.create(), 'alice');
+    describe('search', () => {
+        it('sets the top-level search parameter, not a filter', () => {
+            const q = filter.search().apply(ApiQuery.create(), 'alice');
 
-            expect(parsedFilters(q)).toEqual(
-                wire([
-                    [
-                        '$or',
-                        wire([
-                            ['name', wire([['$like', 'alice']])],
-                            ['email', wire([['$like', 'alice']])],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(q.toQueryString()).toBe('search=alice');
         });
 
-        it('nests dot-path fields inside the $or group', () => {
-            const q = filter.searchAcross(['name', 'posts.title']).apply(ApiQuery.create(), 'news');
+        it('clears the search for an empty term', () => {
+            const base = ApiQuery.create().search('alice');
 
-            expect(parsedFilters(q)).toEqual(
-                wire([
-                    [
-                        '$or',
-                        wire([
-                            ['name', wire([['$like', 'news']])],
-                            ['posts', wire([['title', wire([['$like', 'news']])]])],
-                        ]),
-                    ],
-                ]),
-            );
-        });
-
-        it('handles a mix of plain and deeply-nested dot-path fields', () => {
-            const q = filter.searchAcross(['title', 'posts.author.name']).apply(ApiQuery.create(), 'bob');
-
-            expect(parsedFilters(q)).toEqual(
-                wire([
-                    [
-                        '$or',
-                        wire([
-                            ['title', wire([['$like', 'bob']])],
-                            ['posts', { author: wire([['name', wire([['$like', 'bob']])]]) }],
-                        ]),
-                    ],
-                ]),
-            );
-        });
-
-        it('works with a single field', () => {
-            const q = filter.searchAcross(['email']).apply(ApiQuery.create(), 'test');
-
-            expect(parsedFilters(q)).toEqual(wire([['$or', wire([['email', wire([['$like', 'test']])]])]]));
-        });
-
-        it('matches every field when several target the same relation', () => {
-            const q = filter
-                .searchAcross(['author.first_name', 'author.last_name'])
-                .apply(ApiQuery.create(), 'alice');
-
-            expect(parsedFilters(q)).toEqual(
-                wire([
-                    [
-                        '$or',
-                        wire([
-                            [
-                                'author',
-                                wire([
-                                    ['first_name', wire([['$like', 'alice']])],
-                                    ['last_name', wire([['$like', 'alice']])],
-                                ]),
-                            ],
-                        ]),
-                    ],
-                ]),
-            );
-        });
-
-        it('matches every field when several target the same deeply nested relation', () => {
-            const q = filter
-                .searchAcross(['posts.author.first_name', 'posts.author.last_name'])
-                .apply(ApiQuery.create(), 'bob');
-
-            expect(parsedFilters(q)).toEqual(
-                wire([
-                    [
-                        '$or',
-                        wire([
-                            [
-                                'posts',
-                                {
-                                    author: wire([
-                                        ['first_name', wire([['$like', 'bob']])],
-                                        ['last_name', wire([['$like', 'bob']])],
-                                    ]),
-                                },
-                            ],
-                        ]),
-                    ],
-                ]),
-            );
+            expect(filter.search().apply(base, '').toQueryParameters()).toEqual({});
         });
     });
 

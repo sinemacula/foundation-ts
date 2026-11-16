@@ -10,6 +10,9 @@
  * `whereRelation` calls so the full relation chain is expressed correctly on
  * the wire.
  *
+ * Every value a mapper receives is a real condition: `''` and `false` filter
+ * for that value. Clear a filter by not applying it.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -76,8 +79,9 @@ function applyDotPath(query: ApiQuery, field: string, applyLeaf: (q: ApiQuery, l
  * const definition = defineListQuery({
  *     filters: {
  *         status: filter.equals('status'),
- *         name:   filter.text('name'),
+ *         roles:  filter.anyOf('role'),
  *     },
+ *     search: filter.search(),
  * });
  * ```
  */
@@ -97,21 +101,8 @@ export const filter = Object.freeze({
     },
 
     /**
-     * Case-insensitive text search filter (`field $like value`).
-     *
-     * @param field - the API field path, optionally dot-separated
-     * @returns a {@link ListFilter} that emits a `$like` condition
-     */
-    text(field: string): ListFilter<string> {
-        return {
-            apply(query, value) {
-                return applyDotPath(query, field, (q, leaf) => q.where(leaf, '$like', value));
-            },
-        };
-    },
-
-    /**
-     * Membership filter (`field IN (values)`).
+     * Membership filter (`field IN (values)`). An empty list applies no filter,
+     * as an empty `$in` would match nothing.
      *
      * @param field - the API field path, optionally dot-separated
      * @returns a {@link ListFilter} that emits a `$in` condition
@@ -119,6 +110,10 @@ export const filter = Object.freeze({
     anyOf(field: string): ListFilter<readonly FilterScalar[]> {
         return {
             apply(query, value) {
+                if (value.length === 0) {
+                    return query;
+                }
+
                 return applyDotPath(query, field, (q, leaf) => q.whereIn(leaf, value));
             },
         };
@@ -200,8 +195,9 @@ export const filter = Object.freeze({
     },
 
     /**
-     * Contains filter (`field $contains value`). Accepts a scalar or an array
-     * of scalars.
+     * JSON containment filter (`field $contains value`). An array must all be
+     * contained (all-of); a comma-separated string matches any one item
+     * (any-of).
      *
      * @param field - the API field path, optionally dot-separated
      * @returns a {@link ListFilter} that emits a `$contains` condition
@@ -215,25 +211,16 @@ export const filter = Object.freeze({
     },
 
     /**
-     * Cross-field text search: emits one `$or` group with a `$like` condition
-     * per field. Each field may be dot-separated for relation nesting.
+     * Free-text search over the fields the resource declares searchable,
+     * emitted as the top-level `search` parameter. An empty or whitespace-only
+     * term clears the search.
      *
-     * @param fields - the API field paths to search across
-     * @returns a {@link ListFilter} that emits an `$or` group with `$like` per
-     * field
+     * @returns a {@link ListFilter} that sets the query's search term
      */
-    searchAcross(fields: readonly string[]): ListFilter<string> {
+    search(): ListFilter<string> {
         return {
             apply(query, value) {
-                return query.orWhere(orQuery => {
-                    let q = orQuery;
-
-                    for (const field of fields) {
-                        q = applyDotPath(q, field, (inner, leaf) => inner.where(leaf, '$like', value));
-                    }
-
-                    return q;
-                });
+                return query.search(value);
             },
         };
     },

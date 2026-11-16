@@ -261,9 +261,9 @@ describe('ResourceClient', () => {
             const { client, resource } = createResource();
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
 
-            await resource.show('w1', ApiQuery.create().fields(['id']));
+            await resource.show('w1', ApiQuery.create().fieldsFor('widget', ['id']).withTrashed());
 
-            expect(client.calls.at(0)?.options?.query).toEqual({ fields: 'id' });
+            expect(client.calls.at(0)?.options?.query).toEqual({ 'fields[widget]': 'id', trashed: 'with' });
         });
 
         it('propagates malformed-envelope errors', async () => {
