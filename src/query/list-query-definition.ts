@@ -11,6 +11,7 @@
  */
 
 import type { ApiQuery } from './api-query';
+import type { SortDirection } from './filter-expression';
 import type { ListFilter } from './list-filter';
 
 /**
@@ -31,7 +32,7 @@ export interface SortDefault {
     readonly column: string;
 
     /** The sort direction. */
-    readonly direction: 'asc' | 'desc';
+    readonly direction: SortDirection;
 }
 
 /**

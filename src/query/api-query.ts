@@ -26,17 +26,15 @@
 
 import { isRecord } from '../support/is-record';
 import type { QueryParameters } from '../http/http-client';
-import type { FilterOperators, FilterScalar, FilterTree } from './filter-expression';
+import type {
+    FilterDocumentBuilder,
+    FilterOperators,
+    FilterScalar,
+    FilterTree,
+    ScalarOperator,
+    SortDirection,
+} from './filter-expression';
 import { QueryError } from './query-error';
-
-/**
- * The scalar comparison operators accepted by the two-argument `where`
- * overload.
- */
-type ScalarOperator = '$eq' | '$neq' | '$gt' | '$lt' | '$ge' | '$le';
-
-/** Builds one filter document from a fresh query. */
-type DocumentBuilder = (query: ApiQuery) => ApiQuery;
 
 /** The logical group keys of the filter grammar. */
 type GroupKey = '$and' | '$or';
@@ -53,7 +51,7 @@ interface OrderEntry {
     readonly column: string;
 
     /** The sort direction. */
-    readonly direction: 'asc' | 'desc';
+    readonly direction: SortDirection;
 }
 
 /**
@@ -373,7 +371,7 @@ export class ApiQuery {
      * query
      * @returns a new `ApiQuery` with the relation filter applied
      */
-    whereRelation(relation: string, build: DocumentBuilder): ApiQuery {
+    whereRelation(relation: string, build: FilterDocumentBuilder): ApiQuery {
         return this.#withMergedDocument({ [relation]: ApiQuery.#document(build) });
     }
 
@@ -389,7 +387,7 @@ export class ApiQuery {
      * @param build - optional callback to add filter conditions on the relation
      * @returns a new `ApiQuery` with the `$has` condition applied
      */
-    whereHas(relation: string, build?: DocumentBuilder): ApiQuery {
+    whereHas(relation: string, build?: FilterDocumentBuilder): ApiQuery {
         return this.#applyExistence('$has', relation, build);
     }
 
@@ -404,7 +402,7 @@ export class ApiQuery {
      * @param build - optional callback to add filter conditions on the relation
      * @returns a new `ApiQuery` with the `$hasnt` condition applied
      */
-    whereHasNot(relation: string, build?: DocumentBuilder): ApiQuery {
+    whereHasNot(relation: string, build?: FilterDocumentBuilder): ApiQuery {
         return this.#applyExistence('$hasnt', relation, build);
     }
 
@@ -429,7 +427,7 @@ export class ApiQuery {
      * @throws {@link QueryError} when no documents are given or a document has
      * no conditions
      */
-    andWhere(documents: readonly DocumentBuilder[]): ApiQuery {
+    andWhere(documents: readonly FilterDocumentBuilder[]): ApiQuery {
         return this.#appendGroup('$and', documents);
     }
 
@@ -450,7 +448,7 @@ export class ApiQuery {
      * @throws {@link QueryError} when no documents are given or a document has
      * no conditions
      */
-    orWhere(documents: readonly DocumentBuilder[]): ApiQuery {
+    orWhere(documents: readonly FilterDocumentBuilder[]): ApiQuery {
         return this.#appendGroup('$or', documents);
     }
 
@@ -491,7 +489,7 @@ export class ApiQuery {
      * @returns a new `ApiQuery` with the order entry appended
      * @throws {@link QueryError} when random order meets cursor pagination
      */
-    orderBy(column: string, direction: 'asc' | 'desc' = 'asc'): ApiQuery {
+    orderBy(column: string, direction: SortDirection = 'asc'): ApiQuery {
         const order = [...this.#state.order.filter(e => e.column !== column), { column, direction }];
 
         return ApiQuery.#guarded({ ...this.#state, order, cursorToken: undefined });
@@ -680,7 +678,7 @@ export class ApiQuery {
      * @param build - the document builder
      * @returns the document the builder assembled
      */
-    static #document(build: DocumentBuilder): FilterTree {
+    static #document(build: FilterDocumentBuilder): FilterTree {
         return build(ApiQuery.create()).#state.filters;
     }
 
@@ -836,7 +834,7 @@ export class ApiQuery {
      * @throws {@link QueryError} when no builders are given or a document has
      * no conditions
      */
-    #appendGroup(key: GroupKey, builders: readonly DocumentBuilder[]): ApiQuery {
+    #appendGroup(key: GroupKey, builders: readonly FilterDocumentBuilder[]): ApiQuery {
         if (builders.length === 0) {
             throw new QueryError(`A ${key} group needs at least one document.`);
         }
@@ -862,7 +860,7 @@ export class ApiQuery {
      * @param build - optional sub-query builder
      * @returns a new `ApiQuery` with the existence condition applied
      */
-    #applyExistence(key: ExistenceKey, relation: string, build?: DocumentBuilder): ApiQuery {
+    #applyExistence(key: ExistenceKey, relation: string, build?: FilterDocumentBuilder): ApiQuery {
         return this.#withMergedDocument({ [key]: build ? { [relation]: ApiQuery.#document(build) } : [relation] });
     }
 }
