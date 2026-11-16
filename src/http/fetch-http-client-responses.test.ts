@@ -406,17 +406,18 @@ describe('FetchHttpClient - API error envelope', () => {
         expect(error.title).toBe('Query Too Expensive');
     });
 
-    it.each(
-        UNREADABLE_COST_META,
-    )('falls back to a plain HttpError when the query-cost meta is %s', async (_case, meta) => {
-        const error = await rejectionFor(
-            envelopeResponse(422, { code: 10201, title: 'Query Too Expensive', meta }),
-            HttpError,
-        );
+    it.each(UNREADABLE_COST_META)(
+        'falls back to a plain HttpError when the query-cost meta is %s',
+        async (_case, meta) => {
+            const error = await rejectionFor(
+                envelopeResponse(422, { code: 10201, title: 'Query Too Expensive', meta }),
+                HttpError,
+            );
 
-        expect(error).not.toBeInstanceOf(QueryTooExpensiveError);
-        expect(error.code).toBe(ApiErrorCode.QueryTooExpensive);
-    });
+            expect(error).not.toBeInstanceOf(QueryTooExpensiveError);
+            expect(error.code).toBe(ApiErrorCode.QueryTooExpensive);
+        },
+    );
 
     it('builds a MaintenanceError for the maintenance code, distinct from a plain 503', async () => {
         const maintenance = await rejectionFor(

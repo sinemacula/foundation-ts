@@ -1214,20 +1214,23 @@ describe('refreshSession', () => {
     it.each([
         ['a rejection', REJECTED],
         ['a return to pending', { kind: 'interactionRequired', pending: PENDING }],
-    ] as const)('reports a failure when persistence cannot be cleared on %s, never re-adopting the refused pair', async (_label, result) => {
-        const { state, api, persistence, context } = await signedIn(tokens('a'));
-        const failure = new Error('unavailable');
-        persistence.clearFailure = failure;
-        api.refreshes.push(result);
+    ] as const)(
+        'reports a failure when persistence cannot be cleared on %s, never re-adopting the refused pair',
+        async (_label, result) => {
+            const { state, api, persistence, context } = await signedIn(tokens('a'));
+            const failure = new Error('unavailable');
+            persistence.clearFailure = failure;
+            api.refreshes.push(result);
 
-        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'failed', error: failure });
-        expect(state).toStrictEqual(createInitialSessionState());
+            await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'failed', error: failure });
+            expect(state).toStrictEqual(createInitialSessionState());
 
-        await hydrateSession(state, context);
+            await hydrateSession(state, context);
 
-        expect(state).toStrictEqual(createInitialSessionState());
-        expect(persistence.snapshot).toStrictEqual({ revision: 1, tokens: tokens('a') });
-    });
+            expect(state).toStrictEqual(createInitialSessionState());
+            expect(persistence.snapshot).toStrictEqual({ revision: 1, tokens: tokens('a') });
+        },
+    );
 
     it('keeps the session this context rotated since the refused refresh started', async () => {
         const { state, api, persistence, context } = await signedIn(tokens('a'));

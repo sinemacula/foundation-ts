@@ -498,18 +498,17 @@ describe('FetchHttpClient - accept header', () => {
 // ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - credentials', () => {
-    it.each([
-        'omit',
-        'same-origin',
-        'include',
-    ] as const)('sends the %s credentials mode to fetch', async credentials => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn);
+    it.each(['omit', 'same-origin', 'include'] as const)(
+        'sends the %s credentials mode to fetch',
+        async credentials => {
+            const fetchFn = makeFetch(async () => jsonResponse({}));
+            const client = makeClient(fetchFn);
 
-        await client.post('/session', {}, { credentials });
+            await client.post('/session', {}, { credentials });
 
-        expect(lastInit(fetchFn).credentials).toBe(credentials);
-    });
+            expect(lastInit(fetchFn).credentials).toBe(credentials);
+        },
+    );
 
     it('leaves the credentials mode to the platform when the request sets none', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({}));
