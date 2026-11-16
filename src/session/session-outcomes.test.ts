@@ -16,11 +16,11 @@ describe('classifyRefreshError', () => {
         expect(classifyRefreshError(new HttpError(401, 'Unauthorized'))).toBe('rejected');
     });
 
-    it.each([408, 429, 500, 502, 503, 599])('treats a %i as retryable', (status) => {
+    it.each([408, 429, 500, 502, 503, 599])('treats a %i as retryable', status => {
         expect(classifyRefreshError(new HttpError(status, 'Transient'))).toBe('retryable');
     });
 
-    it.each([400, 403, 404, 409, 410, 422, 499])('treats a %i as a non-retryable failure', (status) => {
+    it.each([400, 403, 404, 409, 410, 422, 499])('treats a %i as a non-retryable failure', status => {
         expect(classifyRefreshError(new HttpError(status, 'Refused'))).toBe('failed');
     });
 
