@@ -560,9 +560,10 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Classify a fetch or body-read rejection: the configured timeout firing is
-     * a {@link TimeoutError}, a caller abort a {@link CancelledError}, and
-     * anything else a {@link NetworkError}.
+     * Classify a fetch or body-read rejection by what aborted the exchange: the
+     * timeout is a {@link TimeoutError}, the caller a {@link CancelledError},
+     * and nothing a {@link NetworkError}, even when the rejection is an
+     * `AbortError`, since only a recorded source proves a deliberate abort.
      *
      * @param error - the rejection
      * @param request - the request being exchanged
@@ -573,15 +574,14 @@ export class FetchHttpClient implements HttpClient {
     #toTransportError(error: unknown, request: HttpRequest, scope: AbortScope, failure: string): Error {
         const target = describeRequest(request);
 
-        if (scope.timedOut()) {
-            return new TimeoutError(`${target} timed out after ${String(this.#timeout)}ms.`, { cause: error });
+        switch (scope.source()) {
+            case 'timeout':
+                return new TimeoutError(`${target} timed out after ${String(this.#timeout)}ms.`, { cause: error });
+            case 'caller':
+                return new CancelledError(`${target} was cancelled.`, { cause: error });
+            case 'none':
+                return new NetworkError(`${target} ${failure}.`, { cause: error });
         }
-
-        if (isAbortError(error) || scope.signal?.aborted === true) {
-            return new CancelledError(`${target} was cancelled.`, { cause: error });
-        }
-
-        return new NetworkError(`${target} ${failure}.`, { cause: error });
     }
 
     /**
@@ -703,17 +703,6 @@ function trimTrailingSlashes(value: string): string {
     }
 
     return value.slice(0, end);
-}
-
-/**
- * Determine whether a fetch rejection represents a deliberate abort rather than
- * a genuine transport failure.
- *
- * @param error - the value fetch rejected with
- * @returns true when the error is named AbortError
- */
-function isAbortError(error: unknown): boolean {
-    return typeof error === 'object' && error !== null && (error as Record<string, unknown>)['name'] === 'AbortError';
 }
 
 /**

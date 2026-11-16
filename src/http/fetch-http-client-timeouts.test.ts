@@ -303,6 +303,32 @@ describe('FetchHttpClient - request timeout', () => {
         await pending;
     });
 
+    it('keeps a timeout a TimeoutError when the caller aborts before fetch settles', async () => {
+        const client = makeClient(makeFetch(failAfterTenSeconds), { timeout: 5_000 });
+        const caller = new AbortController();
+
+        const pending = rejectionOf(client.get('/items', { signal: caller.signal }), TimeoutError);
+
+        await vi.advanceTimersByTimeAsync(6_000);
+        caller.abort();
+        await vi.advanceTimersByTimeAsync(4_000);
+
+        await pending;
+    });
+
+    it('maps an AbortError that neither the timeout nor the caller caused to a NetworkError', async () => {
+        const cause = new DOMException('The operation was aborted.', 'AbortError');
+        const client = makeClient(
+            makeFetch(() => Promise.reject(cause)),
+            { timeout: 5_000 },
+        );
+
+        const error = await rejectionOf(client.get('/items', { signal: new AbortController().signal }), NetworkError);
+
+        expect(error).not.toBeInstanceOf(TimeoutError);
+        expect(error.cause).toBe(cause);
+    });
+
     it('clears the timer and detaches from the caller signal once the body is read', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ ok: true }));
         const client = makeClient(fetchFn, { timeout: 5_000 });

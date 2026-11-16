@@ -432,15 +432,20 @@ describe('FetchHttpClient - network failure', () => {
 // ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - cancellation', () => {
-    it('throws CancelledError when the fetch rejection is an AbortError, even without a caller signal', async () => {
+    it.each([
+        ['no caller signal', undefined],
+        ['a caller signal that has not aborted', new AbortController().signal],
+    ])('throws a reported NetworkError for an AbortError rejection with %s', async (_case, signal) => {
         const cause = new DOMException('The operation was aborted.', 'AbortError');
         const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(cause);
-        const client = makeClient(fetchFn);
+        const onResponseError = vi.fn();
+        const client = makeClient(fetchFn, { onResponseError });
 
-        const error = await rejectionOf(client.get('/items'), CancelledError);
+        const error = await rejectionOf(client.get('/items', signal === undefined ? {} : { signal }), NetworkError);
 
-        expect(error.message).toBe('GET https://api.example.com/items was cancelled.');
+        expect(error.message).toBe('GET https://api.example.com/items failed without a response.');
         expect(error.cause).toBe(cause);
+        expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
     });
 
     it('throws CancelledError when the caller aborts, whatever the rejection is named', async () => {

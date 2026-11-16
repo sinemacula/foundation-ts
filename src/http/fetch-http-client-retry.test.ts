@@ -252,18 +252,38 @@ describe('FetchHttpClient - transient retry', () => {
         expect(fetchFn).toHaveBeenCalledTimes(2);
     });
 
-    it('stops immediately when a CancelledError occurs mid-retry, without a further attempt or notification', async () => {
+    it('retries an AbortError the caller did not cause as a transport failure', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'))
+            .mockResolvedValueOnce(jsonResponse({ recovered: true }));
+        const client = makeClient(fetchFn, { retry: { attempts: 2, backoff: fixedBackoff(10) } });
+
+        const pending = client.get<RecoveredBody>('/items');
+
+        await vi.advanceTimersByTimeAsync(10);
+
+        await expect(pending).resolves.toStrictEqual({ recovered: true });
+        expect(fetchFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops when the caller aborts a retried attempt, without a further attempt or notification', async () => {
+        const caller = new AbortController();
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockResolvedValueOnce(jsonResponse({}, 503))
-            .mockRejectedValueOnce(new DOMException('The operation was aborted.', 'AbortError'));
+            .mockImplementationOnce(() => {
+                caller.abort();
+
+                return Promise.reject(new DOMException('The operation was aborted.', 'AbortError'));
+            });
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, {
             retry: { attempts: 2, backoff: fixedBackoff(10) },
             onResponseError,
         });
 
-        const pending = rejectionOf(client.get('/items'), CancelledError);
+        const pending = rejectionOf(client.get('/items', { signal: caller.signal }), CancelledError);
 
         await vi.advanceTimersByTimeAsync(10);
 
