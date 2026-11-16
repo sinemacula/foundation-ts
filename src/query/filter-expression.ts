@@ -48,7 +48,8 @@
  * { "$has": { "posts": {}, "comments": { "title": "X" } } }
  * ```
  * The three forms are a bare list, a conditioned map, and a mix - use `{}` for
- * a bare relation inside the map form.
+ * a bare relation inside the map form. Two `$hasnt` documents on one relation
+ * are separate conditions, so the second stands as its own `$and` document.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
