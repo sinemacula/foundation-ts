@@ -5,108 +5,36 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { CancelledError, HttpError, NetworkError } from '../http/http-error';
-import { MemoryStorage } from '../storage/memory-storage';
-import type { SessionApi, SessionDevice } from './session-api';
+import { HttpError, NetworkError } from '../http/http-error';
+import type { PasswordCredentials, SessionApi, SessionDevice } from './session-api';
 import type { SessionCoreContext } from './session-core';
 import {
     clearSession,
     createInitialSessionState,
-    hydrateStateFromStorage,
+    hydrateSession,
     loginWithCredentials,
     logoutSession,
     refreshSession,
     rehydrateSessionUser,
 } from './session-core';
+import type { LoginResult, RefreshResult } from './session-outcomes';
+import type { SessionPersistence } from './session-persistence';
 import type { SessionState } from './session-state';
 import type { SessionTokens } from './session-tokens';
 import type { SessionUser } from './session-user';
 
-const ACCESS_TOKEN_KEY = 'auth.access_token';
-const REFRESH_TOKEN_KEY = 'auth.refresh_token';
-const EXPIRES_AT_KEY = 'auth.expires_at';
-
-/**
- * The epoch-millisecond instant for the UTC wire timestamp 2026-12-31 23:59:59.
- */
-const SESSION_EXPIRY_EPOCH_MS = 1_798_761_599_000;
-
-/**
- * An in-memory {@link SessionApi} fake that records every call and replays
- * queued outcomes in order.
- */
-class FakeSessionApi implements SessionApi {
-    readonly calls: string[] = [];
-    readonly loginCalls: Array<{ credentials: unknown; device: SessionDevice }> = [];
-    readonly refreshCalls: string[] = [];
-
-    readonly #sessions: Array<SessionTokens | Error> = [];
-    readonly #users: Array<SessionUser | Error> = [];
-    #logoutError: Error | null = null;
-
-    /**
-     * Queue an outcome for the next login or refresh call.
-     *
-     * @param outcome - the tokens to resolve with, or the error to reject with
-     */
-    queueSession(outcome: SessionTokens | Error): void {
-        this.#sessions.push(outcome);
-    }
-
-    /**
-     * Queue an outcome for the next currentUser call.
-     *
-     * @param outcome - the user to resolve with, or the error to reject with
-     */
-    queueUser(outcome: SessionUser | Error): void {
-        this.#users.push(outcome);
-    }
-
-    /**
-     * Make the next logout call reject.
-     *
-     * @param error - the error to reject with
-     */
-    failLogout(error: Error): void {
-        this.#logoutError = error;
-    }
-
-    login(credentials: unknown, device: SessionDevice): Promise<SessionTokens> {
-        this.calls.push('login');
-        this.loginCalls.push({ credentials, device });
-
-        return take(this.#sessions);
-    }
-
-    refresh(refreshToken: string): Promise<SessionTokens> {
-        this.calls.push('refresh');
-        this.refreshCalls.push(refreshToken);
-
-        return take(this.#sessions);
-    }
-
-    logout(): Promise<void> {
-        this.calls.push('logout');
-
-        return this.#logoutError === null ? Promise.resolve() : Promise.reject(this.#logoutError);
-    }
-
-    currentUser(): Promise<SessionUser> {
-        this.calls.push('currentUser');
-
-        return take(this.#users);
-    }
-}
+/** A queued gateway outcome: a value, a failure, or a pending promise. */
+type Queued<T> = T | Error | Promise<T>;
 
 /**
  * Consume the next queued outcome.
  *
  * @param queue - the outcome queue
- * @returns a promise resolving or rejecting with the next outcome
+ * @returns a promise settling with the next outcome
  */
-function take<T>(queue: Array<T | Error>): Promise<T> {
+function take<T>(queue: Array<Queued<T>>): Promise<T> {
     const outcome = queue.shift();
 
     if (outcome === undefined) {
@@ -116,464 +44,958 @@ function take<T>(queue: Array<T | Error>): Promise<T> {
     return outcome instanceof Error ? Promise.reject(outcome) : Promise.resolve(outcome);
 }
 
-/** A valid token bundle as returned by the gateway. */
-function tokens(overrides: Partial<SessionTokens> = {}): SessionTokens {
+/** A promise with its settle functions exposed. */
+interface Deferred<T> {
+    /** The promise. */
+    readonly promise: Promise<T>;
+
+    /** Resolve the promise. */
+    readonly resolve: (value: T) => void;
+
+    /** Reject the promise. */
+    readonly reject: (error: unknown) => void;
+}
+
+/**
+ * Create a promise settled from outside.
+ *
+ * @returns the deferred promise
+ */
+function deferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise<T>((onResolve, onReject) => {
+        resolve = onResolve;
+        reject = onReject;
+    });
+
+    return { promise, resolve, reject };
+}
+
+/** The arguments of one login call. */
+interface LoginCall<C> {
+    /** The credentials. */
+    readonly credentials: C;
+
+    /** The device fingerprint. */
+    readonly device: SessionDevice;
+}
+
+/** Credentials signing in with a one-time code. */
+interface CodeCredentials {
+    /** The phone number. */
+    readonly phone: string;
+
+    /** The one-time code. */
+    readonly code: string;
+}
+
+/**
+ * An in-memory {@link SessionApi} fake that records every call and replays
+ * queued outcomes in order.
+ */
+class FakeSessionApi<C = PasswordCredentials> implements SessionApi<SessionUser, C> {
+    /** The calls made, by method name. */
+    readonly calls: string[] = [];
+
+    /** The arguments of every login call. */
+    readonly loginCalls: Array<LoginCall<C>> = [];
+
+    /** The refresh token presented by every refresh call. */
+    readonly refreshCalls: Array<string | null> = [];
+
+    /** The refresh token presented by every logout call. */
+    readonly logoutCalls: Array<string | null> = [];
+
+    /** The queued login outcomes. */
+    readonly logins: Array<Queued<LoginResult>> = [];
+
+    /** The queued refresh outcomes. */
+    readonly refreshes: Array<Queued<RefreshResult>> = [];
+
+    /** The queued user outcomes. */
+    readonly users: Array<Queued<SessionUser>> = [];
+
+    /** The queued logout outcomes. */
+    readonly logouts: Array<Queued<undefined>> = [];
+
+    /**
+     * Record a login.
+     *
+     * @param credentials - the credentials
+     * @param device - the device fingerprint
+     * @returns the next queued login outcome
+     */
+    login(credentials: C, device: SessionDevice): Promise<LoginResult> {
+        this.calls.push('login');
+        this.loginCalls.push({ credentials, device });
+
+        return take(this.logins);
+    }
+
+    /**
+     * Record a refresh.
+     *
+     * @param refreshToken - the presented refresh token
+     * @returns the next queued refresh outcome
+     */
+    refresh(refreshToken: string | null): Promise<RefreshResult> {
+        this.calls.push('refresh');
+        this.refreshCalls.push(refreshToken);
+
+        return take(this.refreshes);
+    }
+
+    /**
+     * Record a logout, resolving when nothing is queued.
+     *
+     * @param refreshToken - the presented refresh token
+     * @returns the next queued logout outcome
+     */
+    async logout(refreshToken: string | null): Promise<void> {
+        this.calls.push('logout');
+        this.logoutCalls.push(refreshToken);
+
+        if (this.logouts.length > 0) {
+            await take(this.logouts);
+        }
+    }
+
+    /**
+     * Record a user fetch.
+     *
+     * @returns the next queued user outcome
+     */
+    currentUser(): Promise<SessionUser> {
+        this.calls.push('currentUser');
+
+        return take(this.users);
+    }
+}
+
+/**
+ * An in-memory {@link SessionPersistence} fake recording each operation, with
+ * injectable failures and gates.
+ */
+class FakePersistence implements SessionPersistence {
+    /** The persisted snapshot. */
+    snapshot: SessionTokens | null = null;
+
+    /** Every operation, in order. */
+    readonly operations: string[] = [];
+
+    /** A failure the next load rejects with. */
+    loadFailure: Error | null = null;
+
+    /** A failure the next save rejects with. */
+    saveFailure: Error | null = null;
+
+    /** A failure the next clear rejects with. */
+    clearFailure: Error | null = null;
+
+    /** A gate the next load waits on. */
+    loadGate: Promise<void> | null = null;
+
+    /** A gate the next save waits on. */
+    saveGate: Promise<void> | null = null;
+
+    /**
+     * Read the snapshot.
+     *
+     * @returns the snapshot
+     */
+    async load(): Promise<SessionTokens | null> {
+        this.operations.push('load');
+        await this.#pass(this.loadGate);
+        this.loadGate = null;
+        this.#fail('loadFailure');
+
+        return this.snapshot;
+    }
+
+    /**
+     * Replace the snapshot.
+     *
+     * @param tokens - the tokens to persist
+     */
+    async save(tokens: SessionTokens): Promise<void> {
+        this.operations.push(`save:${tokens.accessToken}`);
+        await this.#pass(this.saveGate);
+        this.saveGate = null;
+        this.#fail('saveFailure');
+        this.snapshot = tokens;
+    }
+
+    /**
+     * Remove the snapshot.
+     */
+    clear(): Promise<void> {
+        return new Promise((resolve) => {
+            this.operations.push('clear');
+            this.#fail('clearFailure');
+            this.snapshot = null;
+            resolve();
+        });
+    }
+
+    /**
+     * Wait on a gate when one is set.
+     *
+     * @param gate - the gate, or null
+     */
+    async #pass(gate: Promise<void> | null): Promise<void> {
+        if (gate !== null) {
+            await gate;
+        }
+    }
+
+    /**
+     * Throw, once, the failure stored under the given field.
+     *
+     * @param field - the failure field
+     */
+    #fail(field: 'loadFailure' | 'saveFailure' | 'clearFailure'): void {
+        const failure = this[field];
+
+        this[field] = null;
+
+        if (failure !== null) {
+            throw failure;
+        }
+    }
+}
+
+const DEVICE: SessionDevice = { uuid: 'device-uuid', os: 'macOS' };
+const CREDENTIALS: PasswordCredentials = { email: 'alice@example.com', password: 'secret' };
+const ALICE: SessionUser = { id: 'u1', email: 'alice@example.com', name: 'Alice', permissions: [] };
+const BOB: SessionUser = { id: 'u2', email: 'bob@example.com', name: 'Bob', permissions: [] };
+
+/**
+ * Build a token set.
+ *
+ * @param suffix - distinguishes the tokens of one pair from another
+ * @param overrides - fields replacing the defaults
+ * @returns the tokens
+ */
+function tokens(suffix: string, overrides: Partial<SessionTokens> = {}): SessionTokens {
+    return { accessToken: `access-${suffix}`, refreshToken: `refresh-${suffix}`, expiresAtEpochMs: 1000, ...overrides };
+}
+
+/** A test fixture: the state, the fakes, and the context over them. */
+interface Fixture<C = PasswordCredentials> {
+    /** The session state. */
+    readonly state: SessionState;
+
+    /** The gateway fake. */
+    readonly api: FakeSessionApi<C>;
+
+    /** The persistence fake. */
+    readonly persistence: FakePersistence;
+
+    /** The context over the fakes. */
+    readonly context: SessionCoreContext<SessionUser, C>;
+}
+
+/**
+ * Build a fixture, optionally signed in with the given tokens.
+ *
+ * @param signedIn - the tokens to start signed in with, persisted too
+ * @returns the fixture
+ */
+function fixture(signedIn: SessionTokens | null = null): Fixture {
+    const state = createInitialSessionState();
+    const api = new FakeSessionApi();
+    const persistence = new FakePersistence();
+
+    if (signedIn !== null) {
+        Object.assign(state, signedIn, { user: ALICE });
+        persistence.snapshot = signedIn;
+    }
+
+    return { state, api, persistence, context: { api, persistence, device: () => DEVICE } };
+}
+
+/**
+ * Read the token fields of the state.
+ *
+ * @param state - the session state
+ * @returns the state's tokens
+ */
+function tokensOf(state: SessionState): Record<string, unknown> {
     return {
-        accessToken: 'new-token',
-        refreshToken: 'new-refresh-token',
-        expiresAtEpochMs: SESSION_EXPIRY_EPOCH_MS,
-        ...overrides,
+        accessToken: state.accessToken,
+        refreshToken: state.refreshToken,
+        expiresAtEpochMs: state.expiresAtEpochMs,
     };
 }
 
-/** A mapped user record as returned by the gateway. */
-function user(): SessionUser {
-    return { id: 'u1', email: 'alice@example.com', name: 'Alice Smith', permissions: [] };
+/**
+ * Let every queued microtask run.
+ */
+async function flush(): Promise<void> {
+    await new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+    });
 }
 
-describe('session core', () => {
-    let storage: MemoryStorage;
-    let fake: FakeSessionApi;
-    let parseCalls: string[];
-
-    /**
-     * Build a core context over the test collaborators.
-     *
-     * @param overrides - optional context overrides
-     * @returns the assembled context
-     */
-    function context(overrides: { parseTimestamp?: (value: string) => number | null } = {}): SessionCoreContext {
-        return {
-            storage,
-            storageKeys: {
-                accessToken: ACCESS_TOKEN_KEY,
-                refreshToken: REFRESH_TOKEN_KEY,
-                expiresAt: EXPIRES_AT_KEY,
-                deviceUuid: 'auth.device_uuid',
-            },
-            api: fake,
-            device: () => ({ uuid: 'device-uuid-1', os: 'WEB' }),
-            parseTimestamp:
-                overrides.parseTimestamp ??
-                ((value: string): null => {
-                    parseCalls.push(value);
-
-                    return null;
-                }),
-        };
-    }
-
-    /** A signed-out state with nothing persisted. */
-    function emptyState(): SessionState {
-        return { accessToken: null, refreshToken: null, expiresAtEpochMs: null, user: null };
-    }
-
-    beforeEach(() => {
-        storage = new MemoryStorage();
-        fake = new FakeSessionApi();
-        parseCalls = [];
-    });
-
-    describe('createInitialSessionState', () => {
-        it('reads the persisted tokens from storage', () => {
-            storage.set(ACCESS_TOKEN_KEY, 'persisted-token');
-            storage.set(REFRESH_TOKEN_KEY, 'persisted-refresh');
-
-            const state = createInitialSessionState(context());
-
-            expect(state.accessToken).toBe('persisted-token');
-            expect(state.refreshToken).toBe('persisted-refresh');
-        });
-
-        it('initialises every field as null when storage is empty', () => {
-            expect(createInitialSessionState(context())).toStrictEqual(emptyState());
-            expect(parseCalls).toStrictEqual([]);
-        });
-
-        it('hydrates a digits-only persisted expiry as epoch milliseconds', () => {
-            storage.set(EXPIRES_AT_KEY, '1782820800000');
-
-            expect(createInitialSessionState(context()).expiresAtEpochMs).toBe(1_782_820_800_000);
-            expect(parseCalls).toStrictEqual([]);
-        });
-
-        it('delegates a legacy non-numeric expiry to the configured parser', () => {
-            storage.set(EXPIRES_AT_KEY, '2026-06-30 12:00:00');
-
-            const state = createInitialSessionState(
-                context({ parseTimestamp: value => (value === '2026-06-30 12:00:00' ? 1_782_820_800_000 : null) }),
-            );
-
-            expect(state.expiresAtEpochMs).toBe(1_782_820_800_000);
-        });
-
-        it('hydrates expiry as null when the legacy value is unparseable', () => {
-            storage.set(EXPIRES_AT_KEY, 'not-a-timestamp');
-
-            expect(createInitialSessionState(context()).expiresAtEpochMs).toBeNull();
-            expect(parseCalls).toStrictEqual(['not-a-timestamp']);
+describe('createInitialSessionState', () => {
+    it('builds a signed-out state', () => {
+        expect(createInitialSessionState()).toStrictEqual({
+            accessToken: null,
+            refreshToken: null,
+            expiresAtEpochMs: null,
+            user: null,
         });
     });
+});
 
-    describe('loginWithCredentials', () => {
-        it('sets the tokens and user after a successful login', async () => {
-            fake.queueSession(tokens());
-            fake.queueUser(user());
+describe('hydrateSession', () => {
+    it('reads the persisted session into state', async () => {
+        const { state, persistence, context } = fixture();
+        persistence.snapshot = tokens('a');
 
-            const state = emptyState();
+        await hydrateSession(state, context);
 
-            await loginWithCredentials(state, context(), { email: 'alice@example.com', password: 'secret' });
-
-            expect(state.accessToken).toBe('new-token');
-            expect(state.refreshToken).toBe('new-refresh-token');
-            expect(state.expiresAtEpochMs).toBe(SESSION_EXPIRY_EPOCH_MS);
-            expect(state.user).toStrictEqual(user());
-        });
-
-        it('forwards the credentials and device fingerprint to the gateway', async () => {
-            fake.queueSession(tokens());
-            fake.queueUser(user());
-
-            await loginWithCredentials(emptyState(), context(), { email: 'alice@example.com', password: 'secret' });
-
-            expect(fake.loginCalls).toStrictEqual([
-                {
-                    credentials: { email: 'alice@example.com', password: 'secret' },
-                    device: { uuid: 'device-uuid-1', os: 'WEB' },
-                },
-            ]);
-        });
-
-        it('persists every session key, with expiry as an epoch-ms string', async () => {
-            fake.queueSession(tokens({ accessToken: 'stored-token', refreshToken: 'stored-refresh' }));
-            fake.queueUser(user());
-
-            await loginWithCredentials(emptyState(), context(), { email: 'alice@example.com', password: 'secret' });
-
-            expect(storage.get(ACCESS_TOKEN_KEY)).toBe('stored-token');
-            expect(storage.get(REFRESH_TOKEN_KEY)).toBe('stored-refresh');
-            expect(storage.get(EXPIRES_AT_KEY)).toBe('1798761599000');
-        });
-
-        it('fetches the current user after the session is applied', async () => {
-            fake.queueSession(tokens());
-            fake.queueUser(user());
-
-            const state = emptyState();
-
-            await loginWithCredentials(state, context(), { email: 'alice@example.com', password: 'secret' });
-
-            expect(fake.calls).toStrictEqual(['login', 'currentUser']);
-            expect(state.user?.name).toBe('Alice Smith');
-        });
-
-        it('removes the persisted expiry when the session has none', async () => {
-            storage.set(EXPIRES_AT_KEY, '1782820800000');
-            fake.queueSession(tokens({ expiresAtEpochMs: null }));
-            fake.queueUser(user());
-
-            const state = emptyState();
-
-            await loginWithCredentials(state, context(), { email: 'alice@example.com', password: 'secret' });
-
-            expect(state.expiresAtEpochMs).toBeNull();
-            expect(storage.get(EXPIRES_AT_KEY)).toBeNull();
-        });
-
-        it('removes rather than writes the absent refresh token and expiry keys', async () => {
-            fake.queueSession(tokens({ refreshToken: null, expiresAtEpochMs: null }));
-            fake.queueUser(user());
-
-            const removed: string[] = [];
-            const written: string[] = [];
-            const base = context();
-            const recording = {
-                ...base,
-                storage: {
-                    get: (key: string) => storage.get(key),
-                    set: (key: string, value: string) => {
-                        written.push(key);
-                        storage.set(key, value);
-                    },
-                    remove: (key: string) => {
-                        removed.push(key);
-                        storage.remove(key);
-                    },
-                },
-            };
-
-            await loginWithCredentials(emptyState(), recording, { email: 'alice@example.com', password: 'secret' });
-
-            expect(removed).toStrictEqual([REFRESH_TOKEN_KEY, EXPIRES_AT_KEY]);
-            expect(written).toStrictEqual([ACCESS_TOKEN_KEY]);
-        });
-
-        it('removes the persisted refresh token when the session has none', async () => {
-            storage.set(REFRESH_TOKEN_KEY, 'old-refresh');
-            fake.queueSession(tokens({ refreshToken: null }));
-            fake.queueUser(user());
-
-            const state = emptyState();
-
-            await loginWithCredentials(state, context(), { email: 'alice@example.com', password: 'secret' });
-
-            expect(state.refreshToken).toBeNull();
-            expect(storage.get(REFRESH_TOKEN_KEY)).toBeNull();
-        });
+        expect(state).toStrictEqual({ ...tokens('a'), user: null });
     });
 
-    describe('refreshSession', () => {
-        /** A signed-in session persisted to storage, ready for a refresh attempt. */
-        function signedIn(): SessionState {
-            storage.set(ACCESS_TOKEN_KEY, 'old-token');
-            storage.set(REFRESH_TOKEN_KEY, 'old-refresh');
-            storage.set(EXPIRES_AT_KEY, '1782820800000');
+    it('leaves a signed-out state alone when nothing is persisted', async () => {
+        const { state, context } = fixture();
 
-            return { accessToken: 'old-token', refreshToken: 'old-refresh', expiresAtEpochMs: 1_782_820_800_000, user: user() };
-        }
+        await hydrateSession(state, context);
 
-        /** Assert the persisted session survived a transient failure untouched. */
-        function expectSessionKept(state: SessionState): void {
-            expect(state).toStrictEqual({
-                accessToken: 'old-token',
-                refreshToken: 'old-refresh',
-                expiresAtEpochMs: 1_782_820_800_000,
-                user: user(),
-            });
-            expect(storage.get(ACCESS_TOKEN_KEY)).toBe('old-token');
-            expect(storage.get(REFRESH_TOKEN_KEY)).toBe('old-refresh');
-            expect(storage.get(EXPIRES_AT_KEY)).toBe('1782820800000');
-        }
-
-        /** Assert the session was fully cleared from state and storage. */
-        function expectSessionCleared(state: SessionState): void {
-            expect(state).toStrictEqual(emptyState());
-            expect(storage.get(ACCESS_TOKEN_KEY)).toBeNull();
-            expect(storage.get(REFRESH_TOKEN_KEY)).toBeNull();
-            expect(storage.get(EXPIRES_AT_KEY)).toBeNull();
-        }
-
-        it('returns false immediately when no refresh token is in state', async () => {
-            const result = await refreshSession(emptyState(), context());
-
-            expect(result).toBe(false);
-            expect(fake.calls).toStrictEqual([]);
-        });
-
-        it('updates tokens and returns true on a successful refresh', async () => {
-            fake.queueSession(tokens({ accessToken: 'fresh-token', refreshToken: 'fresh-refresh' }));
-
-            const state = { ...emptyState(), refreshToken: 'old-refresh' };
-            const result = await refreshSession(state, context());
-
-            expect(result).toBe(true);
-            expect(fake.refreshCalls).toStrictEqual(['old-refresh']);
-            expect(state.accessToken).toBe('fresh-token');
-            expect(state.refreshToken).toBe('fresh-refresh');
-            expect(state.expiresAtEpochMs).toBe(SESSION_EXPIRY_EPOCH_MS);
-            expect(storage.get(ACCESS_TOKEN_KEY)).toBe('fresh-token');
-            expect(storage.get(REFRESH_TOKEN_KEY)).toBe('fresh-refresh');
-            expect(storage.get(EXPIRES_AT_KEY)).toBe('1798761599000');
-        });
-
-        it('clears the session and returns false when the server rejects the token with 401', async () => {
-            fake.queueSession(new HttpError(401, 'Unauthorized'));
-
-            const state = signedIn();
-            const result = await refreshSession(state, context());
-
-            expect(result).toBe(false);
-            expectSessionCleared(state);
-        });
-
-        it('clears the session and returns false when the server rejects the token with 403', async () => {
-            fake.queueSession(new HttpError(403, 'Forbidden'));
-
-            const state = signedIn();
-
-            expect(await refreshSession(state, context())).toBe(false);
-            expectSessionCleared(state);
-        });
-
-        it('keeps the session and returns false when a proactive refresh fails offline', async () => {
-            fake.queueSession(new NetworkError('offline'));
-
-            const state = signedIn();
-
-            expect(await refreshSession(state, context())).toBe(false);
-            expectSessionKept(state);
-        });
-
-        it('keeps the session and returns false when the refresh is cancelled by a timeout', async () => {
-            fake.queueSession(new CancelledError('request timed out'));
-
-            const state = signedIn();
-
-            expect(await refreshSession(state, context())).toBe(false);
-            expectSessionKept(state);
-        });
-
-        it('keeps the session and returns false when the server errors without rejecting the token', async () => {
-            fake.queueSession(new HttpError(500, 'Server error'));
-
-            const state = signedIn();
-
-            expect(await refreshSession(state, context())).toBe(false);
-            expectSessionKept(state);
-        });
+        expect(state).toStrictEqual(createInitialSessionState());
     });
 
-    describe('logoutSession', () => {
-        it('calls the logout endpoint and clears the session state and storage', async () => {
-            storage.set(ACCESS_TOKEN_KEY, 'tok');
+    it('signs the state out when the persisted session is gone', async () => {
+        const { state, persistence, context } = fixture(tokens('a'));
+        persistence.snapshot = null;
 
-            const state: SessionState = { ...emptyState(), accessToken: 'tok', user: user() };
+        await hydrateSession(state, context);
 
-            await logoutSession(state, context());
-
-            expect(fake.calls).toStrictEqual(['logout']);
-            expect(state).toStrictEqual(emptyState());
-            expect(storage.get(ACCESS_TOKEN_KEY)).toBeNull();
-        });
-
-        it('still clears local state when the logout API call rejects', async () => {
-            storage.set(ACCESS_TOKEN_KEY, 'tok');
-            fake.failLogout(new Error('network failure'));
-
-            const state: SessionState = { ...emptyState(), accessToken: 'tok', user: user() };
-
-            await logoutSession(state, context());
-
-            expect(state).toStrictEqual(emptyState());
-            expect(storage.get(ACCESS_TOKEN_KEY)).toBeNull();
-        });
+        expect(state).toStrictEqual(createInitialSessionState());
     });
 
-    describe('hydrateStateFromStorage', () => {
-        it('re-reads all three persisted keys into state', () => {
-            storage.set(ACCESS_TOKEN_KEY, 'other-tab-token');
-            storage.set(REFRESH_TOKEN_KEY, 'other-tab-refresh');
-            storage.set(EXPIRES_AT_KEY, '1786752000000');
+    it('keeps the user when the persisted session was rotated', async () => {
+        const { state, persistence, context } = fixture(tokens('a'));
+        persistence.snapshot = tokens('b');
 
-            const state = emptyState();
+        await hydrateSession(state, context);
 
-            hydrateStateFromStorage(state, context());
-
-            expect(state.accessToken).toBe('other-tab-token');
-            expect(state.refreshToken).toBe('other-tab-refresh');
-            expect(state.expiresAtEpochMs).toBe(1_786_752_000_000);
-        });
-
-        it('delegates a legacy expiry to the configured parser on hydration', () => {
-            storage.set(EXPIRES_AT_KEY, '2026-06-30 12:00:00');
-
-            const state = emptyState();
-
-            hydrateStateFromStorage(state, context({ parseTimestamp: () => 1_782_820_800_000 }));
-
-            expect(state.expiresAtEpochMs).toBe(1_782_820_800_000);
-        });
-
-        it('resets state to null when storage has no persisted keys', () => {
-            const state = { ...emptyState(), accessToken: 'stale-token' };
-
-            hydrateStateFromStorage(state, context());
-
-            expect(state.accessToken).toBeNull();
-        });
-
-        it('does not call the API', () => {
-            hydrateStateFromStorage(emptyState(), context());
-
-            expect(fake.calls).toStrictEqual([]);
-        });
+        expect(state).toStrictEqual({ ...tokens('b'), user: ALICE });
     });
 
-    describe('clearSession', () => {
-        it('clears the state and removes every persisted key without calling the API', () => {
-            storage.set(ACCESS_TOKEN_KEY, 'tok');
-            storage.set(REFRESH_TOKEN_KEY, 'refresh');
-            storage.set(EXPIRES_AT_KEY, '1782820800000');
+    it('lets an in-flight refresh land when the persisted session was rotated', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const response = deferred<RefreshResult>();
+        api.refreshes.push(response.promise);
 
-            const state: SessionState = {
-                accessToken: 'tok',
-                refreshToken: 'refresh',
-                expiresAtEpochMs: 1_782_820_800_000,
-                user: user(),
-            };
+        const refresh = refreshSession(state, context);
 
-            clearSession(state, context());
+        persistence.snapshot = tokens('b');
+        await hydrateSession(state, context);
+        response.resolve({ kind: 'refreshed', tokens: tokens('c') });
 
-            expect(fake.calls).toStrictEqual([]);
-            expect(state).toStrictEqual(emptyState());
-            expect(storage.get(ACCESS_TOKEN_KEY)).toBeNull();
-            expect(storage.get(REFRESH_TOKEN_KEY)).toBeNull();
-            expect(storage.get(EXPIRES_AT_KEY)).toBeNull();
-        });
+        await expect(refresh).resolves.toStrictEqual({ kind: 'refreshed' });
+        expect(tokensOf(state)).toStrictEqual(tokens('c'));
     });
 
-    describe('rehydrateSessionUser', () => {
-        it('fetches and stores the current user when a token is present but no user is loaded', async () => {
-            fake.queueUser(user());
+    it('supersedes an in-flight refresh when the persisted session is gone', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const response = deferred<RefreshResult>();
+        api.refreshes.push(response.promise);
 
-            const state = { ...emptyState(), accessToken: 'tok' };
+        const refresh = refreshSession(state, context);
 
-            await rehydrateSessionUser(state, context());
+        persistence.snapshot = null;
+        await hydrateSession(state, context);
+        response.resolve({ kind: 'refreshed', tokens: tokens('b') });
 
-            expect(state.user?.email).toBe('alice@example.com');
+        await expect(refresh).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state.accessToken).toBeNull();
+        expect(persistence.snapshot).toBeNull();
+    });
+
+    it('does not supersede an in-flight sign-in when already signed out and nothing is persisted', async () => {
+        const { state, api, context } = fixture();
+        const response = deferred<LoginResult>();
+        api.logins.push(response.promise);
+        api.users.push(ALICE);
+
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await hydrateSession(state, context);
+        response.resolve({ kind: 'authenticated', tokens: tokens('a') });
+
+        await expect(login).resolves.toStrictEqual({ kind: 'authenticated' });
+    });
+
+    it('supersedes an in-flight sign-in when another context signed in', async () => {
+        const { state, api, persistence, context } = fixture();
+        const response = deferred<LoginResult>();
+        api.logins.push(response.promise);
+
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        persistence.snapshot = tokens('elsewhere');
+        await hydrateSession(state, context);
+        response.resolve({ kind: 'authenticated', tokens: tokens('a') });
+
+        await expect(login).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(tokensOf(state)).toStrictEqual(tokens('elsewhere'));
+        expect(api.calls).toStrictEqual(['login']);
+    });
+
+    it('discards the persisted session when a transition overtook the read', async () => {
+        const { state, persistence, context } = fixture(tokens('a'));
+        const gate = deferred<undefined>();
+        persistence.loadGate = gate.promise;
+
+        const hydrate = hydrateSession(state, context);
+
+        await clearSession(state, context);
+        persistence.snapshot = tokens('stale');
+        gate.resolve(undefined);
+        await hydrate;
+
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
+
+    it('propagates a persistence failure', async () => {
+        const { state, persistence, context } = fixture();
+        persistence.loadFailure = new Error('unavailable');
+
+        await expect(hydrateSession(state, context)).rejects.toThrow('unavailable');
+    });
+});
+
+describe('loginWithCredentials', () => {
+    it('signs in, loads the user, then persists the session', async () => {
+        const { state, api, persistence, context } = fixture();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(ALICE);
+
+        await expect(loginWithCredentials(state, context, CREDENTIALS)).resolves.toStrictEqual({
+            kind: 'authenticated',
         });
 
-        it('does nothing when no access token is present', async () => {
-            const state = emptyState();
+        expect(api.loginCalls).toStrictEqual([{ credentials: CREDENTIALS, device: DEVICE }]);
+        expect(api.calls).toStrictEqual(['login', 'currentUser']);
+        expect(persistence.operations).toStrictEqual(['save:access-a']);
+        expect(persistence.snapshot).toStrictEqual(tokens('a'));
+        expect(state).toStrictEqual({ ...tokens('a'), user: ALICE });
+    });
 
-            await rehydrateSessionUser(state, context());
+    it('holds the tokens in state while the user loads, without the previous user', async () => {
+        const { state, api, persistence, context } = fixture(tokens('old'));
+        const user = deferred<SessionUser>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(user.promise);
 
-            expect(state.user).toBeNull();
-            expect(fake.calls).toStrictEqual([]);
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+
+        expect(state).toStrictEqual({ ...tokens('a'), user: null });
+        expect(persistence.snapshot).toStrictEqual(tokens('old'));
+
+        user.resolve(BOB);
+        await login;
+
+        expect(state.user).toStrictEqual(BOB);
+    });
+
+    it('forwards typed credentials without casts', async () => {
+        const api = new FakeSessionApi<CodeCredentials>();
+        const persistence = new FakePersistence();
+        const state = createInitialSessionState();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(ALICE);
+
+        await loginWithCredentials(state, { api, persistence, device: () => DEVICE }, { phone: '+44', code: '123' });
+
+        expect(api.loginCalls[0]?.credentials).toStrictEqual({ phone: '+44', code: '123' });
+    });
+
+    it('hands back a pending sign-in without persisting anything', async () => {
+        const { state, api, persistence, context } = fixture();
+        const pending = { credential: 'pending', requires: ['mfa'] };
+        api.logins.push({ kind: 'interactionRequired', pending });
+
+        await expect(loginWithCredentials(state, context, CREDENTIALS)).resolves.toStrictEqual({
+            kind: 'interactionRequired',
+            pending,
         });
 
-        it('does nothing when a user is already loaded', async () => {
-            fake.queueUser(user());
+        expect(api.calls).toStrictEqual(['login']);
+        expect(persistence.operations).toStrictEqual([]);
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
 
-            const state = { ...emptyState(), accessToken: 'tok' };
+    it('propagates a failed sign-in, leaving the state alone', async () => {
+        const { state, api, persistence, context } = fixture();
+        api.logins.push(new HttpError(422, 'Invalid'));
 
-            await rehydrateSessionUser(state, context());
-            await rehydrateSessionUser(state, context());
+        await expect(loginWithCredentials(state, context, CREDENTIALS)).rejects.toThrow('Invalid');
 
-            expect(fake.calls).toStrictEqual(['currentUser']);
-        });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual([]);
+    });
 
-        it('swallows failures and leaves the user unset', async () => {
-            fake.queueUser(new Error('network failure'));
+    it('rolls the session back when the user cannot be loaded', async () => {
+        const { state, api, persistence, context } = fixture(tokens('old'));
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(new NetworkError('offline'));
 
-            const state = { ...emptyState(), accessToken: 'tok' };
+        await expect(loginWithCredentials(state, context, CREDENTIALS)).rejects.toThrow('offline');
 
-            await expect(rehydrateSessionUser(state, context())).resolves.toBeUndefined();
-            expect(state.user).toBeNull();
-        });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['clear']);
+        expect(persistence.snapshot).toBeNull();
+    });
 
-        it('retries the fetch on a later call after a swallowed failure', async () => {
-            fake.queueUser(new Error('network failure'));
-            fake.queueUser(user());
+    it('rolls the session back when it cannot be persisted', async () => {
+        const { state, api, persistence, context } = fixture();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(ALICE);
+        persistence.saveFailure = new Error('quota');
 
-            const state = { ...emptyState(), accessToken: 'tok' };
+        await expect(loginWithCredentials(state, context, CREDENTIALS)).rejects.toThrow('quota');
 
-            await rehydrateSessionUser(state, context());
-            await rehydrateSessionUser(state, context());
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['save:access-a', 'clear']);
+    });
 
-            expect(fake.calls).toStrictEqual(['currentUser', 'currentUser']);
-            expect(state.user?.email).toBe('alice@example.com');
-        });
+    it('rethrows the original failure when the rollback cannot clear persistence', async () => {
+        const { state, api, persistence, context } = fixture();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(new Error('user failed'));
+        persistence.clearFailure = new Error('clear failed');
 
-        it('shares one request across concurrent rehydrations of the same state', async () => {
-            fake.queueUser(user());
+        await expect(loginWithCredentials(state, context, CREDENTIALS)).rejects.toThrow('user failed');
 
-            const state = { ...emptyState(), accessToken: 'tok' };
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
 
-            await Promise.all([rehydrateSessionUser(state, context()), rehydrateSessionUser(state, context())]);
+    it('is superseded by a sign-out during the sign-in request', async () => {
+        const { state, api, persistence, context } = fixture();
+        const response = deferred<LoginResult>();
+        api.logins.push(response.promise);
 
-            expect(fake.calls).toStrictEqual(['currentUser']);
-            expect(state.user?.email).toBe('alice@example.com');
-        });
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await logoutSession(state, context);
+        response.resolve({ kind: 'authenticated', tokens: tokens('a') });
+
+        await expect(login).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['clear']);
+    });
+
+    it('is superseded by a sign-out while the user loads, persisting nothing', async () => {
+        const { state, api, persistence, context } = fixture();
+        const user = deferred<SessionUser>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(user.promise);
+
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+        await logoutSession(state, context);
+        user.resolve(ALICE);
+
+        await expect(login).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['clear']);
+        expect(api.logoutCalls).toStrictEqual(['refresh-a']);
+    });
+
+    it('is superseded by a sign-out while the session persists, setting no user', async () => {
+        const { state, api, persistence, context } = fixture();
+        const gate = deferred<undefined>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(ALICE);
+        persistence.saveGate = gate.promise;
+
+        const login = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+        const logout = logoutSession(state, context);
+
+        gate.resolve(undefined);
+        await logout;
+
+        await expect(login).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['save:access-a', 'clear']);
+        expect(persistence.snapshot).toBeNull();
+    });
+
+    it('leaves a newer sign-in alone when an overtaken sign-in fails', async () => {
+        const { state, api, persistence, context } = fixture();
+        const firstUser = deferred<SessionUser>();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.users.push(firstUser.promise);
+
+        const first = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('b') });
+        api.users.push(BOB);
+        await loginWithCredentials(state, context, CREDENTIALS);
+        firstUser.reject(new Error('first failed'));
+
+        await expect(first).rejects.toThrow('first failed');
+        expect(state).toStrictEqual({ ...tokens('b'), user: BOB });
+        expect(persistence.snapshot).toStrictEqual(tokens('b'));
+        expect(persistence.operations).toStrictEqual(['save:access-b']);
+    });
+});
+
+describe('refreshSession', () => {
+    it('presents the refresh token, persists the new pair, then applies it', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const gate = deferred<undefined>();
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+        persistence.saveGate = gate.promise;
+
+        const refresh = refreshSession(state, context);
+
+        await flush();
+
+        expect(tokensOf(state)).toStrictEqual(tokens('a'));
+
+        gate.resolve(undefined);
+
+        await expect(refresh).resolves.toStrictEqual({ kind: 'refreshed' });
+        expect(api.refreshCalls).toStrictEqual(['refresh-a']);
+        expect(persistence.snapshot).toStrictEqual(tokens('b'));
+        expect(state).toStrictEqual({ ...tokens('b'), user: ALICE });
+    });
+
+    it('refreshes without a held refresh token, as with a cookie transport', async () => {
+        const { state, api, context } = fixture(tokens('a', { refreshToken: null }));
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b', { refreshToken: null }) });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'refreshed' });
+        expect(api.refreshCalls).toStrictEqual([null]);
+        expect(state.accessToken).toBe('access-b');
+    });
+
+    it('keeps the new pair in memory and reports a failure when it cannot be persisted', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const failure = new Error('quota');
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+        persistence.saveFailure = failure;
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'failed', error: failure });
+        expect(tokensOf(state)).toStrictEqual(tokens('b'));
+        expect(persistence.snapshot).toStrictEqual(tokens('a'));
+    });
+
+    it.each(['retryable', 'failed'] as const)('keeps the tokens on a %s failure', async (kind) => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const error = new HttpError(500, 'Server');
+        api.refreshes.push({ kind, error });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind, error });
+        expect(state).toStrictEqual({ ...tokens('a'), user: ALICE });
+        expect(persistence.operations).toStrictEqual([]);
+    });
+
+    it('keeps the tokens and hands back a pending session', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const pending = { credential: 'pending', requires: ['mfa'] };
+        api.refreshes.push({ kind: 'interactionRequired', pending });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'interactionRequired', pending });
+        expect(tokensOf(state)).toStrictEqual(tokens('a'));
+        expect(persistence.operations).toStrictEqual([]);
+    });
+
+    it('classifies a failure the gateway throws, keeping the tokens when transient', async () => {
+        const { state, api, context } = fixture(tokens('a'));
+        const error = new NetworkError('offline');
+        api.refreshes.push(error);
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'retryable', error });
+        expect(tokensOf(state)).toStrictEqual(tokens('a'));
+    });
+
+    it('classifies a thrown 401 as a rejection, clearing the session', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const error = new HttpError(401, 'Unauthorized');
+        api.refreshes.push(error);
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'rejected', error });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.snapshot).toBeNull();
+    });
+
+    it('clears the session when persistence still holds the rejected session', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const error = new HttpError(401, 'Unauthorized');
+        api.refreshes.push({ kind: 'rejected', error });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'rejected', error });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['load', 'clear']);
+        expect(persistence.snapshot).toBeNull();
+    });
+
+    it('clears the session when nothing is persisted', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        persistence.snapshot = null;
+        api.refreshes.push({ kind: 'rejected', error: null });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'rejected', error: null });
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
+
+    it('clears the session when persistence cannot be read', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        persistence.snapshot = tokens('b');
+        persistence.loadFailure = new Error('unavailable');
+        api.refreshes.push({ kind: 'rejected', error: null });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'rejected', error: null });
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
+
+    it('still reports the rejection when persistence cannot be cleared', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        persistence.clearFailure = new Error('unavailable');
+        api.refreshes.push({ kind: 'rejected', error: null });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'rejected', error: null });
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
+
+    it('adopts a session another context rotated in instead of clearing', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        persistence.snapshot = tokens('b');
+        api.refreshes.push({ kind: 'rejected', error: null });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'refreshed' });
+        expect(state).toStrictEqual({ ...tokens('b'), user: ALICE });
+        expect(persistence.operations).toStrictEqual(['load']);
+    });
+
+    it('adopts a session whose refresh token alone differs', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        persistence.snapshot = tokens('a', { refreshToken: 'refresh-b' });
+        api.refreshes.push({ kind: 'rejected', error: null });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'refreshed' });
+        expect(state.refreshToken).toBe('refresh-b');
+    });
+
+    it('adopts a session whose access token alone differs, as with a cookie transport', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a', { refreshToken: null }));
+        persistence.snapshot = tokens('b', { refreshToken: null });
+        api.refreshes.push({ kind: 'rejected', error: null });
+
+        await expect(refreshSession(state, context)).resolves.toStrictEqual({ kind: 'refreshed' });
+        expect(state.accessToken).toBe('access-b');
+    });
+
+    it('is superseded by a sign-out during the refresh request, never re-applying tokens', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const response = deferred<RefreshResult>();
+        api.refreshes.push(response.promise);
+
+        const refresh = refreshSession(state, context);
+
+        await logoutSession(state, context);
+        response.resolve({ kind: 'refreshed', tokens: tokens('b') });
+
+        await expect(refresh).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['clear']);
+        expect(persistence.snapshot).toBeNull();
+    });
+
+    it('is superseded by a sign-out while the new pair persists', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const gate = deferred<undefined>();
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+        persistence.saveGate = gate.promise;
+
+        const refresh = refreshSession(state, context);
+
+        await flush();
+        const logout = logoutSession(state, context);
+
+        gate.resolve(undefined);
+        await logout;
+
+        await expect(refresh).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['save:access-b', 'clear']);
+        expect(persistence.snapshot).toBeNull();
+    });
+
+    it('is superseded by a sign-out while a failed persist settles', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const gate = deferred<undefined>();
+        api.refreshes.push({ kind: 'refreshed', tokens: tokens('b') });
+        persistence.saveGate = gate.promise;
+        persistence.saveFailure = new Error('quota');
+
+        const refresh = refreshSession(state, context);
+
+        await flush();
+        const logout = logoutSession(state, context);
+
+        gate.resolve(undefined);
+        await logout;
+
+        await expect(refresh).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
+
+    it('is superseded by a sign-out while the rejected session is compared', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const gate = deferred<undefined>();
+        api.refreshes.push({ kind: 'rejected', error: null });
+        persistence.loadGate = gate.promise;
+        persistence.snapshot = tokens('b');
+
+        const refresh = refreshSession(state, context);
+
+        await flush();
+        await logoutSession(state, context);
+        gate.resolve(undefined);
+
+        await expect(refresh).resolves.toStrictEqual({ kind: 'superseded' });
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
+});
+
+describe('logoutSession', () => {
+    it('signs out server-side with the refresh token, then clears the session', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+
+        await logoutSession(state, context);
+
+        expect(api.logoutCalls).toStrictEqual(['refresh-a']);
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['clear']);
+        expect(persistence.snapshot).toBeNull();
+    });
+
+    it('clears the session even when the server cannot be reached', async () => {
+        const { state, api, context } = fixture(tokens('a'));
+        api.logouts.push(new NetworkError('offline'));
+
+        await logoutSession(state, context);
+
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
+
+    it('leaves a sign-in that started during the server call in place', async () => {
+        const { state, api, persistence, context } = fixture(tokens('a'));
+        const response = deferred<undefined>();
+        api.logouts.push(response.promise);
+
+        const logout = logoutSession(state, context);
+
+        api.logins.push({ kind: 'authenticated', tokens: tokens('b') });
+        api.users.push(BOB);
+        await loginWithCredentials(state, context, CREDENTIALS);
+        response.resolve(undefined);
+        await logout;
+
+        expect(state).toStrictEqual({ ...tokens('b'), user: BOB });
+        expect(persistence.snapshot).toStrictEqual(tokens('b'));
+    });
+
+    it('propagates a persistence failure after clearing the state', async () => {
+        const { state, persistence, context } = fixture(tokens('a'));
+        persistence.clearFailure = new Error('unavailable');
+
+        await expect(logoutSession(state, context)).rejects.toThrow('unavailable');
+        expect(state).toStrictEqual(createInitialSessionState());
+    });
+});
+
+describe('clearSession', () => {
+    it('clears the state before persistence settles', async () => {
+        const { state, persistence, context } = fixture(tokens('a'));
+
+        const clear = clearSession(state, context);
+
+        expect(state).toStrictEqual(createInitialSessionState());
+
+        await clear;
+
+        expect(persistence.snapshot).toBeNull();
+    });
+
+    it('propagates a persistence failure', async () => {
+        const { state, persistence, context } = fixture(tokens('a'));
+        persistence.clearFailure = new Error('unavailable');
+
+        await expect(clearSession(state, context)).rejects.toThrow('unavailable');
+    });
+});
+
+describe('rehydrateSessionUser', () => {
+    it('does nothing when signed out', async () => {
+        const { state, api, context } = fixture();
+
+        await rehydrateSessionUser(state, context);
+
+        expect(api.calls).toStrictEqual([]);
+    });
+
+    it('does nothing when the user is already loaded', async () => {
+        const { state, api, context } = fixture(tokens('a'));
+
+        await rehydrateSessionUser(state, context);
+
+        expect(api.calls).toStrictEqual([]);
+    });
+
+    it('loads the user', async () => {
+        const { state, api, context } = fixture(tokens('a'));
+        state.user = null;
+        api.users.push(BOB);
+
+        await rehydrateSessionUser(state, context);
+
+        expect(state.user).toStrictEqual(BOB);
+    });
+
+    it('shares one request between concurrent callers, then allows another', async () => {
+        const { state, api, context } = fixture(tokens('a'));
+        state.user = null;
+        api.users.push(new Error('failed'));
+
+        await Promise.all([rehydrateSessionUser(state, context), rehydrateSessionUser(state, context)]);
+
+        expect(api.calls).toStrictEqual(['currentUser']);
+        expect(state.user).toBeNull();
+
+        api.users.push(ALICE);
+        await rehydrateSessionUser(state, context);
+
+        expect(api.calls).toStrictEqual(['currentUser', 'currentUser']);
+        expect(state.user).toStrictEqual(ALICE);
+    });
+
+    it('discards a user that arrives after the session was cleared', async () => {
+        const { state, api, context } = fixture(tokens('a'));
+        const user = deferred<SessionUser>();
+        state.user = null;
+        api.users.push(user.promise);
+
+        const rehydrate = rehydrateSessionUser(state, context);
+
+        await clearSession(state, context);
+        user.resolve(ALICE);
+        await rehydrate;
+
+        expect(state.user).toBeNull();
     });
 });

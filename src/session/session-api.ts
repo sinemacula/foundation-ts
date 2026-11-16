@@ -9,7 +9,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import type { SessionTokens } from './session-tokens';
+import type { LoginResult, RefreshResult } from './session-outcomes';
 import type { SessionUser } from './session-user';
 
 /**
@@ -24,39 +24,47 @@ export interface SessionDevice {
 }
 
 /**
+ * The default credential shape: an email address and a password.
+ */
+export interface PasswordCredentials {
+    /** The submitted account email address. */
+    readonly email: string;
+
+    /** The submitted account password. */
+    readonly password: string;
+}
+
+/**
  * Typed access to the session endpoints.
  */
-export interface SessionApi<
-    U extends SessionUser = SessionUser,
-    C = {
-        /** The submitted account email address. */
-        email: string;
-
-        /** The submitted account password. */
-        password: string;
-    },
-> {
+export interface SessionApi<U extends SessionUser = SessionUser, C = PasswordCredentials> {
     /**
      * Exchange credentials and a device fingerprint for a session.
      *
      * @param credentials - the credentials submitted by the user
      * @param device - the device fingerprint
-     * @returns the normalised session tokens
+     * @returns the issued tokens, or the pending session awaiting a further
+     * step
      */
-    login(credentials: C, device: SessionDevice): Promise<SessionTokens>;
+    login(credentials: C, device: SessionDevice): Promise<LoginResult>;
 
     /**
-     * Exchange a refresh token for a new session.
+     * Exchange the refresh credential for a new session. Implementations
+     * classify failures into the result rather than throwing.
      *
-     * @param refreshToken - the refresh token from the current session
-     * @returns the normalised session tokens
+     * @param refreshToken - the refresh token from the current session, or null
+     * when none is held (as when the refresh credential travels in a cookie)
+     * @returns the refresh result
      */
-    refresh(refreshToken: string): Promise<SessionTokens>;
+    refresh(refreshToken: string | null): Promise<RefreshResult>;
 
     /**
      * Invalidate the current session server-side.
+     *
+     * @param refreshToken - the refresh token from the current session, or null
+     * when none is held
      */
-    logout(): Promise<void>;
+    logout(refreshToken: string | null): Promise<void>;
 
     /**
      * Fetch the authenticated user record.
