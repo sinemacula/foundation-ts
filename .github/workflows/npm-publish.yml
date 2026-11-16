@@ -5,9 +5,9 @@
 # created with a GitHub App token (see release.yml `use-app-token`) so this
 # workflow is triggered; the automatic token would not fire it.
 #
-# Authentication is OIDC trusted publishing - no npm token. The `prepack`
-# lifecycle compiles `dist/` and points the published `exports` at it, so no
-# build step is needed here beyond installing dependencies.
+# Authentication is OIDC trusted publishing - no npm token. The `prepare`
+# lifecycle compiles `dist/`, which the `exports` map points at, so no build
+# step is needed here beyond installing dependencies.
 # ==============================================================================
 name: npm-publish
 

@@ -1,9 +1,10 @@
 /**
  * Knip dead-code detection configuration.
  *
- * A single-package repository: production entries come from the manifest's
- * explicit `exports` map, and the test, tooling and config files are listed
- * statically. The staged qlty sources are external tooling, not project code.
+ * A single-package repository: production entries are the sources behind the
+ * manifest's `exports` map, which points at the compiled `dist` output, and the
+ * test, tooling and config files are listed statically. The staged qlty sources
+ * are external tooling, not project code.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -11,8 +12,14 @@
 
 import type { KnipConfig } from 'knip';
 
+import manifest from './package.json' with { type: 'json' };
+
+const sourceEntries = Object.values(manifest.exports).map(({ import: target }) =>
+    target.replace(/^\.\/dist\/(.+)\.js$/, 'src/$1.ts'),
+);
+
 const config: KnipConfig = {
-    entry: ['src/**/*.test.ts', 'stryker.config.json', 'scripts/*.mjs'],
+    entry: [...sourceEntries, 'src/**/*.test.ts', 'stryker.config.json', 'scripts/*.mjs'],
     project: ['src/**/*.ts', 'scripts/**/*.mjs'],
     ignoreBinaries: ['qlty'],
     ignoreExportsUsedInFile: true,

@@ -51,6 +51,9 @@ services on top. Everything platform-specific arrives through an injected port.
 npm install @sinemacula/foundation
 ```
 
+The `exports` map always resolves to the compiled `dist/`, and the `prepare` script builds it, so a git dependency
+(`github:sinemacula/foundation-ts#<ref>`) installs the same output as the registry tarball.
+
 ## Import style
 
 The package has no barrel: every module is imported by its explicit subpath, and the manifest `exports` map is
@@ -147,8 +150,7 @@ The toolkit enforces cost caps server-side and answers a request over one with a
 ## Releases
 
 Releases are cut by release-please from Conventional Commit history and published to npm by CI through OIDC
-trusted publishing; the pack lifecycle compiles `dist/` and rewrites the manifest `exports` to its published
-form.
+trusted publishing; the `prepare` lifecycle compiles `dist/` before the tarball is packed.
 
 ## Contributing
 

@@ -19,76 +19,286 @@
     },
     "packageManager": "npm@11.11.0",
     "exports": {
-        "./analytics/analytics-tracker": "./src/analytics/analytics-tracker.ts",
-        "./analytics/install-page-tracking": "./src/analytics/install-page-tracking.ts",
-        "./analytics/null-analytics-tracker": "./src/analytics/null-analytics-tracker.ts",
-        "./app/boot-foundation-core": "./src/app/boot-foundation-core.ts",
-        "./app/foundation-boot-error": "./src/app/foundation-boot-error.ts",
-        "./app/foundation-config": "./src/app/foundation-config.ts",
-        "./app/services": "./src/app/services.ts",
-        "./app/wire-http-client": "./src/app/wire-http-client.ts",
-        "./app/wire-observability": "./src/app/wire-observability.ts",
-        "./authorization/permission-set": "./src/authorization/permission-set.ts",
-        "./config/chain-environment-source": "./src/config/chain-environment-source.ts",
-        "./config/config-repository": "./src/config/config-repository.ts",
-        "./config/environment": "./src/config/environment.ts",
-        "./config/object-environment-source": "./src/config/object-environment-source.ts",
-        "./config/prefixed-environment-source": "./src/config/prefixed-environment-source.ts",
-        "./connectivity/connectivity-monitor": "./src/connectivity/connectivity-monitor.ts",
-        "./feature-flags/feature-flags": "./src/feature-flags/feature-flags.ts",
-        "./feature-flags/static-feature-flags": "./src/feature-flags/static-feature-flags.ts",
-        "./http/bearer-token-interceptor": "./src/http/bearer-token-interceptor.ts",
-        "./http/fetch-http-client": "./src/http/fetch-http-client.ts",
-        "./http/http-client": "./src/http/http-client.ts",
-        "./http/http-error": "./src/http/http-error.ts",
-        "./http/module-http-contributions": "./src/http/module-http-contributions.ts",
-        "./http/token-refresh-coordinator": "./src/http/token-refresh-coordinator.ts",
-        "./i18n/i18n-error": "./src/i18n/i18n-error.ts",
-        "./i18n/locale-service": "./src/i18n/locale-service.ts",
-        "./logging/logger": "./src/logging/logger.ts",
-        "./logging/null-logger": "./src/logging/null-logger.ts",
-        "./notifications/confirmer": "./src/notifications/confirmer.ts",
-        "./notifications/toaster": "./src/notifications/toaster.ts",
-        "./query/api-query": "./src/query/api-query.ts",
-        "./query/envelope": "./src/query/envelope.ts",
-        "./query/filter-expression": "./src/query/filter-expression.ts",
-        "./query/list-filter": "./src/query/list-filter.ts",
-        "./query/list-query-definition": "./src/query/list-query-definition.ts",
-        "./query/query-error": "./src/query/query-error.ts",
-        "./query/resource-client": "./src/query/resource-client.ts",
-        "./realtime/exponential-backoff": "./src/realtime/exponential-backoff.ts",
-        "./realtime/realtime-connection": "./src/realtime/realtime-connection.ts",
-        "./realtime/realtime-error": "./src/realtime/realtime-error.ts",
-        "./realtime/reconnect": "./src/realtime/reconnect.ts",
-        "./realtime/test-support/realtime-connection-contract": "./src/realtime/test-support/realtime-connection-contract.ts",
-        "./realtime/web-socket-connection": "./src/realtime/web-socket-connection.ts",
-        "./reporting/breadcrumb-trail": "./src/reporting/breadcrumb-trail.ts",
-        "./reporting/error-reporter": "./src/reporting/error-reporter.ts",
-        "./reporting/null-error-reporter": "./src/reporting/null-error-reporter.ts",
-        "./router/middleware": "./src/router/middleware.ts",
-        "./session/default-session-api": "./src/session/default-session-api.ts",
-        "./session/in-process-session-lock": "./src/session/in-process-session-lock.ts",
-        "./session/key-value-session-persistence": "./src/session/key-value-session-persistence.ts",
-        "./session/redirect": "./src/session/redirect.ts",
-        "./session/session-api": "./src/session/session-api.ts",
-        "./session/session-core": "./src/session/session-core.ts",
-        "./session/session-error": "./src/session/session-error.ts",
-        "./session/session-lock": "./src/session/session-lock.ts",
-        "./session/session-outcomes": "./src/session/session-outcomes.ts",
-        "./session/session-persistence": "./src/session/session-persistence.ts",
-        "./session/session-routes": "./src/session/session-routes.ts",
-        "./session/session-state": "./src/session/session-state.ts",
-        "./session/session-storage-keys": "./src/session/session-storage-keys.ts",
-        "./session/session-tokens": "./src/session/session-tokens.ts",
-        "./session/session-user": "./src/session/session-user.ts",
-        "./storage/key-value-storage": "./src/storage/key-value-storage.ts",
-        "./storage/memory-storage": "./src/storage/memory-storage.ts",
-        "./storage/namespaced-storage": "./src/storage/namespaced-storage.ts",
-        "./support/is-record": "./src/support/is-record.ts",
-        "./support/service-holder": "./src/support/service-holder.ts",
-        "./support/support-error": "./src/support/support-error.ts",
-        "./theme/color-scheme": "./src/theme/color-scheme.ts",
-        "./theme/color-scheme-service": "./src/theme/color-scheme-service.ts"
+        "./analytics/analytics-tracker": {
+            "types": "./dist/analytics/analytics-tracker.d.ts",
+            "import": "./dist/analytics/analytics-tracker.js"
+        },
+        "./analytics/install-page-tracking": {
+            "types": "./dist/analytics/install-page-tracking.d.ts",
+            "import": "./dist/analytics/install-page-tracking.js"
+        },
+        "./analytics/null-analytics-tracker": {
+            "types": "./dist/analytics/null-analytics-tracker.d.ts",
+            "import": "./dist/analytics/null-analytics-tracker.js"
+        },
+        "./app/boot-foundation-core": {
+            "types": "./dist/app/boot-foundation-core.d.ts",
+            "import": "./dist/app/boot-foundation-core.js"
+        },
+        "./app/foundation-boot-error": {
+            "types": "./dist/app/foundation-boot-error.d.ts",
+            "import": "./dist/app/foundation-boot-error.js"
+        },
+        "./app/foundation-config": {
+            "types": "./dist/app/foundation-config.d.ts",
+            "import": "./dist/app/foundation-config.js"
+        },
+        "./app/services": {
+            "types": "./dist/app/services.d.ts",
+            "import": "./dist/app/services.js"
+        },
+        "./app/wire-http-client": {
+            "types": "./dist/app/wire-http-client.d.ts",
+            "import": "./dist/app/wire-http-client.js"
+        },
+        "./app/wire-observability": {
+            "types": "./dist/app/wire-observability.d.ts",
+            "import": "./dist/app/wire-observability.js"
+        },
+        "./authorization/permission-set": {
+            "types": "./dist/authorization/permission-set.d.ts",
+            "import": "./dist/authorization/permission-set.js"
+        },
+        "./config/chain-environment-source": {
+            "types": "./dist/config/chain-environment-source.d.ts",
+            "import": "./dist/config/chain-environment-source.js"
+        },
+        "./config/config-repository": {
+            "types": "./dist/config/config-repository.d.ts",
+            "import": "./dist/config/config-repository.js"
+        },
+        "./config/environment": {
+            "types": "./dist/config/environment.d.ts",
+            "import": "./dist/config/environment.js"
+        },
+        "./config/object-environment-source": {
+            "types": "./dist/config/object-environment-source.d.ts",
+            "import": "./dist/config/object-environment-source.js"
+        },
+        "./config/prefixed-environment-source": {
+            "types": "./dist/config/prefixed-environment-source.d.ts",
+            "import": "./dist/config/prefixed-environment-source.js"
+        },
+        "./connectivity/connectivity-monitor": {
+            "types": "./dist/connectivity/connectivity-monitor.d.ts",
+            "import": "./dist/connectivity/connectivity-monitor.js"
+        },
+        "./feature-flags/feature-flags": {
+            "types": "./dist/feature-flags/feature-flags.d.ts",
+            "import": "./dist/feature-flags/feature-flags.js"
+        },
+        "./feature-flags/static-feature-flags": {
+            "types": "./dist/feature-flags/static-feature-flags.d.ts",
+            "import": "./dist/feature-flags/static-feature-flags.js"
+        },
+        "./http/bearer-token-interceptor": {
+            "types": "./dist/http/bearer-token-interceptor.d.ts",
+            "import": "./dist/http/bearer-token-interceptor.js"
+        },
+        "./http/fetch-http-client": {
+            "types": "./dist/http/fetch-http-client.d.ts",
+            "import": "./dist/http/fetch-http-client.js"
+        },
+        "./http/http-client": {
+            "types": "./dist/http/http-client.d.ts",
+            "import": "./dist/http/http-client.js"
+        },
+        "./http/http-error": {
+            "types": "./dist/http/http-error.d.ts",
+            "import": "./dist/http/http-error.js"
+        },
+        "./http/module-http-contributions": {
+            "types": "./dist/http/module-http-contributions.d.ts",
+            "import": "./dist/http/module-http-contributions.js"
+        },
+        "./http/token-refresh-coordinator": {
+            "types": "./dist/http/token-refresh-coordinator.d.ts",
+            "import": "./dist/http/token-refresh-coordinator.js"
+        },
+        "./i18n/i18n-error": {
+            "types": "./dist/i18n/i18n-error.d.ts",
+            "import": "./dist/i18n/i18n-error.js"
+        },
+        "./i18n/locale-service": {
+            "types": "./dist/i18n/locale-service.d.ts",
+            "import": "./dist/i18n/locale-service.js"
+        },
+        "./logging/logger": {
+            "types": "./dist/logging/logger.d.ts",
+            "import": "./dist/logging/logger.js"
+        },
+        "./logging/null-logger": {
+            "types": "./dist/logging/null-logger.d.ts",
+            "import": "./dist/logging/null-logger.js"
+        },
+        "./notifications/confirmer": {
+            "types": "./dist/notifications/confirmer.d.ts",
+            "import": "./dist/notifications/confirmer.js"
+        },
+        "./notifications/toaster": {
+            "types": "./dist/notifications/toaster.d.ts",
+            "import": "./dist/notifications/toaster.js"
+        },
+        "./query/api-query": {
+            "types": "./dist/query/api-query.d.ts",
+            "import": "./dist/query/api-query.js"
+        },
+        "./query/envelope": {
+            "types": "./dist/query/envelope.d.ts",
+            "import": "./dist/query/envelope.js"
+        },
+        "./query/filter-expression": {
+            "types": "./dist/query/filter-expression.d.ts",
+            "import": "./dist/query/filter-expression.js"
+        },
+        "./query/list-filter": {
+            "types": "./dist/query/list-filter.d.ts",
+            "import": "./dist/query/list-filter.js"
+        },
+        "./query/list-query-definition": {
+            "types": "./dist/query/list-query-definition.d.ts",
+            "import": "./dist/query/list-query-definition.js"
+        },
+        "./query/query-error": {
+            "types": "./dist/query/query-error.d.ts",
+            "import": "./dist/query/query-error.js"
+        },
+        "./query/resource-client": {
+            "types": "./dist/query/resource-client.d.ts",
+            "import": "./dist/query/resource-client.js"
+        },
+        "./realtime/exponential-backoff": {
+            "types": "./dist/realtime/exponential-backoff.d.ts",
+            "import": "./dist/realtime/exponential-backoff.js"
+        },
+        "./realtime/realtime-connection": {
+            "types": "./dist/realtime/realtime-connection.d.ts",
+            "import": "./dist/realtime/realtime-connection.js"
+        },
+        "./realtime/realtime-error": {
+            "types": "./dist/realtime/realtime-error.d.ts",
+            "import": "./dist/realtime/realtime-error.js"
+        },
+        "./realtime/reconnect": {
+            "types": "./dist/realtime/reconnect.d.ts",
+            "import": "./dist/realtime/reconnect.js"
+        },
+        "./realtime/test-support/realtime-connection-contract": {
+            "types": "./dist/realtime/test-support/realtime-connection-contract.d.ts",
+            "import": "./dist/realtime/test-support/realtime-connection-contract.js"
+        },
+        "./realtime/web-socket-connection": {
+            "types": "./dist/realtime/web-socket-connection.d.ts",
+            "import": "./dist/realtime/web-socket-connection.js"
+        },
+        "./reporting/breadcrumb-trail": {
+            "types": "./dist/reporting/breadcrumb-trail.d.ts",
+            "import": "./dist/reporting/breadcrumb-trail.js"
+        },
+        "./reporting/error-reporter": {
+            "types": "./dist/reporting/error-reporter.d.ts",
+            "import": "./dist/reporting/error-reporter.js"
+        },
+        "./reporting/null-error-reporter": {
+            "types": "./dist/reporting/null-error-reporter.d.ts",
+            "import": "./dist/reporting/null-error-reporter.js"
+        },
+        "./router/middleware": {
+            "types": "./dist/router/middleware.d.ts",
+            "import": "./dist/router/middleware.js"
+        },
+        "./session/default-session-api": {
+            "types": "./dist/session/default-session-api.d.ts",
+            "import": "./dist/session/default-session-api.js"
+        },
+        "./session/in-process-session-lock": {
+            "types": "./dist/session/in-process-session-lock.d.ts",
+            "import": "./dist/session/in-process-session-lock.js"
+        },
+        "./session/key-value-session-persistence": {
+            "types": "./dist/session/key-value-session-persistence.d.ts",
+            "import": "./dist/session/key-value-session-persistence.js"
+        },
+        "./session/redirect": {
+            "types": "./dist/session/redirect.d.ts",
+            "import": "./dist/session/redirect.js"
+        },
+        "./session/session-api": {
+            "types": "./dist/session/session-api.d.ts",
+            "import": "./dist/session/session-api.js"
+        },
+        "./session/session-core": {
+            "types": "./dist/session/session-core.d.ts",
+            "import": "./dist/session/session-core.js"
+        },
+        "./session/session-error": {
+            "types": "./dist/session/session-error.d.ts",
+            "import": "./dist/session/session-error.js"
+        },
+        "./session/session-lock": {
+            "types": "./dist/session/session-lock.d.ts",
+            "import": "./dist/session/session-lock.js"
+        },
+        "./session/session-outcomes": {
+            "types": "./dist/session/session-outcomes.d.ts",
+            "import": "./dist/session/session-outcomes.js"
+        },
+        "./session/session-persistence": {
+            "types": "./dist/session/session-persistence.d.ts",
+            "import": "./dist/session/session-persistence.js"
+        },
+        "./session/session-routes": {
+            "types": "./dist/session/session-routes.d.ts",
+            "import": "./dist/session/session-routes.js"
+        },
+        "./session/session-state": {
+            "types": "./dist/session/session-state.d.ts",
+            "import": "./dist/session/session-state.js"
+        },
+        "./session/session-storage-keys": {
+            "types": "./dist/session/session-storage-keys.d.ts",
+            "import": "./dist/session/session-storage-keys.js"
+        },
+        "./session/session-tokens": {
+            "types": "./dist/session/session-tokens.d.ts",
+            "import": "./dist/session/session-tokens.js"
+        },
+        "./session/session-user": {
+            "types": "./dist/session/session-user.d.ts",
+            "import": "./dist/session/session-user.js"
+        },
+        "./storage/key-value-storage": {
+            "types": "./dist/storage/key-value-storage.d.ts",
+            "import": "./dist/storage/key-value-storage.js"
+        },
+        "./storage/memory-storage": {
+            "types": "./dist/storage/memory-storage.d.ts",
+            "import": "./dist/storage/memory-storage.js"
+        },
+        "./storage/namespaced-storage": {
+            "types": "./dist/storage/namespaced-storage.d.ts",
+            "import": "./dist/storage/namespaced-storage.js"
+        },
+        "./support/is-record": {
+            "types": "./dist/support/is-record.d.ts",
+            "import": "./dist/support/is-record.js"
+        },
+        "./support/service-holder": {
+            "types": "./dist/support/service-holder.d.ts",
+            "import": "./dist/support/service-holder.js"
+        },
+        "./support/support-error": {
+            "types": "./dist/support/support-error.d.ts",
+            "import": "./dist/support/support-error.js"
+        },
+        "./theme/color-scheme": {
+            "types": "./dist/theme/color-scheme.d.ts",
+            "import": "./dist/theme/color-scheme.js"
+        },
+        "./theme/color-scheme-service": {
+            "types": "./dist/theme/color-scheme-service.d.ts",
+            "import": "./dist/theme/color-scheme-service.js"
+        }
     },
     "files": ["dist", "README.md", "LICENSE"],
     "publishConfig": {
@@ -109,8 +319,7 @@
         "smells": "qlty smells",
         "deadcode": "knip",
         "check:pkg": "rm -rf .pack && mkdir -p .pack && npm pack --pack-destination .pack --silent && publint .pack/*.tgz && attw .pack/*.tgz --profile esm-only",
-        "prepack": "node scripts/build.mjs && node scripts/pack-exports.mjs dist",
-        "postpack": "node scripts/pack-exports.mjs src"
+        "prepare": "node scripts/build.mjs"
     },
     "devDependencies": {
         "@arethetypeswrong/cli": "^0.18.5",

@@ -15,6 +15,9 @@ cd foundation-ts
 npm install
 ```
 
+`npm install` builds `dist/` through the `prepare` script. The `exports` map resolves to `dist/`, so run
+`npm run build` after changing `src/` when another project links this checkout.
+
 ## Development Workflow
 
 ### Branching
