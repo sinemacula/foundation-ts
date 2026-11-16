@@ -9,146 +9,249 @@ import { describe, expect, it } from 'vitest';
 
 import { MemoryStorage } from '../storage/memory-storage';
 import { KeyValueSessionPersistence } from './key-value-session-persistence';
-import type { SessionStorageKeys } from './session-storage-keys';
+import { SessionError } from './session-error';
+import type { SessionLock } from './session-lock';
+import type { SessionTokens } from './session-tokens';
 
 /**
- * A memory storage recording every write.
+ * A lock recording whether a task is running inside it.
  */
-class RecordingStorage extends MemoryStorage {
-    /** Every write, in order. */
-    readonly writes: string[] = [];
+class RecordingLock implements SessionLock {
+    /** Whether a task is running. */
+    held = false;
+
+    /** How many tasks have run. */
+    runs = 0;
 
     /**
-     * Record and store a value.
+     * Run the task, marking the lock held until it settles.
+     *
+     * @param task - the task to run
+     * @returns the task's result
+     */
+    async run<T>(task: () => Promise<T>): Promise<T> {
+        this.held = true;
+        this.runs += 1;
+
+        try {
+            return await task();
+        } finally {
+            this.held = false;
+        }
+    }
+}
+
+/**
+ * A memory storage recording whether each write happened inside a lock.
+ */
+class LockCheckingStorage extends MemoryStorage {
+    /** Whether the lock was held at each write. */
+    readonly writesHeld: boolean[] = [];
+
+    /** The lock the writes are checked against. */
+    readonly #lock: RecordingLock;
+
+    constructor(lock: RecordingLock) {
+        super();
+        this.#lock = lock;
+    }
+
+    /**
+     * Record whether the lock is held, then store the value.
      *
      * @param key - the storage key
      * @param value - the value to store
      */
     override set(key: string, value: string): void {
-        this.writes.push(`set:${key}=${value}`);
+        this.writesHeld.push(this.#lock.held);
         super.set(key, value);
-    }
-
-    /**
-     * Record and remove a key.
-     *
-     * @param key - the storage key
-     */
-    override remove(key: string): void {
-        this.writes.push(`remove:${key}`);
-        super.remove(key);
     }
 }
 
-const CUSTOM_KEYS: SessionStorageKeys = {
-    accessToken: 'app.access',
-    refreshToken: 'app.refresh',
-    expiresAt: 'app.expires',
-    deviceUuid: 'app.device',
-};
+const TOKENS: SessionTokens = { accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: 1_700_000_000_000 };
+
+/**
+ * Serialise a stored snapshot.
+ *
+ * @param revision - the stored revision
+ * @param tokens - the stored tokens
+ * @returns the stored value
+ */
+function stored(revision: unknown, tokens: unknown): string {
+    return JSON.stringify({ revision, tokens });
+}
+
+/**
+ * Load from a storage holding the given value under the default key.
+ *
+ * @param value - the stored value
+ * @returns the load result
+ */
+function loadStored(value: string): Promise<unknown> {
+    const storage = new MemoryStorage();
+
+    storage.set('auth.session', value);
+
+    return new KeyValueSessionPersistence(storage).load();
+}
 
 describe('KeyValueSessionPersistence', () => {
-    it('loads null when no access token is stored', async () => {
-        const storage = new MemoryStorage();
-
-        storage.set('auth.refresh_token', 'refresh');
-
-        await expect(new KeyValueSessionPersistence(storage).load()).resolves.toBeNull();
+    it('loads revision 0 without tokens when nothing is stored', async () => {
+        await expect(new KeyValueSessionPersistence(new MemoryStorage()).load()).resolves.toStrictEqual({
+            revision: 0,
+            tokens: null,
+        });
     });
 
-    it('round-trips a full snapshot under the default keys', async () => {
+    it('saves at the expected revision as one JSON value under the next revision', async () => {
         const storage = new MemoryStorage();
         const persistence = new KeyValueSessionPersistence(storage);
 
-        await persistence.save({ accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: 1_700_000_000_000 });
+        await expect(persistence.saveIf(0, TOKENS)).resolves.toStrictEqual({ status: 'saved', revision: 1 });
+        await expect(persistence.saveIf(1, { ...TOKENS, accessToken: 'next' })).resolves.toStrictEqual({
+            status: 'saved',
+            revision: 2,
+        });
 
-        expect(storage.get('auth.access_token')).toBe('access');
-        expect(storage.get('auth.refresh_token')).toBe('refresh');
-        expect(storage.get('auth.expires_at')).toBe('1700000000000');
+        expect(storage.get('auth.session')).toBe(stored(2, { ...TOKENS, accessToken: 'next' }));
         await expect(persistence.load()).resolves.toStrictEqual({
-            accessToken: 'access',
-            refreshToken: 'refresh',
-            expiresAtEpochMs: 1_700_000_000_000,
+            revision: 2,
+            tokens: { ...TOKENS, accessToken: 'next' },
         });
     });
 
-    it('removes the refresh token and expiry keys when they are null', async () => {
-        const storage = new RecordingStorage();
+    it('round-trips null refresh token and expiry', async () => {
+        const persistence = new KeyValueSessionPersistence(new MemoryStorage());
+        const tokens = { accessToken: 'access', refreshToken: null, expiresAtEpochMs: null };
+
+        await persistence.saveIf(0, tokens);
+
+        await expect(persistence.load()).resolves.toStrictEqual({ revision: 1, tokens });
+    });
+
+    it('refuses a save at another revision, reporting the snapshot as it stands', async () => {
+        const storage = new MemoryStorage();
         const persistence = new KeyValueSessionPersistence(storage);
 
-        await persistence.save({ accessToken: 'access', refreshToken: null, expiresAtEpochMs: null });
+        await persistence.saveIf(0, TOKENS);
 
-        expect(storage.writes).toStrictEqual([
-            'set:auth.access_token=access',
-            'remove:auth.refresh_token',
-            'remove:auth.expires_at',
-        ]);
-
-        expect(storage.get('auth.refresh_token')).toBeNull();
-        expect(storage.get('auth.expires_at')).toBeNull();
-        await expect(persistence.load()).resolves.toStrictEqual({
-            accessToken: 'access',
-            refreshToken: null,
-            expiresAtEpochMs: null,
+        await expect(persistence.saveIf(0, { ...TOKENS, accessToken: 'late' })).resolves.toStrictEqual({
+            status: 'changed',
+            current: { revision: 1, tokens: TOKENS },
         });
+        expect(storage.get('auth.session')).toBe(stored(1, TOKENS));
     });
 
-    it.each(['2026-12-31 23:59:59', '12a', 'a12', ''])('reads a non-numeric expiry %j as unknown', async (stored) => {
-        const storage = new MemoryStorage();
-
-        storage.set('auth.access_token', 'access');
-        storage.set('auth.expires_at', stored);
-
-        await expect(new KeyValueSessionPersistence(storage).load()).resolves.toStrictEqual({
-            accessToken: 'access',
-            refreshToken: null,
-            expiresAtEpochMs: null,
-        });
-    });
-
-    it('clears every snapshot key', async () => {
+    it('clears at the expected revision, keeping the revision growing', async () => {
         const storage = new MemoryStorage();
         const persistence = new KeyValueSessionPersistence(storage);
 
         storage.set('auth.device_uuid', 'device');
-        await persistence.save({ accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: 1 });
-        await persistence.clear();
+        await persistence.saveIf(0, TOKENS);
 
-        expect(storage.get('auth.access_token')).toBeNull();
-        expect(storage.get('auth.refresh_token')).toBeNull();
-        expect(storage.get('auth.expires_at')).toBeNull();
+        await expect(persistence.clearIf(1)).resolves.toStrictEqual({ status: 'cleared', revision: 2 });
+        await expect(persistence.load()).resolves.toStrictEqual({ revision: 2, tokens: null });
         expect(storage.get('auth.device_uuid')).toBe('device');
     });
 
-    it('writes under custom keys', async () => {
-        const storage = new MemoryStorage();
-        const persistence = new KeyValueSessionPersistence(storage, CUSTOM_KEYS);
+    it('refuses a clear at another revision', async () => {
+        const persistence = new KeyValueSessionPersistence(new MemoryStorage());
 
-        await persistence.save({ accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: 5 });
+        await persistence.saveIf(0, TOKENS);
 
-        expect(storage.get('app.access')).toBe('access');
-        expect(storage.get('app.refresh')).toBe('refresh');
-        expect(storage.get('app.expires')).toBe('5');
-        await expect(persistence.load()).resolves.toStrictEqual({
-            accessToken: 'access',
-            refreshToken: 'refresh',
-            expiresAtEpochMs: 5,
+        await expect(persistence.clearIf(0)).resolves.toStrictEqual({
+            status: 'changed',
+            current: { revision: 1, tokens: TOKENS },
         });
-
-        await persistence.clear();
-
-        expect(storage.get('app.access')).toBeNull();
-        expect(storage.get('app.refresh')).toBeNull();
-        expect(storage.get('app.expires')).toBeNull();
     });
 
-    it('rejects when the storage adapter throws', async () => {
+    it('lets one of two writes at the same revision through', async () => {
+        const persistence = new KeyValueSessionPersistence(new MemoryStorage());
+
+        const results = await Promise.all([persistence.saveIf(0, TOKENS), persistence.clearIf(0)]);
+
+        expect(results).toStrictEqual([
+            { status: 'saved', revision: 1 },
+            { status: 'changed', current: { revision: 1, tokens: TOKENS } },
+        ]);
+    });
+
+    it('writes only while holding the lock', async () => {
+        const lock = new RecordingLock();
+        const storage = new LockCheckingStorage(lock);
+        const persistence = new KeyValueSessionPersistence(storage, { lock });
+
+        await persistence.saveIf(0, TOKENS);
+        await persistence.clearIf(1);
+
+        expect(lock.runs).toBe(2);
+        expect(storage.writesHeld).toStrictEqual([true, true]);
+    });
+
+    it('stores under a custom key', async () => {
         const storage = new MemoryStorage();
+        const persistence = new KeyValueSessionPersistence(storage, { key: 'app.session' });
+
+        await persistence.saveIf(0, TOKENS);
+
+        expect(storage.get('app.session')).toBe(stored(1, TOKENS));
+        expect(storage.get('auth.session')).toBeNull();
+        await expect(persistence.load()).resolves.toStrictEqual({ revision: 1, tokens: TOKENS });
+    });
+
+    it('rejects when the storage cannot be read', async () => {
+        const storage = new MemoryStorage();
+        const persistence = new KeyValueSessionPersistence(storage);
 
         storage.get = (): string | null => {
             throw new Error('unavailable');
         };
 
-        await expect(new KeyValueSessionPersistence(storage).load()).rejects.toThrow('unavailable');
+        await expect(persistence.load()).rejects.toThrow('unavailable');
+        await expect(persistence.saveIf(0, TOKENS)).rejects.toThrow('unavailable');
+    });
+
+    it('rejects when the storage cannot be written', async () => {
+        const storage = new MemoryStorage();
+        const persistence = new KeyValueSessionPersistence(storage);
+
+        storage.set = (): void => {
+            throw new Error('quota');
+        };
+
+        await expect(persistence.saveIf(0, TOKENS)).rejects.toThrow('quota');
+        await expect(persistence.clearIf(0)).rejects.toThrow('quota');
+    });
+
+    it('rejects a value that is not JSON, keeping the parse failure as the cause', async () => {
+        const error: unknown = await loadStored('{').catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(SessionError);
+        expect(error).toHaveProperty('message', 'The persisted session could not be read.');
+        expect(error).toHaveProperty('cause', expect.any(SyntaxError));
+    });
+
+    it.each([
+        ['a non-record', '"session"'],
+        ['null', 'null'],
+        ['a missing revision', JSON.stringify({ tokens: null })],
+        ['a zero revision', stored(0, null)],
+        ['a fractional revision', stored(1.5, null)],
+        ['a string revision', stored('1', null)],
+        ['missing tokens', JSON.stringify({ revision: 1 })],
+        ['non-record tokens', stored(1, 'access')],
+        ['a missing access token', stored(1, { refreshToken: null, expiresAtEpochMs: null })],
+        ['an empty access token', stored(1, { ...TOKENS, accessToken: '' })],
+        ['a non-string access token', stored(1, { ...TOKENS, accessToken: 1 })],
+        ['a non-string refresh token', stored(1, { ...TOKENS, refreshToken: 1 })],
+        ['a missing refresh token', stored(1, { accessToken: 'access', expiresAtEpochMs: null })],
+        ['a string expiry', stored(1, { ...TOKENS, expiresAtEpochMs: '1' })],
+        ['a missing expiry', stored(1, { accessToken: 'access', refreshToken: null })],
+    ])('rejects a stored snapshot with %s', async (_label, value) => {
+        const error: unknown = await loadStored(value).catch((caught: unknown) => caught);
+
+        expect(error).toBeInstanceOf(SessionError);
+        expect(error).toHaveProperty('message', 'The persisted session could not be read.');
+        expect(error).not.toHaveProperty('cause');
     });
 });
