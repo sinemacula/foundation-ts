@@ -483,6 +483,75 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
                 expect(transports).toHaveLength(1);
                 expect(connection.state).toBe('closed');
             });
+
+            it('does not reschedule when a stale hook rejects after a disconnect and fresh connect', async () => {
+                const gate = deferred<void>();
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(100),
+                    beforeReconnect: () => gate.promise,
+                });
+
+                connection.connect();
+                transports.at(0)?.fail();
+
+                await vi.advanceTimersByTimeAsync(100);
+
+                connection.disconnect();
+                connection.connect();
+                transports.at(1)?.open();
+
+                gate.reject(new Error('token refresh failed'));
+                await vi.advanceTimersByTimeAsync(0);
+
+                expect(vi.getTimerCount()).toBe(0);
+                expect(connection.state).toBe('open');
+
+                await vi.advanceTimersByTimeAsync(10_000);
+
+                expect(transports).toHaveLength(2);
+                expect(transports.at(1)?.closeCalls).toBe(0);
+            });
+
+            it('leaves exactly one live transport and no pending timers after rapid disconnect and connect cycles', async () => {
+                const gates: Deferred<void>[] = [];
+                const { connection, transports } = harness.create({
+                    url: 'realtime://test',
+                    backoff: fixedBackoff(100),
+                    beforeReconnect: () => {
+                        const gate = deferred<void>();
+
+                        gates.push(gate);
+
+                        return gate.promise;
+                    },
+                });
+
+                for (let cycle = 0; cycle < 3; cycle++) {
+                    connection.connect();
+                    transports.at(cycle)?.open();
+                    transports.at(cycle)?.fail();
+
+                    await vi.advanceTimersByTimeAsync(100);
+
+                    connection.disconnect();
+                }
+
+                connection.connect();
+                transports.at(3)?.open();
+
+                for (const gate of gates) {
+                    gate.resolve();
+                }
+
+                await vi.advanceTimersByTimeAsync(10_000);
+
+                expect(gates).toHaveLength(3);
+                expect(transports).toHaveLength(4);
+                expect(transports.at(3)?.closeCalls).toBe(0);
+                expect(vi.getTimerCount()).toBe(0);
+                expect(connection.state).toBe('open');
+            });
         });
 
         describe('on()', () => {
