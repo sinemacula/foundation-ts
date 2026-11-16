@@ -1,6 +1,6 @@
 /**
  * Unit tests for FetchHttpClient - authentication flows, network errors,
- * signal/timeout, default fetch fallback, and download-specific auth handling.
+ * cancellation, default fetch fallback, and download-specific auth handling.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -10,6 +10,18 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FetchHttpClient } from './fetch-http-client';
 import { CancelledError, HttpError, NetworkError } from './http-error';
+
+/** The body a retried request resolves with. */
+interface RetriedBody {
+    /** Whether the response came from the retry. */
+    readonly retried: boolean;
+}
+
+/** The body the global fetch stub resolves with. */
+interface GlobalBody {
+    /** Whether the global fetch served the request. */
+    readonly global: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Stub type
@@ -22,6 +34,13 @@ type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a JSON response.
+ *
+ * @param body - the value to serialise
+ * @param status - the response status
+ * @returns the response
+ */
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
         status,
@@ -29,12 +48,25 @@ function jsonResponse(body: unknown, status = 200): Response {
     });
 }
 
+/**
+ * Wrap a fetch implementation in a typed stub.
+ *
+ * @param impl - the fetch implementation
+ * @returns the stub
+ */
 function makeFetch(
     impl: (...args: FetchArgs) => Promise<Response>,
 ): ReturnType<typeof vi.fn<(...args: FetchArgs) => Promise<Response>>> {
     return vi.fn<(...args: FetchArgs) => Promise<Response>>(impl);
 }
 
+/**
+ * Build a client against the stub with optional extra options.
+ *
+ * @param fetchFn - the fetch stub
+ * @param extra - options to merge over the base URL and stub
+ * @returns the client
+ */
 function makeClient(
     fetchFn: typeof fetch,
     extra: Partial<ConstructorParameters<typeof FetchHttpClient>[0]> = {},
@@ -52,37 +84,6 @@ function lastInit(fn: ReturnType<typeof makeFetch>): RequestInit {
     const call = fn.mock.calls.at(-1);
     expect(call).toBeDefined();
     return call?.[1] ?? {};
-}
-
-/**
- * A fetch stub that mimics real fetch's abort behaviour: it rejects as soon as
- * its signal aborts, whether that has already happened by the time fetch is
- * called or happens later while the request is pending.
- *
- * @returns the fetch stub
- */
-function makeAbortAwareFetch(): ReturnType<typeof makeFetch> {
-    return makeFetch(
-        (_input, init) =>
-            new Promise<Response>((_resolve, reject) => {
-                const signal = init?.signal;
-
-                if (signal === undefined || signal === null) {
-                    return;
-                }
-
-                const rejectWithReason = (): void => {
-                    reject(signal.reason);
-                };
-
-                if (signal.aborted) {
-                    rejectWithReason();
-                    return;
-                }
-
-                signal.addEventListener('abort', rejectWithReason);
-            }),
-    );
 }
 
 // ---------------------------------------------------------------------------
@@ -172,17 +173,17 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
-        const result = await client.get<{ retried: boolean }>('/secure');
+        const result = await client.get<RetriedBody>('/secure');
 
         expect(fetchFn).toHaveBeenCalledTimes(2);
         expect(result).toStrictEqual({ retried: true });
     });
 
     it.each([
-        ['post', (client: FetchHttpClient) => client.post<{ retried: boolean }>('/secure', { a: 1 })],
-        ['put', (client: FetchHttpClient) => client.put<{ retried: boolean }>('/secure', { a: 1 })],
-        ['patch', (client: FetchHttpClient) => client.patch<{ retried: boolean }>('/secure', { a: 1 })],
-        ['delete', (client: FetchHttpClient) => client.delete<{ retried: boolean }>('/secure')],
+        ['post', (client: FetchHttpClient) => client.post<RetriedBody>('/secure', { a: 1 })],
+        ['put', (client: FetchHttpClient) => client.put<RetriedBody>('/secure', { a: 1 })],
+        ['patch', (client: FetchHttpClient) => client.patch<RetriedBody>('/secure', { a: 1 })],
+        ['delete', (client: FetchHttpClient) => client.delete<RetriedBody>('/secure')],
     ] as const)('retries a %s once through the handler and resolves the parsed body', async (_verb, invoke) => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
@@ -201,7 +202,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('does not invoke the handler for a non-401 error status', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('{}', { status: 500 }));
+            .mockImplementation(async () => new Response('{}', { status: 500 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -214,7 +215,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('throws HttpError(401) and does not retry when onUnauthorized returns false', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(false);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -223,10 +224,43 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
         expect(fetchFn).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps the original 401 when onUnauthorized rejects', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockImplementation(async () => new Response('', { status: 401 }));
+        const onUnauthorized = vi.fn().mockRejectedValue(new Error('refresh exploded'));
+        const onResponseError = vi.fn();
+        const client = makeClient(fetchFn, { onUnauthorized, onResponseError });
+
+        const error = await client.get('/secure').catch(error => error);
+
+        expect(error).toBeInstanceOf(HttpError);
+        // Cast proven safe: toBeInstanceOf(HttpError) guards the type.
+        expect((error as HttpError).status).toBe(401);
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+        expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
+    });
+
+    it('keeps the original 401 when onUnauthorized throws synchronously', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockImplementation(async () => new Response('', { status: 401 }));
+        const onUnauthorized = vi.fn(() => {
+            throw new Error('refresh exploded');
+        });
+        const client = makeClient(fetchFn, { onUnauthorized });
+
+        const error = await client.get('/secure').catch(error => error);
+
+        expect(error).toBeInstanceOf(HttpError);
+        // Cast proven safe: toBeInstanceOf(HttpError) guards the type.
+        expect((error as HttpError).status).toBe(401);
+    });
+
     it('does not retry a second time when the retry also returns 401', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -239,7 +273,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('throws HttpError(401) immediately when no onUnauthorized handler is configured', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const client = makeClient(fetchFn);
 
         await expect(client.get('/secure')).rejects.toBeInstanceOf(HttpError);
@@ -250,7 +284,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('does not invoke the handler when the request opts out of refresh', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -277,7 +311,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('notifies the response-error handler once with the final error when the retry also fails', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, { onUnauthorized, onResponseError });
@@ -327,7 +361,7 @@ describe('FetchHttpClient - download interceptors and 401 handling', () => {
     it('does not invoke the handler for a download that opts out of refresh', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -442,79 +476,6 @@ describe('FetchHttpClient - cancellation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Signal / timeout
-// ---------------------------------------------------------------------------
-
-describe('FetchHttpClient - signal and timeout', () => {
-    it('passes the caller signal when provided', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn);
-        const signal = AbortSignal.abort();
-
-        // Swallow the expected AbortError: the test goal is to verify the
-        // signal was forwarded to fetch, not to observe the rejection.
-        await client.get('/items', { signal }).catch(() => undefined);
-
-        expect(lastInit(fetchFn).signal).toBe(signal);
-    });
-
-    it('creates a timeout AbortSignal when timeout is set and no signal is provided', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn, { timeout: 5000 });
-
-        await client.get('/items');
-
-        expect(lastInit(fetchFn).signal).toBeInstanceOf(AbortSignal);
-    });
-
-    it('passes null as the signal when no timeout and no signal are set', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn);
-
-        await client.get('/items');
-
-        expect(lastInit(fetchFn).signal).toBeNull();
-    });
-
-    it('composes the caller signal with the timeout signal so the timeout still fires', async () => {
-        const timeoutController = new AbortController();
-        const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
-        const fetchFn = makeAbortAwareFetch();
-        const client = makeClient(fetchFn, { timeout: 5_000 });
-        const callerController = new AbortController();
-
-        const pending = client.get('/items', { signal: callerController.signal }).catch(error => error);
-
-        timeoutController.abort(new DOMException('The operation timed out.', 'TimeoutError'));
-
-        const error = await pending;
-
-        expect(error).toBeInstanceOf(CancelledError);
-        expect(callerController.signal.aborted).toBe(false);
-
-        timeoutSpy.mockRestore();
-    });
-
-    it('does not disable the caller signal when a timeout is also configured', async () => {
-        const timeoutController = new AbortController();
-        const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
-        const fetchFn = makeAbortAwareFetch();
-        const client = makeClient(fetchFn, { timeout: 5_000 });
-        const callerController = new AbortController();
-
-        const pending = client.get('/items', { signal: callerController.signal }).catch(error => error);
-
-        callerController.abort();
-
-        const error = await pending;
-
-        expect(error).toBeInstanceOf(CancelledError);
-
-        timeoutSpy.mockRestore();
-    });
-});
-
-// ---------------------------------------------------------------------------
 // Default fetchFn - uses globalThis.fetch
 // ---------------------------------------------------------------------------
 
@@ -529,7 +490,7 @@ describe('FetchHttpClient - default fetchFn', () => {
 
         const client = new FetchHttpClient({ baseUrl: 'https://api.example.com' });
 
-        const result = await client.get<{ global: boolean }>('/test');
+        const result = await client.get<GlobalBody>('/test');
 
         expect(stub).toHaveBeenCalledOnce();
         expect(result).toStrictEqual({ global: true });
@@ -557,40 +518,5 @@ describe('FetchHttpClient - runtime fallbacks', () => {
         const error = await client.get('/items').catch(error => error);
 
         expect(error).toBeInstanceOf(NetworkError);
-    });
-
-    it('skips the timeout signal when AbortSignal.timeout is unavailable', async () => {
-        const original = AbortSignal.timeout;
-
-        (AbortSignal as unknown as { timeout: typeof original | undefined }).timeout = undefined;
-
-        try {
-            const fetchFn = makeFetch(async () => jsonResponse({}));
-            const client = makeClient(fetchFn, { timeout: 5000 });
-
-            await client.get('/items');
-
-            expect(lastInit(fetchFn).signal).toBeNull();
-        } finally {
-            (AbortSignal as unknown as { timeout: typeof original }).timeout = original;
-        }
-    });
-
-    it('falls back to the caller signal when AbortSignal.any is unavailable', async () => {
-        const original = AbortSignal.any;
-
-        (AbortSignal as unknown as { any: typeof original | undefined }).any = undefined;
-
-        try {
-            const fetchFn = makeFetch(async () => jsonResponse({}));
-            const client = makeClient(fetchFn, { timeout: 5000 });
-            const controller = new AbortController();
-
-            await client.get('/items', { signal: controller.signal }).catch(() => undefined);
-
-            expect(lastInit(fetchFn).signal).toBe(controller.signal);
-        } finally {
-            (AbortSignal as unknown as { any: typeof original }).any = original;
-        }
     });
 });

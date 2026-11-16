@@ -9,7 +9,22 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { FetchHttpClient } from './fetch-http-client';
-import { HttpError, HttpValidationError } from './http-error';
+import {
+    ApiErrorCode,
+    HttpError,
+    HttpValidationError,
+    MaintenanceError,
+    QueryTooExpensiveError,
+} from './http-error';
+
+/** A user body parsed from JSON. */
+interface UserBody {
+    /** The user identifier. */
+    readonly id: number;
+
+    /** The user name. */
+    readonly name: string;
+}
 
 // ---------------------------------------------------------------------------
 // Stub type
@@ -22,6 +37,14 @@ type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a JSON response.
+ *
+ * @param body - the value to serialise
+ * @param status - the response status
+ * @param extra - additional response headers
+ * @returns the response
+ */
 function jsonResponse(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
     return new Response(JSON.stringify(body), {
         status,
@@ -29,6 +52,13 @@ function jsonResponse(body: unknown, status = 200, extra: Record<string, string>
     });
 }
 
+/**
+ * Build a plain-text response.
+ *
+ * @param body - the response text
+ * @param status - the response status
+ * @returns the response
+ */
 function textResponse(body: string, status = 200): Response {
     return new Response(body, {
         status,
@@ -36,10 +66,22 @@ function textResponse(body: string, status = 200): Response {
     });
 }
 
+/**
+ * Build a response without a body.
+ *
+ * @param status - the response status
+ * @returns the response
+ */
 function emptyResponse(status = 204): Response {
     return new Response(null, { status });
 }
 
+/**
+ * Build an HTML error response.
+ *
+ * @param status - the response status
+ * @returns the response
+ */
 function nonJsonErrorResponse(status: number): Response {
     return new Response('<html>error</html>', {
         status,
@@ -47,12 +89,25 @@ function nonJsonErrorResponse(status: number): Response {
     });
 }
 
+/**
+ * Wrap a fetch implementation in a typed stub.
+ *
+ * @param impl - the fetch implementation
+ * @returns the stub
+ */
 function makeFetch(
     impl: (...args: FetchArgs) => Promise<Response>,
 ): ReturnType<typeof vi.fn<(...args: FetchArgs) => Promise<Response>>> {
     return vi.fn<(...args: FetchArgs) => Promise<Response>>(impl);
 }
 
+/**
+ * Build a client against the stub with optional extra options.
+ *
+ * @param fetchFn - the fetch stub
+ * @param extra - options to merge over the base URL and stub
+ * @returns the client
+ */
 function makeClient(
     fetchFn: typeof fetch,
     extra: Partial<ConstructorParameters<typeof FetchHttpClient>[0]> = {},
@@ -78,7 +133,7 @@ describe('FetchHttpClient - success response parsing', () => {
         const fetchFn = makeFetch(async () => jsonResponse({ id: 1, name: 'Alice' }));
         const client = makeClient(fetchFn);
 
-        const result = await client.get<{ id: number; name: string }>('/users/1');
+        const result = await client.get<UserBody>('/users/1');
 
         expect(result).toStrictEqual({ id: 1, name: 'Alice' });
     });
@@ -170,6 +225,20 @@ describe('FetchHttpClient - error response mapping', () => {
         // Cast proven safe: toBeInstanceOf(HttpValidationError) guards the
         // type.
         expect((error as HttpValidationError).errors).toStrictEqual({ email: ['required'] });
+        expect((error as HttpValidationError).message).toBe('invalid');
+        expect((error as HttpValidationError).code).toBeNull();
+    });
+
+    it('uses a generic status message for a 422 errors record without a message', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({ errors: { email: ['required'] } }, 422));
+        const client = makeClient(fetchFn);
+
+        const error = await client.get('/fail').catch(error => error);
+
+        expect(error).toBeInstanceOf(HttpValidationError);
+        // Cast proven safe: toBeInstanceOf(HttpValidationError) guards the
+        // type.
+        expect((error as HttpValidationError).message).toBe('Request failed with status 422.');
     });
 
     it('filters non-string entries from validation error arrays', async () => {
@@ -231,6 +300,179 @@ describe('FetchHttpClient - error response mapping', () => {
 });
 
 // ---------------------------------------------------------------------------
+// API error envelope
+// ---------------------------------------------------------------------------
+
+/**
+ * Build an API error envelope response.
+ *
+ * @param status - the response status
+ * @param error - the envelope's `error` object
+ * @returns the response
+ */
+function envelopeResponse(status: number, error: Record<string, unknown>): Response {
+    return jsonResponse({ error: { status, ...error } }, status);
+}
+
+/**
+ * Request a path and return what the client rejected with.
+ *
+ * @param response - the response the server sends
+ * @returns the rejection
+ */
+async function rejectionFor(response: Response): Promise<unknown> {
+    const client = makeClient(makeFetch(async () => response));
+
+    return await client.get('/fail').catch((error: unknown) => error);
+}
+
+/** A complete query-cost meta object. */
+const COST_META = { parameter: 'filters', pointer: 'filters.$or', reason: 'nodes', limit: 100, actual: 140 };
+
+describe('FetchHttpClient - API error envelope', () => {
+    it('uses the detail as the message and exposes the code and title', async () => {
+        const error = await rejectionFor(
+            envelopeResponse(404, { code: 10103, title: 'Not Found', detail: 'The order does not exist.' }),
+        );
+
+        expect(error).toBeInstanceOf(HttpError);
+        // Cast proven safe: toBeInstanceOf(HttpError) guards the type.
+        expect((error as HttpError).message).toBe('The order does not exist.');
+        expect((error as HttpError).status).toBe(404);
+        expect((error as HttpError).code).toBe(ApiErrorCode.NotFound);
+        expect((error as HttpError).title).toBe('Not Found');
+        expect((error as HttpError).payload).toStrictEqual({
+            error: { status: 404, code: 10103, title: 'Not Found', detail: 'The order does not exist.' },
+        });
+    });
+
+    it('falls back to the title when the detail is absent or empty', async () => {
+        const absent = await rejectionFor(envelopeResponse(403, { code: 10102, title: 'Forbidden' }));
+        const empty = await rejectionFor(envelopeResponse(403, { code: 10102, title: 'Forbidden', detail: '' }));
+
+        // Cast proven safe: a non-2xx response always rejects with HttpError.
+        expect((absent as HttpError).message).toBe('Forbidden');
+        expect((empty as HttpError).message).toBe('Forbidden');
+    });
+
+    it('falls back to the status message and a null title when neither text field is usable', async () => {
+        const error = await rejectionFor(envelopeResponse(500, { code: 10001, title: '', detail: 42 }));
+
+        // Cast proven safe: a non-2xx response always rejects with HttpError.
+        expect((error as HttpError).message).toBe('Request failed with status 500.');
+        expect((error as HttpError).title).toBeNull();
+        expect((error as HttpError).code).toBe(ApiErrorCode.UnhandledError);
+    });
+
+    it('builds an HttpValidationError from the meta field map on an invalid-input code', async () => {
+        const error = await rejectionFor(
+            envelopeResponse(422, {
+                code: 10106,
+                title: 'Invalid Input',
+                meta: {
+                    'order.created_at': ['The order column is not sortable.'],
+                    'filters.name.$eq': ['Not a condition.', 7],
+                    search: ['Too short.'],
+                    ignored: 'not a list',
+                },
+            }),
+        );
+
+        expect(error).toBeInstanceOf(HttpValidationError);
+        // Cast proven safe: toBeInstanceOf(HttpValidationError) guards the
+        // type.
+        expect((error as HttpValidationError).errors).toStrictEqual({
+            'order.created_at': ['The order column is not sortable.'],
+            'filters.name.$eq': ['Not a condition.'],
+            search: ['Too short.'],
+        });
+        expect((error as HttpValidationError).message).toBe('Invalid Input');
+        expect((error as HttpValidationError).code).toBe(ApiErrorCode.InvalidInput);
+        expect((error as HttpValidationError).title).toBe('Invalid Input');
+    });
+
+    it('builds an HttpValidationError with no field errors when the invalid-input meta is absent', async () => {
+        const error = await rejectionFor(envelopeResponse(422, { code: 10106, title: 'Invalid Input' }));
+
+        expect(error).toBeInstanceOf(HttpValidationError);
+        // Cast proven safe: toBeInstanceOf(HttpValidationError) guards the
+        // type.
+        expect((error as HttpValidationError).errors).toStrictEqual({});
+    });
+
+    it('only reads query-cost meta on the query-too-expensive code', async () => {
+        const error = await rejectionFor(envelopeResponse(422, { code: 10100, title: 'Bad Request', meta: COST_META }));
+
+        expect(error).toBeInstanceOf(HttpError);
+        expect(error).not.toBeInstanceOf(QueryTooExpensiveError);
+    });
+
+    it('does not build a validation error for a 422 whose code is not invalid input', async () => {
+        const error = await rejectionFor(
+            envelopeResponse(422, { code: 10100, title: 'Bad Request', meta: { field: ['bad'] } }),
+        );
+
+        expect(error).toBeInstanceOf(HttpError);
+        expect(error).not.toBeInstanceOf(HttpValidationError);
+    });
+
+    it('builds a QueryTooExpensiveError carrying the cap that was exceeded', async () => {
+        const error = await rejectionFor(
+            envelopeResponse(422, { code: 10201, title: 'Query Too Expensive', meta: COST_META }),
+        );
+
+        expect(error).toBeInstanceOf(QueryTooExpensiveError);
+        expect(error).not.toBeInstanceOf(HttpValidationError);
+        // Cast proven safe: toBeInstanceOf(QueryTooExpensiveError) guards the
+        // type.
+        expect((error as QueryTooExpensiveError).meta).toStrictEqual(COST_META);
+        expect((error as QueryTooExpensiveError).code).toBe(ApiErrorCode.QueryTooExpensive);
+        expect((error as QueryTooExpensiveError).title).toBe('Query Too Expensive');
+    });
+
+    it.each([
+        ['absent', undefined],
+        ['not a record', ['filters']],
+        ['missing the parameter', { ...COST_META, parameter: undefined }],
+        ['missing the pointer', { ...COST_META, pointer: 1 }],
+        ['missing the reason', { ...COST_META, reason: null }],
+        ['missing the limit', { ...COST_META, limit: '100' }],
+        ['missing the actual value', { ...COST_META, actual: '140' }],
+    ])('falls back to a plain HttpError when the query-cost meta is %s', async (_case, meta) => {
+        const error = await rejectionFor(envelopeResponse(422, { code: 10201, title: 'Query Too Expensive', meta }));
+
+        expect(error).toBeInstanceOf(HttpError);
+        expect(error).not.toBeInstanceOf(QueryTooExpensiveError);
+        // Cast proven safe: toBeInstanceOf(HttpError) guards the type.
+        expect((error as HttpError).code).toBe(ApiErrorCode.QueryTooExpensive);
+    });
+
+    it('builds a MaintenanceError for the maintenance code, distinct from a plain 503', async () => {
+        const maintenance = await rejectionFor(envelopeResponse(503, { code: 10200, title: 'Maintenance' }));
+        const unavailable = await rejectionFor(envelopeResponse(503, { code: 10112, title: 'Service Unavailable' }));
+
+        expect(maintenance).toBeInstanceOf(MaintenanceError);
+        // Cast proven safe: toBeInstanceOf(MaintenanceError) guards the type.
+        expect((maintenance as MaintenanceError).code).toBe(ApiErrorCode.MaintenanceMode);
+        expect((maintenance as MaintenanceError).message).toBe('Maintenance');
+        expect(unavailable).toBeInstanceOf(HttpError);
+        expect(unavailable).not.toBeInstanceOf(MaintenanceError);
+    });
+
+    it.each([
+        ['an error that is not a record', { error: 'boom', message: 'plain message' }],
+        ['an error without a numeric code', { error: { code: '10103' }, message: 'plain message' }],
+    ])('reads the plain shape when the body carries %s', async (_case, body) => {
+        const error = await rejectionFor(jsonResponse(body, 404));
+
+        // Cast proven safe: a non-2xx response always rejects with HttpError.
+        expect((error as HttpError).message).toBe('plain message');
+        expect((error as HttpError).code).toBeNull();
+        expect((error as HttpError).title).toBeNull();
+    });
+});
+
+// ---------------------------------------------------------------------------
 // Response-error handler
 // ---------------------------------------------------------------------------
 
@@ -248,7 +490,7 @@ describe('FetchHttpClient - response-error handler', () => {
         expect(request).toStrictEqual({
             method: 'GET',
             url: 'https://api.example.com/fail',
-            headers: {},
+            headers: { accept: 'application/json' },
             body: undefined,
         });
     });

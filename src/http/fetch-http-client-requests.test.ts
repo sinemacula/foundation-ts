@@ -8,7 +8,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 
-import { FetchHttpClient } from './fetch-http-client';
+import { FetchHttpClient, stripQueryAndFragment } from './fetch-http-client';
 
 // ---------------------------------------------------------------------------
 // Stub type
@@ -21,6 +21,13 @@ type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Build a JSON response.
+ *
+ * @param body - the value to serialise
+ * @param status - the response status
+ * @returns the response
+ */
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
         status,
@@ -28,16 +35,35 @@ function jsonResponse(body: unknown, status = 200): Response {
     });
 }
 
+/**
+ * Build a response without a body.
+ *
+ * @param status - the response status
+ * @returns the response
+ */
 function emptyResponse(status = 204): Response {
     return new Response(null, { status });
 }
 
+/**
+ * Wrap a fetch implementation in a typed stub.
+ *
+ * @param impl - the fetch implementation
+ * @returns the stub
+ */
 function makeFetch(
     impl: (...args: FetchArgs) => Promise<Response>,
 ): ReturnType<typeof vi.fn<(...args: FetchArgs) => Promise<Response>>> {
     return vi.fn<(...args: FetchArgs) => Promise<Response>>(impl);
 }
 
+/**
+ * Build a client against the stub with optional extra options.
+ *
+ * @param fetchFn - the fetch stub
+ * @param extra - options to merge over the base URL and stub
+ * @returns the client
+ */
 function makeClient(
     fetchFn: typeof fetch,
     extra: Partial<ConstructorParameters<typeof FetchHttpClient>[0]> = {},
@@ -393,5 +419,82 @@ describe('FetchHttpClient - defaultHeaders', () => {
         await client.get('/items', { headers: { 'x-api-key': 'override' } });
 
         expect(lastHeaders(fetchFn)['x-api-key']).toBe('override');
+    });
+});
+
+// ---------------------------------------------------------------------------
+// Accept header
+// ---------------------------------------------------------------------------
+
+describe('FetchHttpClient - accept header', () => {
+    it('asks for JSON by default', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn);
+
+        await client.post('/items', { name: 'Alice' });
+
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/json', 'content-type': 'application/json' });
+    });
+
+    it('asks downloads for any type while still preferring JSON errors', async () => {
+        const fetchFn = makeFetch(async () => new Response(new Blob(['bytes']), { status: 200 }));
+        const client = makeClient(fetchFn);
+
+        await client.download('/files/1');
+
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/json, */*;q=0.8' });
+    });
+
+    it('lets a default header replace the default accept, whatever its case', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn, { defaultHeaders: { Accept: 'application/vnd.api+json' } });
+
+        await client.get('/items');
+
+        expect(lastHeaders(fetchFn)).toStrictEqual({ Accept: 'application/vnd.api+json' });
+    });
+
+    it('lets a per-request header replace the default accept', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn);
+
+        await client.get('/items', { headers: { accept: 'text/csv' } });
+
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'text/csv' });
+    });
+
+    it('shows the default accept to request interceptors', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const seen: Record<string, string>[] = [];
+        const client = makeClient(fetchFn, {
+            requestInterceptors: [
+                request => {
+                    seen.push({ ...request.headers });
+
+                    return request;
+                },
+            ],
+        });
+
+        await client.get('/items');
+
+        expect(seen).toStrictEqual([{ accept: 'application/json' }]);
+    });
+});
+
+// ---------------------------------------------------------------------------
+// URL redaction
+// ---------------------------------------------------------------------------
+
+describe('stripQueryAndFragment', () => {
+    it.each([
+        ['https://api.example.com/items', 'https://api.example.com/items'],
+        ['https://api.example.com/reset?token=secret', 'https://api.example.com/reset'],
+        ['https://api.example.com/callback#code=secret', 'https://api.example.com/callback'],
+        ['https://api.example.com/a?b=1#c', 'https://api.example.com/a'],
+        ['https://api.example.com/a#b?c=1', 'https://api.example.com/a'],
+        ['', ''],
+    ])('strips %s to %s', (url, expected) => {
+        expect(stripQueryAndFragment(url)).toBe(expected);
     });
 });
