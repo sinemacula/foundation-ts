@@ -47,13 +47,11 @@ name = "shellcheck"
 name = "shfmt"
 mode = "comment"
 
-# Biome must read this repository's config in place: the shared driver points
-# at an exported nested config and silently falls back to Biome's defaults.
-[plugins.definitions.biome.drivers.lint]
-config_script = "--config-path .qlty/configs"
-
-[plugins.definitions.biome.drivers.format]
-config_script = "--config-path .qlty/configs"
+# Biome runs in a sandbox where neither the exported nested config nor a
+# relative extends resolves, so the repo config is self-contained and passed
+# directly; re-sync it from the shared js/biome.json when the tag moves.
+[plugins.definitions.biome]
+exported_config_paths = []
 
 [[plugin]]
 name = "biome"
