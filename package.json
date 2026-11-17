@@ -191,6 +191,10 @@
             "types": "./dist/realtime/reconnect.d.ts",
             "default": "./dist/realtime/reconnect.js"
         },
+        "./realtime/subscribers": {
+            "types": "./dist/realtime/subscribers.d.ts",
+            "default": "./dist/realtime/subscribers.js"
+        },
         "./realtime/test-support/realtime-connection-contract": {
             "types": "./dist/realtime/test-support/realtime-connection-contract.d.ts",
             "default": "./dist/realtime/test-support/realtime-connection-contract.js"
