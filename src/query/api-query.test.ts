@@ -5,7 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { ApiQuery } from './api-query';
 import { QueryError } from './query-error';
@@ -266,6 +266,15 @@ describe('ApiQuery', () => {
                     ],
                 ]),
             );
+        });
+    });
+
+    describe('where (types)', () => {
+        it('refuses a list operator in the operator form', () => {
+            expectTypeOf((query: ApiQuery) => {
+                // @ts-expect-error -- $in takes a list through whereIn
+                return query.where('a', '$in', 1);
+            }).toBeFunction();
         });
     });
 

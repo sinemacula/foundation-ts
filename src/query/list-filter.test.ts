@@ -5,9 +5,10 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { ApiQuery } from './api-query';
+import type { FilterScalar } from './filter-expression';
 import { filter } from './list-filter';
 import { QueryError } from './query-error';
 
@@ -71,6 +72,16 @@ describe('filter', () => {
             const q = filter.anyOf('posts.status').apply(ApiQuery.create(), ['draft', 'published']);
 
             expect(parsedFilters(q)).toEqual({ posts: wire([['status', wire([['$in', ['draft', 'published']]])]]) });
+        });
+
+        it('takes only a list of scalars', () => {
+            const anyOf = filter.anyOf('role');
+
+            expectTypeOf(anyOf.apply).parameter(1).toEqualTypeOf<readonly FilterScalar[]>();
+            expectTypeOf((query: ApiQuery) => {
+                // @ts-expect-error -- a single scalar is not a list
+                return anyOf.apply(query, 'x');
+            }).toBeFunction();
         });
 
         it('applies no filter for an empty list', () => {
