@@ -13,15 +13,15 @@
 
 </div>
 
-`@sinemacula/foundation` is the platform-agnostic base of the Sine Macula application kernels: configuration, HTTP,
+`@sinemacula/foundation` is the platform-agnostic core of the Sine Macula application kernels: configuration, HTTP,
 sessions, queries, realtime, storage and the rest of the shared client logic, as small port-driven TypeScript units
-with no framework, DOM or node-only dependencies.
+with no framework, DOM or Node-only dependencies.
 
-Applications do not normally consume this package directly: each platform kernel (web, mobile) boots the
-foundation core, binds the generic contracts to its own router and UI vocabulary, and layers its platform
-services on top. Everything platform-specific arrives through an injected port.
+## How It Works
 
-## What lives here
+Applications do not consume this package directly. Each platform kernel (web, mobile) boots the foundation core, binds
+its generic contracts to the platform's router and UI, and layers its own services on top. Everything
+platform-specific arrives through a port.
 
 | Area                 | What it provides                                                                                                   | Port / contract           |
 |----------------------|--------------------------------------------------------------------------------------------------------------------|---------------------------|
@@ -50,73 +50,36 @@ services on top. Everything platform-specific arrives through an injected port.
 npm install @sinemacula/foundation
 ```
 
-The `exports` map always resolves to the compiled `dist/`, and the `prepare` script builds it, so a git dependency
+The `exports` map resolves to the compiled `dist/` and the `prepare` script builds it, so a git dependency
 (`github:sinemacula/foundation-ts#<ref>`) installs the same output as the registry tarball.
 
-## Import style
-
-The package has no barrel: every module is imported by its explicit subpath, and the manifest `exports` map is
-the public-surface allow-list - anything unlisted is internal and unreachable.
+There is no barrel: import each module by its subpath. The `exports` map is the public surface; anything unlisted is
+internal.
 
 ```ts
 import { Environment } from '@sinemacula/foundation/config/environment';
 import { MemoryStorage } from '@sinemacula/foundation/storage/memory-storage';
 ```
 
-## Bootstrapping
+## Usage
 
-Platform kernels boot the core through `@sinemacula/foundation/app/boot-foundation-core`, supplying their own
-storage, notification and fetch seams. The core runs the agnostic boot phases in a fixed order - runtime
-environment, configuration, storage, feature flags, notifications, observability and the HTTP client - and
-bridges the platform's module-registration step so modules contribute interceptors before the client is built.
+### Bootstrapping
+
+A kernel boots the core through `@sinemacula/foundation/app/boot-foundation-core`, supplying its storage,
+notification and fetch seams. The core runs the runtime environment, configuration, storage, feature flags,
+notifications, observability and HTTP client phases in that order, and calls the kernel's module registration before
+building the client so modules can contribute interceptors.
 
 ```ts
 const core = await bootFoundationCore({ ...options, runtime: { url: '/runtime-env.json' } }, { fetchFn });
 ```
 
-`runtime` is optional. When set, the core fetches that JSON document within `timeout` (default 5000 ms) and hands
-its string values to `createEnvironment`. A missing document (404) counts as empty, a `timeout` that is not positive
-or exceeds 2147483647 ms rejects the boot with a `RangeError`, and any other failure rejects it with a
-`RuntimeEnvironmentError` (`@sinemacula/foundation/config/runtime-environment-error`). Omit it where configuration
-ships with the build, as on mobile, and nothing is fetched.
-
-Everything the core installs is reachable afterwards through the service accessors in
+`runtime` is optional; omit it where configuration ships with the build, as on mobile. When set, the document must
+load within `timeout` (default 5000 ms). A 404 counts as empty, an invalid `timeout` rejects with a `RangeError`, and
+any other failure rejects with a `RuntimeEnvironmentError`. The installed services are then available through
 `@sinemacula/foundation/app/services`.
 
-## React Native
-
-Every subpath resolves under Metro and Jest through the `default` export condition. CI bundles the public surface
-for iOS and Android, compiles it to Hermes bytecode, loads it against React Native's globals and requires each
-subpath under React Native's Jest preset (`npm run smoke:react-native`). The package ships ES modules, so add it to
-the Jest `transformIgnorePatterns` allow-list. `KeyValueStorage` is synchronous, so back it with a synchronous store;
-an asynchronous secure store implements the `SessionPersistence` port directly.
-
-## Realtime
-
-`@sinemacula/foundation/realtime/web-socket-connection` is the WebSocket adapter for the `RealtimeConnection` port.
-It reconnects with exponential backoff after any close it did not initiate, and `disconnect()` stops it until the next
-`connect()`, which restarts the backoff. `beforeReconnect` runs before each reconnect and skips the attempt when it
-resolves `false` or rejects, so map the refresh outcome to that decision explicitly:
-
-```ts
-const connection = new WebSocketConnection({
-    url: () => `wss://example.test/realtime?token=${readAccessToken()}`,
-    beforeReconnect: async () => (await coordinator.refresh()).kind === 'refreshed',
-    onError: error => reporter.captureError(error),
-});
-
-connection.on('order.updated', message => applyOrderUpdate(JSON.parse(message.data)));
-connection.connect();
-```
-
-`on('message')` receives every text frame. A frame that parses as a `{ event, data }` envelope also reaches that
-event's subscribers, with `data` as text: a non-string payload arrives re-serialised as JSON.
-
-`onError` receives the errors the connection contains rather than throws: a subscriber that threw, or a reconnect
-whose `url()` builder or socket factory threw. The same failure inside `connect()` surfaces to the caller as a
-`RealtimeError` (`@sinemacula/foundation/realtime/realtime-error`) with the original error as its `cause`.
-
-## Querying
+### Querying
 
 `ApiQuery` speaks the `sinemacula/laravel-api-toolkit` query grammar. It is immutable: every call returns a new
 query.
@@ -152,27 +115,63 @@ The toolkit enforces cost caps server-side and answers a request over one with a
 3 order keys, 5 aggregates, an offset of 500000 rows, 500 `$in` items, 100 filter nodes, a filter depth of 3, and
 8192 bytes of encoded filters.
 
-## Quality gates
+### Realtime
 
-| Command                      | What it runs                                           |
-|------------------------------|--------------------------------------------------------|
-| `npm run check`              | Static analysis and lint via qlty (Biome, ESLint)      |
-| `npm run typecheck`          | Type-checking with tsc                                 |
-| `npm run test:coverage`      | The unit suite, with 100% coverage enforced            |
-| `npm run test:mutation`      | Mutation testing with Stryker                          |
-| `npm run deadcode`           | Dead-code detection with knip                          |
-| `npm run check:pkg`          | Packaging checks (publint + attw) on the built tarball |
-| `npm run smoke:react-native` | The React Native smoke check (Metro, Hermes, Jest)     |
+`WebSocketConnection` (`realtime/web-socket-connection`) reconnects with exponential backoff after any close it did not
+initiate; `disconnect()` stops it until the next `connect()`. `beforeReconnect` skips an attempt when it resolves
+`false` or rejects:
 
-## Releases
+```ts
+const connection = new WebSocketConnection({
+    url: () => `wss://example.test/realtime?token=${readAccessToken()}`,
+    beforeReconnect: async () => (await coordinator.refresh()).kind === 'refreshed',
+    onError: error => reporter.captureError(error),
+});
 
-Releases are cut by release-please from Conventional Commit history and published to npm by CI through OIDC
-trusted publishing; the `prepare` lifecycle compiles `dist/` before the tarball is packed.
+connection.on('order.updated', message => applyOrderUpdate(JSON.parse(message.data)));
+connection.connect();
+```
+
+`on('message')` receives every text frame; a `{ event, data }` envelope also reaches that event's subscribers, with a
+non-string `data` re-serialised as JSON. `onError` receives failures the connection contains (a throwing subscriber,
+`url()` builder or socket factory); the same failure inside `connect()` throws a `RealtimeError` with the original as
+its `cause`.
+
+### React Native
+
+Every subpath resolves under Metro and Jest through the `default` export condition, and CI loads the whole public
+surface under Metro, Hermes and React Native's Jest preset. The package ships ES modules, so add it to Jest's
+`transformIgnorePatterns` allow-list. `KeyValueStorage` is synchronous, so back it with a synchronous store; an
+asynchronous secure store implements `SessionPersistence` directly.
+
+## Requirements
+
+- Node.js 22+
+- Vitest 3+, only for the realtime contract suite in `realtime/test-support`
+
+## Testing
+
+```bash
+npm test                    # unit suite
+npm run test:coverage       # unit suite with 100% coverage enforced
+npm run test:mutation       # Stryker mutation gate (break 95)
+npm run typecheck           # type-check
+npm run check               # static analysis and lint via qlty
+npm run fmt                 # format via qlty
+npm run smells              # duplication / complexity smells via qlty
+npm run deadcode            # dead-code detection via knip
+npm run check:pkg           # publint + attw on the packed tarball
+npm run smoke:react-native  # load every subpath under Metro, Hermes and Jest
+```
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a list of notable changes.
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on branching, commits,
-code quality, and pull requests.
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on branching, commits, code
+quality, and pull requests.
 
 ## Security
 

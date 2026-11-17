@@ -93,6 +93,11 @@ npx vitest run -t "rehydrateSessionUser"
 - Include tests for new or changed behaviour
 - Ensure `npm run check` and `npm run test:coverage` pass
 
+## Releases
+
+release-please cuts releases from the Conventional Commit history, and CI publishes them to npm through OIDC trusted
+publishing. The `prepare` script builds `dist/` before the tarball is packed.
+
 ## Security
 
 If you discover a security vulnerability, please report it directly to Sine Macula rather than opening a public issue.
