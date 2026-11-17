@@ -1,5 +1,6 @@
 /**
- * Vitest configuration: Node environment, 100% coverage of the source.
+ * Vitest configuration: Node environment, 100% coverage of the source, mocks,
+ * globals and env stubs restored after every test.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -11,6 +12,9 @@ export default defineConfig({
     test: {
         environment: 'node',
         include: ['src/**/*.test.ts'],
+        restoreMocks: true,
+        unstubGlobals: true,
+        unstubEnvs: true,
         coverage: {
             provider: 'v8',
             reporter: ['text', 'html', 'lcov'],
