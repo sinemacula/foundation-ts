@@ -81,7 +81,9 @@ export type SessionClearResult =
 
 /**
  * Persists the session snapshot. Each conditional write compares revision and
- * lineage and writes atomically, across every context sharing the store. A
+ * lineage and writes atomically, across every context sharing the store, and
+ * every operation observes each write that resolved before it was called, in
+ * any context, so no context presents a refresh token another has spent. A
  * failure to read or write rejects; it never reads as an empty store.
  */
 export interface SessionPersistence {

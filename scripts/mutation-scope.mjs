@@ -17,6 +17,7 @@ const TEST_SOURCES = [
     ['src/app/session-http.integration.test.ts', 'src/app/wire-http-client.ts'],
     ['src/http/fetch-http-client-*.test.ts', 'src/http/fetch-http-client.ts'],
     ['src/http/url-search-params-surface.test.ts', 'src/http/fetch-http-client.ts'],
+    ['src/session/session-delayed-visibility.integration.test.ts', 'src/session/record-session-persistence.ts'],
 ];
 
 const SOURCE_TEST = /^src\/.+\.test\.ts$/;
