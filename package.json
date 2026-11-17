@@ -199,6 +199,10 @@
             "types": "./dist/realtime/reconnect.d.ts",
             "default": "./dist/realtime/reconnect.js"
         },
+        "./realtime/subscribers": {
+            "types": "./dist/realtime/subscribers.d.ts",
+            "default": "./dist/realtime/subscribers.js"
+        },
         "./realtime/test-support/realtime-connection-contract": {
             "types": "./dist/realtime/test-support/realtime-connection-contract.d.ts",
             "default": "./dist/realtime/test-support/realtime-connection-contract.js"
@@ -360,13 +364,15 @@
         "@stryker-mutator/core": "^9.6.1",
         "@stryker-mutator/vitest-runner": "^9.6.1",
         "@types/node": "^25.9.3",
+        "@types/ws": "^8.18.2",
         "@vitest/coverage-v8": "^4.1.8",
         "fast-check": "^4.10.2",
         "knip": "^6.16.1",
         "mkdist": "^2.4.1",
         "publint": "^0.3.21",
         "typescript": "^6.0.3",
-        "vitest": "^4.1.8"
+        "vitest": "^4.1.8",
+        "ws": "^8.23.0"
     },
     "overrides": {
         "brace-expansion": "^5.0.13",
