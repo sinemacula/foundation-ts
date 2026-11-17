@@ -129,6 +129,7 @@ async function session() {
         persistence,
         api: createDefaultSessionApi(http, { now: () => 0 }),
         device: () => ({ uuid: 'device', os: 'ios' }),
+        createLineage: () => 'lineage-1',
     };
     const state = createInitialSessionState();
 
@@ -140,11 +141,11 @@ async function session() {
     assertEqual('signed-in user', state.user, SIGNED_IN_USER);
 
     const refresh = await refreshSession(state, context);
-    const { tokens } = await persistence.load();
+    const { session: persisted } = await persistence.load();
 
     assertEqual('refresh outcome', refresh, { kind: 'refreshed' });
     assertEqual('refreshed state', [state.accessToken, state.refreshToken], ['access-2', 'refresh-2']);
-    assertEqual('persisted refresh token', tokens.refreshToken, 'refresh-2');
+    assertEqual('persisted session', [persisted.lineage, persisted.tokens.refreshToken], ['lineage-1', 'refresh-2']);
 
     storage.set(SESSION_KEY, '{');
 

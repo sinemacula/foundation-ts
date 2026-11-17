@@ -21,10 +21,13 @@ function unused(): Promise<never> {
 
 const api: SessionApi = { login: unused, refresh: unused, logout: unused, currentUser: unused };
 const persistence = new KeyValueSessionPersistence(new MemoryStorage());
-const context = { persistence, api, device: () => ({ uuid: 'device', os: 'ios' }) };
+const context = { persistence, api, device: () => ({ uuid: 'device', os: 'ios' }), createLineage: () => 'lineage' };
 const state = createInitialSessionState();
 
-await persistence.saveIf(0, { accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: null });
+await persistence.saveIf(
+    { revision: 0, lineage: null },
+    { lineage: 'lineage', tokens: { accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: null } },
+);
 await hydrateSession(state, context);
 
 describe('hydrateSession', () => {
