@@ -9,6 +9,18 @@
 import type { SessionTokens } from './session-tokens';
 
 /**
+ * A persisted session: the tokens of one sign-in, under the lineage every
+ * rotation of that sign-in keeps.
+ */
+export interface PersistedSession {
+    /** Marks the sign-in the session descends from, so a rotation is told apart from a new sign-in. */
+    readonly lineage: string;
+
+    /** The session's tokens. */
+    readonly tokens: SessionTokens;
+}
+
+/**
  * The persisted session at one revision. The revision grows with every write,
  * clearing included, and is 0 before the first.
  */
@@ -16,13 +28,26 @@ export interface SessionSnapshot {
     /** The revision of the last write. */
     readonly revision: number;
 
-    /** The persisted tokens, or null when no session is persisted. */
-    readonly tokens: SessionTokens | null;
+    /** The persisted session, or null when none is persisted. */
+    readonly session: PersistedSession | null;
+}
+
+/**
+ * What a conditional write expects to find: a revision and the lineage stored
+ * at it, so a write never lands on another sign-in's snapshot even when a store
+ * reset reuses its revision.
+ */
+export interface SessionVersion {
+    /** The expected revision. */
+    readonly revision: number;
+
+    /** The expected lineage, or null when no session is expected. */
+    readonly lineage: string | null;
 }
 
 /**
  * A conditional write refused because the snapshot is no longer at the expected
- * revision.
+ * version.
  */
 export interface SessionSnapshotChanged {
     /** The write was not made. */
@@ -35,7 +60,7 @@ export interface SessionSnapshotChanged {
 /** The result of {@link SessionPersistence.saveIf}. */
 export type SessionSaveResult =
     | {
-          /** The tokens were persisted. */
+          /** The session was persisted. */
           readonly status: 'saved';
 
           /** The revision the write produced. */
@@ -55,33 +80,31 @@ export type SessionClearResult =
     | SessionSnapshotChanged;
 
 /**
- * Persists the session's token snapshot. Each conditional write compares and
- * writes atomically, across every context sharing the store. A failure to read
- * or write rejects; it never reads as an empty store.
+ * Persists the session snapshot. Each conditional write compares revision and
+ * lineage and writes atomically, across every context sharing the store. A
+ * failure to read or write rejects; it never reads as an empty store.
  */
 export interface SessionPersistence {
     /**
      * Read the persisted snapshot.
      *
-     * @returns the snapshot, at revision 0 with no tokens when nothing was ever
-     * written
+     * @returns the snapshot, at revision 0 with no session when nothing was
+     * ever written
      */
     load(): Promise<SessionSnapshot>;
 
     /**
-     * Persist the tokens when the snapshot is still at the expected revision.
+     * Persist the session when the snapshot is still at the expected version.
      *
-     * @param expectedRevision - the revision the caller last saw
      * @returns the new revision, or the snapshot that changed meanwhile
      */
-    saveIf(expectedRevision: number, tokens: SessionTokens): Promise<SessionSaveResult>;
+    saveIf(expected: SessionVersion, session: PersistedSession): Promise<SessionSaveResult>;
 
     /**
      * Remove the persisted session when the snapshot is still at the expected
-     * revision, keeping the revision growing.
+     * version, keeping the revision growing.
      *
-     * @param expectedRevision - the revision the caller last saw
      * @returns the new revision, or the snapshot that changed meanwhile
      */
-    clearIf(expectedRevision: number): Promise<SessionClearResult>;
+    clearIf(expected: SessionVersion): Promise<SessionClearResult>;
 }

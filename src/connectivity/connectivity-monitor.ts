@@ -14,16 +14,19 @@ export type ConnectivityHandler = (online: boolean) => void;
  * Tracks network connectivity and notifies subscribers on change.
  */
 export interface ConnectivityMonitor {
-    /** The current connectivity state. */
+    /** The connectivity last observed; it does not follow the platform while stopped. */
     readonly online: boolean;
 
     /**
-     * Begin observing connectivity changes. A no-op when already started.
+     * Begin observing connectivity changes, resampling the platform and
+     * notifying once when it differs from `online`. A no-op when already
+     * started.
      */
     start(): void;
 
     /**
-     * Stop observing and detach listeners. A no-op when not started.
+     * Stop observing and detach listeners, so nothing is observed until the
+     * next start. A no-op when not started.
      */
     stop(): void;
 

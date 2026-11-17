@@ -6,6 +6,7 @@
  */
 
 import type { AnalyticsTracker } from '../analytics/analytics-tracker';
+import type { DeepReadonly } from '../config/config-repository';
 import { ConfigRepository } from '../config/config-repository';
 import type { Environment } from '../config/environment';
 import type { RuntimeEnvironmentSource } from '../config/runtime-environment';
@@ -51,7 +52,7 @@ export type FoundationCorePhase =
  */
 export interface FoundationCoreRegistration<T extends FoundationConfig> {
     /** The installed configuration repository. */
-    readonly config: ConfigRepository<T & Record<string, unknown>>;
+    readonly config: ConfigRepository<T>;
 
     /** The constructed environment. */
     readonly environment: Environment;
@@ -80,18 +81,18 @@ export interface FoundationCoreOptions<T extends FoundationConfig> {
     readonly confirm: Confirmer;
 
     /** Feature-flag adapter factory; wins over the config-delivered default. */
-    readonly featureFlags?: (settings: Readonly<T>) => FeatureFlags;
+    readonly featureFlags?: (settings: DeepReadonly<T>) => FeatureFlags;
 
     /** Observability factories; each wins over the environment default. */
     readonly observability?: {
         /** Error-reporter factory. */
-        readonly reporter?: (settings: Readonly<T>) => ErrorReporter;
+        readonly reporter?: (settings: DeepReadonly<T>) => ErrorReporter;
 
         /** Analytics-tracker factory. */
-        readonly analytics?: (settings: Readonly<T>) => AnalyticsTracker;
+        readonly analytics?: (settings: DeepReadonly<T>) => AnalyticsTracker;
 
         /** Logger factory. */
-        readonly logger?: (settings: Readonly<T>) => Logger;
+        readonly logger?: (settings: DeepReadonly<T>) => Logger;
     };
 
     /** HTTP client construction options. */
@@ -124,10 +125,10 @@ export interface FoundationCore<T extends FoundationConfig> {
     readonly environment: Environment;
 
     /** The installed configuration repository. */
-    readonly repository: ConfigRepository<T & Record<string, unknown>>;
+    readonly repository: ConfigRepository<T>;
 
     /** The frozen configuration tree. */
-    readonly settings: Readonly<T>;
+    readonly settings: DeepReadonly<T>;
 
     /** The installed feature-flag adapter. */
     readonly flags: FeatureFlags;
@@ -141,6 +142,10 @@ export interface FoundationCore<T extends FoundationConfig> {
 
 /**
  * Run the platform-agnostic boot phases and install the core services.
+ *
+ * A failure rejects with the original error and leaves in place the services
+ * installed so far, alongside any from an earlier boot that this one had not
+ * yet replaced.
  *
  * @throws {RuntimeEnvironmentError} when a configured runtime document cannot
  * be loaded
@@ -157,8 +162,9 @@ export async function bootFoundationCore<T extends FoundationConfig>(
     options.onPhase?.('configuration');
 
     const environment = options.createEnvironment(runtime);
-    const repository = new ConfigRepository(options.define(environment) as T & Record<string, unknown>);
-    const settings: Readonly<T> = repository.all();
+    const definition = options.define(environment);
+    const repository = new ConfigRepository(definition);
+    const settings = repository.all();
 
     installConfig(repository);
 
@@ -191,7 +197,8 @@ export async function bootFoundationCore<T extends FoundationConfig>(
     options.onPhase?.('http-client');
 
     const http = wireHttpClient({
-        config: settings,
+        // Same frozen object as settings, typed as the http wiring expects.
+        config: definition,
         fetchFn: platform.fetchFn,
         contributions,
         ...(options.http?.interceptors === undefined ? {} : { interceptors: options.http.interceptors }),

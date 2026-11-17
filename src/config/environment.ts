@@ -7,6 +7,8 @@
 
 const TRUTHY_VALUES = ['1', 'true', 'yes', 'on'];
 
+const DECIMAL_INTEGER = /^-?\d+$/u;
+
 /**
  * A read-only provider of raw environment values.
  */
@@ -21,7 +23,8 @@ export interface EnvironmentSource {
 }
 
 /**
- * Typed reader over an {@link EnvironmentSource}.
+ * Typed reader over an {@link EnvironmentSource}. An empty string counts as not
+ * set, so every reader resolves it to the fallback.
  */
 export class Environment {
     /** The backing source of raw environment values. */
@@ -35,25 +38,25 @@ export class Environment {
      * Read a string value.
      *
      * @param key - the environment variable name
-     * @param fallback - the value returned when the variable is not defined
+     * @param fallback - the value returned when the variable is not set
      */
-    string(key: string): string | undefined;
     string(key: string, fallback: string): string;
+    string(key: string, fallback?: string): string | undefined;
     string(key: string, fallback?: string): string | undefined {
-        return this.#source.get(key) ?? fallback;
+        return this.#read(key) ?? fallback;
     }
 
     /**
      * Read a boolean value. The strings `1`, `true`, `yes` and `on` (in any
-     * casing) are truthy; every other defined value is falsy.
+     * casing) are truthy; every other set value is falsy.
      *
      * @param key - the environment variable name
-     * @param fallback - the value returned when the variable is not defined
+     * @param fallback - the value returned when the variable is not set
      */
-    boolean(key: string): boolean | undefined;
     boolean(key: string, fallback: boolean): boolean;
+    boolean(key: string, fallback?: boolean): boolean | undefined;
     boolean(key: string, fallback?: boolean): boolean | undefined {
-        const value = this.#source.get(key);
+        const value = this.#read(key);
 
         if (value === undefined) {
             return fallback;
@@ -63,25 +66,26 @@ export class Environment {
     }
 
     /**
-     * Read an integer value. Values that do not parse as a base-10 integer
-     * resolve to the fallback.
+     * Read an integer value. Only an optionally negative run of decimal digits
+     * within the safe integer range parses; anything else, including padding,
+     * signs other than `-`, exponents and separators, resolves to the fallback.
      *
      * @param key - the environment variable name
-     * @param fallback - the value returned when the variable is missing or
+     * @param fallback - the value returned when the variable is not set or
      * invalid
      */
-    integer(key: string): number | undefined;
     integer(key: string, fallback: number): number;
+    integer(key: string, fallback?: number): number | undefined;
     integer(key: string, fallback?: number): number | undefined {
-        const value = this.#source.get(key);
+        const value = this.#read(key);
 
-        if (value === undefined) {
+        if (value === undefined || !DECIMAL_INTEGER.test(value)) {
             return fallback;
         }
 
-        const parsed = Number.parseInt(value, 10);
+        const parsed = Number(value);
 
-        return Number.isNaN(parsed) ? fallback : parsed;
+        return Number.isSafeInteger(parsed) ? parsed : fallback;
     }
 
     /**
@@ -89,13 +93,13 @@ export class Environment {
      * fallback.
      *
      * @param key - the environment variable name
-     * @param fallback - the value returned when the variable is missing or
+     * @param fallback - the value returned when the variable is not set or
      * invalid
      */
-    json<T>(key: string): T | undefined;
     json<T>(key: string, fallback: T): T;
+    json<T>(key: string, fallback?: T): T | undefined;
     json<T>(key: string, fallback?: T): T | undefined {
-        const value = this.#source.get(key);
+        const value = this.#read(key);
 
         if (value === undefined) {
             return fallback;
@@ -107,5 +111,14 @@ export class Environment {
         } catch {
             return fallback;
         }
+    }
+
+    /**
+     * Read the raw value for `key`, treating an empty string as not set.
+     */
+    #read(key: string): string | undefined {
+        const value = this.#source.get(key);
+
+        return value === '' ? undefined : value;
     }
 }

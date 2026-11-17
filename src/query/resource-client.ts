@@ -9,6 +9,10 @@ import type { HttpClient, HttpRequestOptions, QueryParameters } from '../http/ht
 import type { ApiQuery } from './api-query';
 import type { ListResult, ResourceMapper } from './envelope';
 import { unwrapItem, unwrapList } from './envelope';
+import { QueryError } from './query-error';
+
+/** The id segments that would address the collection or a parent path. */
+const INVALID_SEGMENTS: readonly string[] = ['', '.', '..'];
 
 /** Construction options for {@link ResourceClient}. */
 export interface ResourceClientOptions<Value> {
@@ -25,6 +29,10 @@ export interface ResourceClientOptions<Value> {
 /**
  * A typed CRUD client for a single API resource, built on {@link HttpClient}
  * and the laravel-api-toolkit response envelope.
+ *
+ * Ids are raw values: each `/`-separated segment is percent-encoded, and an id
+ * with an empty, `.` or `..` segment rejects with a {@link QueryError} before
+ * any request is sent.
  */
 export class ResourceClient<Value> {
     /** The HTTP client used to issue requests. */
@@ -68,7 +76,7 @@ export class ResourceClient<Value> {
      * envelope shape
      */
     async show(id: string, query?: ApiQuery, options?: HttpRequestOptions): Promise<Value> {
-        const raw = await this.#client.get<unknown>(joinPath(this.#path, id), buildRequestOptions(query, options));
+        const raw = await this.#client.get<unknown>(resourcePath(this.#path, id), buildRequestOptions(query, options));
 
         return unwrapItem(raw, this.#map);
     }
@@ -108,7 +116,7 @@ export class ResourceClient<Value> {
         options?: HttpRequestOptions,
     ): Promise<Value> {
         const raw = await this.#client.patch<unknown>(
-            joinPath(this.#path, id),
+            resourcePath(this.#path, id),
             body,
             buildRequestOptions(query, options),
         );
@@ -125,31 +133,40 @@ export class ResourceClient<Value> {
         body: Readonly<Record<string, unknown>>,
         options?: HttpRequestOptions,
     ): Promise<void> {
-        await this.#client.patch<void>(joinPath(this.#path, id), body, options);
+        await this.#client.patch<void>(resourcePath(this.#path, id), body, options);
     }
 
     /**
      * Delete a resource by id.
      */
     async destroy(id: string, options?: HttpRequestOptions): Promise<void> {
-        await this.#client.delete<void>(joinPath(this.#path, id), options);
+        await this.#client.delete<void>(resourcePath(this.#path, id), options);
     }
 }
 
 /**
- * Join a resource path and id without producing a double slash.
+ * Join a resource path and an id without producing a double slash, encoding
+ * each `/`-separated id segment.
  *
  * The trailing trim walks the string rather than using a `+`-then-anchor regex,
  * which backtracks polynomially on slash runs.
+ *
+ * @throws {@link QueryError} when an id segment is empty, `.` or `..`
  */
-function joinPath(path: string, id: string): string {
+function resourcePath(path: string, id: string): string {
+    const segments = id.replace(/^\/+/u, '').split('/');
+
+    if (segments.some(segment => INVALID_SEGMENTS.includes(segment))) {
+        throw new QueryError(`The resource id "${id}" is not a valid path.`);
+    }
+
     let end = path.length;
 
     while (path[end - 1] === '/') {
         end -= 1;
     }
 
-    return `${path.slice(0, end)}/${id.replace(/^\/+/u, '')}`;
+    return `${path.slice(0, end)}/${segments.map(encodeURIComponent).join('/')}`;
 }
 
 /**

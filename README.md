@@ -27,7 +27,7 @@ platform-specific arrives through a port.
 |----------------------|--------------------------------------------------------------------------------------------------------------------|---------------------------|
 | `src/analytics/`     | Records product events through a swappable tracker (console + no-op adapters), plus route page tracking            | `AnalyticsTracker`        |
 | `src/app/`           | The boot core: `bootFoundationCore` runs the agnostic phases, plus the service registry and base wiring            | `bootFoundationCore`      |
-| `src/authorization/` | Evaluates flat permission grants with wildcard-prefix matching                                                     | `PermissionSet` (no port) |
+| `src/authorization/` | Evaluates flat permission grants with the server's `*` glob grammar                                                | `PermissionSet` (no port) |
 | `src/config/`        | Reads typed configuration from environment sources, fetches the runtime document and freezes the repository        | `EnvironmentSource`       |
 | `src/connectivity/`  | The connectivity-observation contract each platform adapts                                                         | `ConnectivityMonitor`     |
 | `src/feature-flags/` | Resolves feature flags through a swappable provider (static adapter included)                                      | `FeatureFlags`            |
@@ -99,15 +99,25 @@ const query = ApiQuery.create()
 //          &fields[user]=id,name,aggregates&aggregates[user]=posts_count
 ```
 
-- `andWhere` / `orWhere` take one builder per document; keys inside a document AND together, and repeated calls
-  append documents to the same group. An empty group or document throws a `QueryError`.
+- Filter calls AND together and never replace or widen an earlier condition: a different value for a field, a
+  colliding operator or a second `orWhere` group is ANDed beside the first under `$and`. Rebuild from a base query
+  to change a condition.
+- `andWhere` / `orWhere` take one builder per document; keys inside a document AND together. An empty group or
+  document throws a `QueryError`.
 - Repeated `whereRelation` calls on one relation merge into one document, as do repeated `whereHas` calls, so the
   same related row must match all of them. `whereHasNot` conditions never merge.
 - Free-text search is the `search` parameter (`search(term)`), never a filter operator.
 - Aggregates render under the record's `aggregates` field only when `aggregates` is in `fields[type]` or the
   resource's default fields.
 - `withTrashed()` / `onlyTrashed()` set `trashed=with` / `trashed=only`.
-- Changing the order drops any cursor token but keeps cursor pagination; random order under cursor pagination throws.
+- Changing the filters, search, soft-delete visibility or order drops any cursor token but keeps cursor pagination;
+  `limit` and `page` keep it. Random order under cursor pagination throws.
+- `fieldsFor(type, [])` requests only the fixed fields and `aggregatesFor(type, [])` suppresses the default
+  aggregates.
+- `$`-prefixed field or relation names, non-finite numbers, blank field or aggregate names, and a page or limit that
+  is not a positive integer throw a `QueryError`.
+- `ResourceClient` percent-encodes each `/`-separated id segment and rejects an id with an empty, `.` or `..` segment
+  before sending a request.
 - `ResourceClient.list` returns the mapped `items`, `meta` (`{ mode: 'length-aware', total, count, hasMore }`,
   `{ mode: 'cursor', hasMore }`, or `null`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
 
@@ -171,6 +181,35 @@ registered when it started, and state changes made from a handler are delivered 
 same failure inside `connect()` throws a `RealtimeError` with the original as its `cause`. `realtime/subscribers`
 exports the registries behind these rules for other transport adapters.
 
+### Contained failures
+
+`StaticFeatureFlags`, `ColorSchemeService` and `installPageTracking` take an optional `onError` sink, as
+`WebSocketConnection` does: a synchronous throw from a change handler, listener, tracker or breadcrumb trail goes to the
+sink and never stops the others or reaches the caller. Page tracking records only completed navigations, by path: query
+strings and hashes never reach the tracker or the trail.
+
+### Adapter contracts
+
+Each port a platform adapts ships a Vitest contract suite to run against its adapters, under the area's `test-support`:
+`describeFeatureFlagsContract`, `describeRealtimeContract`, `describeSessionPersistenceContract`,
+`describeSessionLockContract`, `describeKeyValueStorageContract` and `describeConnectivityMonitorContract`. An adapter
+proves its behaviour by running the suite from its own tests:
+
+```ts
+import { describeFeatureFlagsContract } from '@sinemacula/foundation/feature-flags/test-support/feature-flags-contract';
+
+describeFeatureFlagsContract({
+    create(initial) {
+        const flags = new RemoteFeatureFlags(initial);
+
+        return { flags, change: next => flags.update(next) };
+    },
+});
+```
+
+`session/test-support/fake-auth-server` serves the session endpoints from memory, with rotation, its grace window,
+replay revocation and cookie sign-out, for integration tests of a session wiring.
+
 ### React Native
 
 Every subpath resolves under Metro and Jest through the `default` export condition, and CI loads the whole public
@@ -181,7 +220,7 @@ asynchronous secure store implements `SessionPersistence` directly.
 ## Requirements
 
 - Node.js 22+
-- Vitest 3+, only for the realtime contract suite in `realtime/test-support`
+- Vitest 3+, only for the contract suites under `*/test-support`
 
 ## Testing
 

@@ -85,11 +85,86 @@ const EMPTY_STATE: QueryState = {
 /** The order keyword the toolkit reads as random ordering. */
 const RANDOM_ORDER = 'random';
 
+/** The operator keys of the filter grammar. */
+const OPERATORS: ReadonlySet<string> = new Set<keyof FilterOperators>([
+    '$eq',
+    '$neq',
+    '$gt',
+    '$lt',
+    '$ge',
+    '$le',
+    '$in',
+    '$between',
+    '$contains',
+    '$null',
+    '$notNull',
+]);
+
 /**
- * Read a filter value as a list, treating anything else as empty.
+ * Deep-freeze a filter node, stopping at nodes already frozen so a derived
+ * query only freezes the nodes it adds.
  */
-function asList(value: unknown): readonly unknown[] {
-    return Array.isArray(value) ? value : [];
+function freezeTree(node: unknown): void {
+    // Primitives report frozen, so the walk also stops at every leaf.
+    if (Object.isFrozen(node)) {
+        return;
+    }
+
+    for (const child of Object.values(node as object)) {
+        freezeTree(child);
+    }
+
+    Object.freeze(node);
+}
+
+/**
+ * Refuse a `$`-prefixed name, which the grammar reserves for groups and
+ * operators.
+ *
+ * @throws {@link QueryError} when the name starts with `$`
+ */
+function assertName(name: string): void {
+    if (name.startsWith('$')) {
+        throw new QueryError(`"${name}" is not a field or relation name.`);
+    }
+}
+
+/**
+ * Refuse a non-finite number, which JSON would encode as null.
+ *
+ * @param operand - a scalar or a list of scalars
+ * @throws {@link QueryError} when any number is NaN or infinite
+ */
+function assertFinite(field: string, operand: unknown): void {
+    if ([operand].flat().some(value => typeof value === 'number' && !Number.isFinite(value))) {
+        throw new QueryError(`The "${field}" filter needs finite numbers.`);
+    }
+}
+
+/**
+ * Check a page number or size is a positive integer.
+ *
+ * @throws {@link QueryError} when it is not a safe integer of at least 1
+ */
+function positiveInteger(label: 'page' | 'limit', n: number): number {
+    if (!Number.isSafeInteger(n) || n < 1) {
+        throw new QueryError(`The ${label} must be a positive integer.`);
+    }
+
+    return n;
+}
+
+/**
+ * Copy a field or aggregate selection, refusing blank names.
+ *
+ * @throws {@link QueryError} when a name is empty or whitespace only
+ */
+function selection(method: string, resource: string, names: readonly string[]): readonly string[] {
+    if (names.some(name => name.trim() === '')) {
+        throw new QueryError(`${method}("${resource}") names must not be blank.`);
+    }
+
+    return [...names];
 }
 
 /**
@@ -100,17 +175,73 @@ function isEmpty(document: FilterTree): boolean {
 }
 
 /**
+ * Determine whether two operands are the same condition: equal scalars, or
+ * lists of equal scalars in the same order.
+ */
+function isSameOperand(a: unknown, b: unknown): boolean {
+    if (!Array.isArray(a) || !Array.isArray(b)) {
+        return a === b;
+    }
+
+    return a.length === b.length && a.every((item, i) => item === b[i]);
+}
+
+/**
+ * Determine whether a field condition is an operator map rather than a relation
+ * document.
+ */
+function isOperatorMap(condition: FilterTree): boolean {
+    return Object.keys(condition).some(key => OPERATORS.has(key));
+}
+
+/**
+ * Merge two operator maps on one field, which is lossless as a map is already a
+ * conjunction, unless an operator collides with a different operand.
+ *
+ * @returns the merged map, or undefined when an operator collides
+ */
+function mergeOperators(current: FilterTree, incoming: FilterTree): FilterTree | undefined {
+    const collides = Object.entries(incoming).some(
+        ([operator, operand]) => current[operator] !== undefined && !isSameOperand(current[operator], operand),
+    );
+
+    return collides ? undefined : { ...current, ...incoming };
+}
+
+/**
+ * Merge a condition into the one a key already holds without widening or
+ * dropping either.
+ *
+ * A repeated condition is kept once, operator maps merge, and relation
+ * documents merge key by key.
+ *
+ * @returns the merged condition, or undefined when the incoming one must stand
+ * apart
+ */
+function mergeCondition(current: unknown, incoming: unknown): unknown {
+    if (isSameOperand(current, incoming)) {
+        return current;
+    }
+
+    if (!isRecord(current) || !isRecord(incoming) || isOperatorMap(current) !== isOperatorMap(incoming)) {
+        return undefined;
+    }
+
+    return isOperatorMap(current) ? mergeOperators(current, incoming) : mergeDocument(current, incoming);
+}
+
+/**
  * Read a `$has` or `$hasnt` value as relation entries, a bare relation carrying
  * an empty document.
  *
- * @param value - the list or map stored under the existence key
+ * @param value - the list or map stored under the existence key, if any
  */
 function existenceEntries(value: unknown): Array<[string, FilterTree]> {
     if (isRecord(value)) {
         return Object.entries(value) as Array<[string, FilterTree]>;
     }
 
-    return asList(value).map(relation => [relation as string, {}]);
+    return ((value ?? []) as readonly string[]).map(relation => [relation, {}]);
 }
 
 /**
@@ -120,14 +251,14 @@ function existenceEntries(value: unknown): Array<[string, FilterTree]> {
  * @param bare - the relations a bare `$hasnt` refuses
  * @returns true when the bare relations imply the document
  */
-function refusedOutright(document: unknown, bare: readonly string[]): boolean {
-    if (!isRecord(document) || Object.keys(document).length !== 1) {
-        return false;
-    }
-
+function refusedOutright(document: FilterTree, bare: readonly string[]): boolean {
     const entries = existenceEntries(document['$hasnt']);
 
-    return entries.length > 0 && entries.every(([relation]) => bare.includes(relation));
+    return (
+        Object.keys(document).length === 1 &&
+        entries.length > 0 &&
+        entries.every(([relation]) => bare.includes(relation))
+    );
 }
 
 /**
@@ -170,64 +301,68 @@ function mergeExistence(key: ExistenceKey, existing: unknown, patch: unknown): [
 }
 
 /**
- * Merge a filter document into another, both applying to the same rows.
+ * Merge a filter document into another, both applying to the same rows, without
+ * widening or dropping any condition either holds.
  *
  * Fields and relation documents merge key by key, existence values merge per
- * relation, and `$and` lists concatenate. Group documents never merge into each
- * other: a second `$or`, like a second conditioned `$hasnt` on a relation,
- * joins the `$and` list as its own document so both keep their meaning. A bare
- * `$hasnt` drops the `$and` documents it implies. Any other collision is
- * replaced.
+ * relation, and `$and` lists concatenate. A condition that cannot merge into
+ * the key it targets, such as a second `$or`, a second conditioned `$hasnt` on
+ * a relation or a different value for a field, joins the `$and` list as its own
+ * document. A bare `$hasnt` drops the `$and` documents it implies.
  */
 function mergeDocument(existing: FilterTree, patch: FilterTree): FilterTree {
-    const merged: Record<string, unknown> = { ...existing };
+    // A map keeps names such as `__proto__` and `constructor` plain keys.
+    const merged = new Map(Object.entries(existing));
     const apart: FilterTree[] = [];
 
     for (const [key, value] of Object.entries(patch)) {
-        const current = merged[key];
+        const current = merged.get(key);
 
-        if (key === '$or' && Array.isArray(current)) {
-            apart.push({ [key]: value });
-        } else if (key === '$and') {
-            merged[key] = [...asList(current), ...asList(value)];
-        } else if (key === '$has' || key === '$hasnt') {
+        if (key === '$has' || key === '$hasnt') {
             const [existence, separate] = mergeExistence(key, current, value);
 
-            merged[key] = existence;
+            merged.set(key, existence);
             apart.push(...separate);
+        } else if (current === undefined) {
+            merged.set(key, value);
+        } else if (key === '$and') {
+            merged.set(key, [...(current as readonly FilterTree[]), ...(value as readonly FilterTree[])]);
         } else {
-            merged[key] = isRecord(current) && isRecord(value) ? mergeDocument(current, value) : value;
+            const condition = mergeCondition(current, value);
+
+            if (condition === undefined) {
+                apart.push({ [key]: value });
+            } else {
+                merged.set(key, condition);
+            }
         }
     }
 
-    settleAnd(merged, patch, apart);
+    settleAnd(merged, apart);
 
-    return merged;
+    return Object.fromEntries(merged);
 }
 
 /**
- * Drop the `$and` documents a bare `$hasnt` in the patch implies, append the
- * documents that must stand apart, and remove the list once it is empty.
+ * Drop the `$and` documents the document's bare `$hasnt` relations imply,
+ * append the documents that must stand apart, and remove the list once it is
+ * empty.
  *
  * @param merged - the merged document, updated in place
  */
-function settleAnd(merged: Record<string, unknown>, patch: FilterTree, apart: readonly FilterTree[]): void {
-    const bare = existenceEntries(patch['$hasnt'])
+function settleAnd(merged: Map<string, unknown>, apart: readonly FilterTree[]): void {
+    const bare = existenceEntries(merged.get('$hasnt'))
         .filter(([, document]) => isEmpty(document))
         .map(([relation]) => relation);
-    const and = asList(merged['$and']);
-    const kept = and.filter(document => !refusedOutright(document, bare));
+    const and = [
+        ...((merged.get('$and') ?? []) as readonly FilterTree[]).filter(document => !refusedOutright(document, bare)),
+        ...apart,
+    ];
 
-    if (kept.length === and.length && apart.length === 0) {
-        return;
-    }
-
-    kept.push(...apart);
-
-    if (kept.length > 0) {
-        merged['$and'] = kept;
+    if (and.length > 0) {
+        merged.set('$and', and);
     } else {
-        delete merged['$and'];
+        merged.delete('$and');
     }
 }
 
@@ -235,7 +370,10 @@ function settleAnd(merged: Record<string, unknown>, patch: FilterTree, apart: re
  * Immutable fluent query builder for the laravel-api-toolkit 2.x API.
  *
  * Construct via {@link ApiQuery.create}; every method returns a new instance,
- * so a base query is safe to share between derived queries.
+ * so a base query is safe to share between derived queries. Filter calls AND
+ * together: none replaces or widens a condition an earlier call added. A
+ * {@link QueryError} is thrown for a field or relation name starting with `$`
+ * and for a non-finite number.
  *
  * The toolkit gates every filter operator by the column's declared capability
  * (`exact`, `enum`, `range`, `document`, `opaque`): `$neq` only on an enum, the
@@ -248,6 +386,7 @@ export class ApiQuery {
     readonly #state: QueryState;
 
     private constructor(state: QueryState) {
+        freezeTree(state.filters);
         this.#state = state;
     }
 
@@ -259,7 +398,7 @@ export class ApiQuery {
     }
 
     /**
-     * Add an equality filter on `field`, replacing any operator map it holds.
+     * Add an equality filter on `field`.
      *
      * Every scalar is a real condition: `''`, `0` and `false` filter for that
      * value rather than clearing the filter.
@@ -273,7 +412,7 @@ export class ApiQuery {
 
     where(field: string, operatorOrValue: ScalarOperator | FilterScalar, value?: FilterScalar): ApiQuery {
         if (value === undefined) {
-            return this.#withFilter(field, operatorOrValue as FilterScalar);
+            return this.#withCondition(field, operatorOrValue, operatorOrValue);
         }
 
         return this.#withOperator(field, operatorOrValue as ScalarOperator, value);
@@ -332,6 +471,8 @@ export class ApiQuery {
      * never merged: a second `$or` on the relation is ANDed beside the first.
      */
     whereRelation(relation: string, build: FilterDocumentBuilder): ApiQuery {
+        assertName(relation);
+
         return this.#withMergedDocument({ [relation]: ApiQuery.#document(build) });
     }
 
@@ -382,8 +523,8 @@ export class ApiQuery {
      * Add documents to the `$or` group.
      *
      * Each callback builds one document; the conditions inside a document AND
-     * together and the documents OR with each other. Repeated calls append to
-     * the same group.
+     * together and the documents OR with each other. A later call is ANDed
+     * beside the earlier group rather than widening it.
      *
      * ```ts
      * query.orWhere([q => q.where('role', 'admin').where('status', 'active'), q => q.where('role', 'owner')])
@@ -408,7 +549,7 @@ export class ApiQuery {
     search(term: string): ApiQuery {
         const trimmed = term.trim();
 
-        return new ApiQuery({ ...this.#state, searchTerm: trimmed === '' ? undefined : trimmed });
+        return this.#withRows({ searchTerm: trimmed === '' ? undefined : trimmed });
     }
 
     /**
@@ -421,13 +562,8 @@ export class ApiQuery {
      * @throws {@link QueryError} when random order meets cursor pagination
      */
     orderBy(column: string, direction: SortDirection = 'asc'): ApiQuery {
-        const { order, cursorToken, cursorPagination } = this.#state;
-
-        return ApiQuery.#guarded({
-            ...this.#state,
-            order: [...order.filter(e => e.column !== column), { column, direction }],
-            cursorToken: undefined,
-            cursorPagination: cursorPagination || cursorToken !== undefined,
+        return this.#withRows({
+            order: [...this.#state.order.filter(e => e.column !== column), { column, direction }],
         });
     }
 
@@ -442,22 +578,30 @@ export class ApiQuery {
 
     /**
      * Set the 1-based page number.
+     *
+     * @throws {@link QueryError} when `n` is not a positive integer
      */
     page(n: number): ApiQuery {
-        return new ApiQuery({ ...this.#state, pageNumber: n });
+        return new ApiQuery({ ...this.#state, pageNumber: positiveInteger('page', n) });
     }
 
     /**
-     * Set the page size (>= 1). The toolkit refuses a size over its ceiling
-     * (100 by default) rather than clamping it.
+     * Set the page size. The toolkit refuses a size over its ceiling (100 by
+     * default) rather than clamping it.
+     *
+     * @throws {@link QueryError} when `n` is not a positive integer
      */
     limit(n: number): ApiQuery {
-        return new ApiQuery({ ...this.#state, limitNumber: n });
+        return new ApiQuery({ ...this.#state, limitNumber: positiveInteger('limit', n) });
     }
 
     /**
      * Set the cursor token, which alone selects cursor pagination on the
      * server.
+     *
+     * A token seeks within one ordered row set, so any later filter, search,
+     * soft-delete or order call drops it, even one repeating the current value,
+     * while the query stays cursor-paginated. `limit` and `page` keep it.
      *
      * @param token - the opaque cursor string returned by the server
      * @throws {@link QueryError} when the order is random
@@ -477,9 +621,14 @@ export class ApiQuery {
 
     /**
      * Request a per-resource field list (`fields[user]=name,email`).
+     *
+     * An empty list is an explicit empty selection: the toolkit then returns
+     * only the resource's fixed fields.
+     *
+     * @throws {@link QueryError} when a name is blank
      */
     fieldsFor(resource: string, names: readonly string[]): ApiQuery {
-        const fieldsMap = { ...this.#state.fieldsMap, [resource]: names };
+        const fieldsMap = { ...this.#state.fieldsMap, [resource]: selection('fieldsFor', resource, names) };
 
         return new ApiQuery({ ...this.#state, fieldsMap });
     }
@@ -492,12 +641,14 @@ export class ApiQuery {
      * `{relation}_exists`, `{relation}_sum_{column}`,
      * `{relation}_avg_{column}`, `{relation}_min_{column}`,
      * `{relation}_max_{column}`, or a declared alias. Requesting any key
-     * replaces the type's default aggregates. The values render under the
-     * record's `aggregates` field only when `aggregates` is in `fields[type]`
-     * or the resource's default fields.
+     * replaces the type's default aggregates, and an empty list suppresses
+     * them. The values render under the record's `aggregates` field only when
+     * `aggregates` is in `fields[type]` or the resource's default fields.
+     *
+     * @throws {@link QueryError} when a key is blank
      */
     aggregatesFor(resource: string, keys: readonly string[]): ApiQuery {
-        const aggregatesMap = { ...this.#state.aggregatesMap, [resource]: keys };
+        const aggregatesMap = { ...this.#state.aggregatesMap, [resource]: selection('aggregatesFor', resource, keys) };
 
         return new ApiQuery({ ...this.#state, aggregatesMap });
     }
@@ -506,18 +657,19 @@ export class ApiQuery {
      * Include soft-deleted records alongside live ones (`trashed=with`).
      */
     withTrashed(): ApiQuery {
-        return new ApiQuery({ ...this.#state, trashed: 'with' });
+        return this.#withRows({ trashed: 'with' });
     }
 
     /**
      * Read soft-deleted records only (`trashed=only`).
      */
     onlyTrashed(): ApiQuery {
-        return new ApiQuery({ ...this.#state, trashed: 'only' });
+        return this.#withRows({ trashed: 'only' });
     }
 
     /**
-     * Return the assembled filter tree, empty when no filters are set.
+     * Return the assembled filter tree, deep-frozen, empty when no filters are
+     * set.
      */
     filterTree(): Readonly<FilterTree> {
         return this.#state.filters;
@@ -652,24 +804,54 @@ export class ApiQuery {
     }
 
     /**
-     * Return a query with `value` stored under `field` in the filter tree.
+     * Return a query with `patch` applied, dropping any cursor token, which
+     * only seeks within the row set and order it was issued for, while keeping
+     * the query cursor-paginated.
+     *
+     * @throws {@link QueryError} when random order meets cursor pagination
      */
-    #withFilter(field: string, value: unknown): ApiQuery {
-        return new ApiQuery({ ...this.#state, filters: { ...this.#state.filters, [field]: value } });
+    #withRows(patch: Partial<QueryState>): ApiQuery {
+        const { cursorToken, cursorPagination } = this.#state;
+
+        return ApiQuery.#guarded({
+            ...this.#state,
+            ...patch,
+            cursorToken: undefined,
+            cursorPagination: cursorPagination || cursorToken !== undefined,
+        });
     }
 
     /**
-     * Return a query with one operator merged into `field`'s operator map.
+     * Return a query with one operator merged into `field`'s conditions,
+     * copying a list operand so the caller keeps its array.
      */
-    #withOperator(field: string, operator: keyof FilterOperators, value: unknown): ApiQuery {
-        return this.#withMergedDocument({ [field]: { [operator]: value } });
+    #withOperator(
+        field: string,
+        operator: keyof FilterOperators,
+        operand: FilterScalar | readonly FilterScalar[] | true,
+    ): ApiQuery {
+        const value = Array.isArray(operand) ? [...operand] : operand;
+
+        return this.#withCondition(field, { [operator]: value }, value);
+    }
+
+    /**
+     * Return a query with `condition` merged into `field`.
+     *
+     * @param operand - the scalar or list the condition compares against
+     */
+    #withCondition(field: string, condition: unknown, operand: unknown): ApiQuery {
+        assertName(field);
+        assertFinite(field, operand);
+
+        return this.#withMergedDocument({ [field]: condition });
     }
 
     /**
      * Return a query with `patch` merged into the root document.
      */
     #withMergedDocument(patch: FilterTree): ApiQuery {
-        return new ApiQuery({ ...this.#state, filters: mergeDocument(this.#state.filters, patch) });
+        return this.#withRows({ filters: mergeDocument(this.#state.filters, patch) });
     }
 
     /**
@@ -693,13 +875,15 @@ export class ApiQuery {
             return document;
         });
 
-        return this.#withFilter(key, [...asList(this.#state.filters[key]), ...documents]);
+        return this.#withMergedDocument({ [key]: documents });
     }
 
     /**
      * Apply a `$has` or `$hasnt` condition.
      */
     #applyExistence(key: ExistenceKey, relation: string, build?: FilterDocumentBuilder): ApiQuery {
+        assertName(relation);
+
         return this.#withMergedDocument({ [key]: build ? { [relation]: ApiQuery.#document(build) } : [relation] });
     }
 }
