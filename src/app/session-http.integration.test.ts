@@ -349,16 +349,15 @@ function createHarness(): Harness {
 
     const { fetchFn, hold, failNext } = createAuthFetch(server, () => now);
 
-    const attachBearer = createBearerTokenInterceptor({ getAccessToken: () => state.accessToken });
-
     /**
      * Attach the session's bearer token, recording the session it was attached
-     * for; an explicit authorization is left in place and not recorded.
+     * for from the same snapshot; an explicit authorization is left in place
+     * and not recorded.
      */
     const interceptor: RequestInterceptor = async request => {
-        const sent = await attachBearer(request);
         const token = state.accessToken;
         const identity = sessionIdentity(state);
+        const sent = await createBearerTokenInterceptor({ getAccessToken: () => token })(request);
 
         if (sent !== request && token !== null && identity !== null) {
             issuedBy.set(token, identity);
