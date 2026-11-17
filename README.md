@@ -156,7 +156,10 @@ strings and hashes never reach the tracker or the trail.
 
 ### Adapter contracts
 
-A `FeatureFlags` or `RealtimeConnection` adapter proves its behaviour by running the shared suite from its own tests:
+Each port a platform adapts ships a Vitest contract suite to run against its adapters, under the area's `test-support`:
+`describeFeatureFlagsContract`, `describeRealtimeContract`, `describeSessionPersistenceContract`,
+`describeSessionLockContract`, `describeKeyValueStorageContract` and `describeConnectivityMonitorContract`. An adapter
+proves its behaviour by running the suite from its own tests:
 
 ```ts
 import { describeFeatureFlagsContract } from '@sinemacula/foundation/feature-flags/test-support/feature-flags-contract';
@@ -169,6 +172,9 @@ describeFeatureFlagsContract({
     },
 });
 ```
+
+`session/test-support/fake-auth-server` serves the session endpoints from memory, with rotation, its grace window,
+replay revocation and cookie sign-out, for integration tests of a session wiring.
 
 ### React Native
 

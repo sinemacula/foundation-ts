@@ -91,6 +91,10 @@
             "types": "./dist/connectivity/connectivity-monitor.d.ts",
             "default": "./dist/connectivity/connectivity-monitor.js"
         },
+        "./connectivity/test-support/connectivity-monitor-contract": {
+            "types": "./dist/connectivity/test-support/connectivity-monitor-contract.d.ts",
+            "default": "./dist/connectivity/test-support/connectivity-monitor-contract.js"
+        },
         "./feature-flags/feature-flags": {
             "types": "./dist/feature-flags/feature-flags.d.ts",
             "default": "./dist/feature-flags/feature-flags.js"
@@ -279,6 +283,18 @@
             "types": "./dist/session/session-user.d.ts",
             "default": "./dist/session/session-user.js"
         },
+        "./session/test-support/fake-auth-server": {
+            "types": "./dist/session/test-support/fake-auth-server.d.ts",
+            "default": "./dist/session/test-support/fake-auth-server.js"
+        },
+        "./session/test-support/session-lock-contract": {
+            "types": "./dist/session/test-support/session-lock-contract.d.ts",
+            "default": "./dist/session/test-support/session-lock-contract.js"
+        },
+        "./session/test-support/session-persistence-contract": {
+            "types": "./dist/session/test-support/session-persistence-contract.d.ts",
+            "default": "./dist/session/test-support/session-persistence-contract.js"
+        },
         "./storage/key-value-storage": {
             "types": "./dist/storage/key-value-storage.d.ts",
             "default": "./dist/storage/key-value-storage.js"
@@ -290,6 +306,10 @@
         "./storage/namespaced-storage": {
             "types": "./dist/storage/namespaced-storage.d.ts",
             "default": "./dist/storage/namespaced-storage.js"
+        },
+        "./storage/test-support/key-value-storage-contract": {
+            "types": "./dist/storage/test-support/key-value-storage-contract.d.ts",
+            "default": "./dist/storage/test-support/key-value-storage-contract.js"
         },
         "./support/is-record": {
             "types": "./dist/support/is-record.d.ts",
@@ -341,6 +361,7 @@
         "@stryker-mutator/vitest-runner": "^9.6.1",
         "@types/node": "^25.9.3",
         "@vitest/coverage-v8": "^4.1.8",
+        "fast-check": "^4.10.2",
         "knip": "^6.16.1",
         "mkdist": "^2.4.1",
         "publint": "^0.3.21",
