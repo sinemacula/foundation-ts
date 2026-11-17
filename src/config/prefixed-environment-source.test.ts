@@ -7,6 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { ChainEnvironmentSource } from './chain-environment-source';
 import { PrefixedEnvironmentSource } from './prefixed-environment-source';
 
 /**
@@ -14,6 +15,13 @@ import { PrefixedEnvironmentSource } from './prefixed-environment-source';
  */
 function wire<T>(entries: ReadonlyArray<readonly [string, T]>): Record<string, T> {
     return Object.fromEntries(entries);
+}
+
+/**
+ * Build an empty record whose prototype carries the given entries.
+ */
+function inheriting(prototype: Record<string, unknown>): Record<string, unknown> {
+    return Object.create(prototype) as Record<string, unknown>;
 }
 
 describe('PrefixedEnvironmentSource', () => {
@@ -43,6 +51,21 @@ describe('PrefixedEnvironmentSource', () => {
         const source = new PrefixedEnvironmentSource(wire([['VITE_KEY', value]]), 'VITE_');
 
         expect(source.get('KEY')).toBeUndefined();
+    });
+
+    it('returns undefined for a string the record only inherits', () => {
+        const source = new PrefixedEnvironmentSource(inheriting(wire([['VITE_KEY', 'inherited']])), 'VITE_');
+
+        expect(source.get('KEY')).toBeUndefined();
+    });
+
+    it('lets a chain fall through an inherited key to a later source', () => {
+        const chain = new ChainEnvironmentSource([
+            new PrefixedEnvironmentSource(inheriting(wire([['VITE_KEY', 'inherited']])), 'VITE_'),
+            new PrefixedEnvironmentSource(wire([['VITE_KEY', 'own']]), 'VITE_'),
+        ]);
+
+        expect(chain.get('KEY')).toBe('own');
     });
 
     it('uses the exact prefix provided', () => {

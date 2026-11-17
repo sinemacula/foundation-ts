@@ -44,6 +44,42 @@ function hangingFetch(): typeof fetch {
 }
 
 /**
+ * Read the abort signal a request was made under.
+ */
+function signalOf(init: RequestInit | undefined): AbortSignal {
+    if (!(init?.signal instanceof AbortSignal)) {
+        throw new Error('expected the request to carry an abort signal');
+    }
+
+    return init.signal;
+}
+
+/**
+ * Build a promise that rejects with an AbortError once `signal` aborts, as a
+ * real fetch or body read does.
+ */
+function rejectOnAbort<T>(signal: AbortSignal): Promise<T> {
+    return new Promise<T>((_, reject) => {
+        signal.addEventListener('abort', () => {
+            reject(new DOMException('This operation was aborted', 'AbortError'));
+        });
+    });
+}
+
+/** A fetch whose request rejects when its signal aborts. */
+const abortingRequest: typeof fetch = (_, init) => rejectOnAbort(signalOf(init));
+
+/** A fetch whose response body read rejects when the signal aborts. */
+const abortingBodyRead: typeof fetch = (_, init) => {
+    const signal = signalOf(init);
+    const response = new Response('{}', { status: 200 });
+
+    vi.spyOn(response, 'json').mockImplementation(() => rejectOnAbort(signal));
+
+    return Promise.resolve(response);
+};
+
+/**
  * Resolve with the rejection reason of a load, failing if it resolves.
  */
 function rejectionOf(load: Promise<unknown>): Promise<unknown> {
@@ -187,6 +223,51 @@ describe('fetchRuntimeEnvironment', () => {
         await vi.advanceTimersByTimeAsync(100);
 
         await expect(load).resolves.toBeInstanceOf(RuntimeEnvironmentError);
+    });
+
+    it.each([
+        ['request', abortingRequest],
+        ['body read', abortingBodyRead],
+    ])('reports the deadline when the %s rejects on abort', async (_, fetchFn) => {
+        const unhandled: unknown[] = [];
+
+        /** Record a rejection nothing handled. */
+        const recordUnhandled = (reason: unknown): void => {
+            unhandled.push(reason);
+        };
+
+        process.on('unhandledRejection', recordUnhandled);
+
+        try {
+            vi.useFakeTimers();
+
+            let settled = false;
+            const load = rejectionOf(fetchRuntimeEnvironment({ url: URL, timeout: 100 }, fetchFn)).finally(() => {
+                settled = true;
+            });
+
+            await vi.advanceTimersByTimeAsync(99);
+
+            expect(settled).toBe(false);
+
+            await vi.advanceTimersByTimeAsync(1);
+
+            const error = await load;
+
+            expect(error).toBeInstanceOf(RuntimeEnvironmentError);
+            expect(error).toStrictEqual(
+                new RuntimeEnvironmentError('The runtime environment document did not load within 100 ms.'),
+            );
+
+            vi.useRealTimers();
+            await new Promise(resolve => {
+                setImmediate(resolve);
+            });
+
+            expect(unhandled).toStrictEqual([]);
+        } finally {
+            process.off('unhandledRejection', recordUnhandled);
+        }
     });
 
     it('clears the deadline once the document loads', async () => {
