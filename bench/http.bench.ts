@@ -5,7 +5,9 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { bench, describe } from 'vitest';
+import { describe } from 'vitest';
+
+import { measure } from './support/measure';
 
 import { FetchHttpClient } from '../src/http/fetch-http-client';
 import type { HttpRequest } from '../src/http/http-client';
@@ -37,7 +39,7 @@ describe('FetchHttpClient', () => {
     const client = clientServing('{"data":{"id":1}}');
     const controller = new AbortController();
 
-    bench('sends a GET through two interceptors, a timeout and a signal', async () => {
+    measure('sends a GET through two interceptors, a timeout and a signal', async () => {
         await client.get('orders/1', { signal: controller.signal });
     });
 });
@@ -45,7 +47,7 @@ describe('FetchHttpClient', () => {
 describe('ResourceClient', () => {
     const resources = new ResourceClient({ client: clientServing(PAGE), path: 'orders', map: (raw: RawRecord) => raw });
 
-    bench('lists a 100-record page', async () => {
+    measure('lists a 100-record page', async () => {
         await resources.list();
     });
 });
