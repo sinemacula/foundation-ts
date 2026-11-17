@@ -70,9 +70,13 @@ export type RequestInterceptor = (request: HttpRequest) => HttpRequest | Promise
  * Invoked when a request fails with 401, at most once per call. Return true to
  * retry the request once (e.g. after a successful token refresh). It receives
  * the request that received the 401, so a handler can retry without refreshing
- * when that request's credentials are already out of date. Requests the handler
- * makes itself must set {@link HttpRequestOptions.retryOnUnauthorized} to
- * false, or their 401 waits on the handler forever.
+ * when that request's credentials are already out of date. That is safe only
+ * when a rotation of the session still held replaced them: the retry re-runs
+ * the interceptors, so it goes out under whatever session is then current.
+ * Refuse a request from a replaced session, and abort a replaced session's
+ * requests through their signals. Requests the handler makes itself must set
+ * {@link HttpRequestOptions.retryOnUnauthorized} to false, or their 401 waits
+ * on the handler forever.
  */
 export type UnauthorizedHandler = (request: HttpRequest) => Promise<boolean>;
 

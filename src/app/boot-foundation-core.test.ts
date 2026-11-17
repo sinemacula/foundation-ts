@@ -18,6 +18,7 @@ import type { ModuleHttpContributions } from '../http/module-http-contributions'
 import { NullLogger } from '../logging/null-logger';
 import type { Confirmer } from '../notifications/confirmer';
 import type { Toaster } from '../notifications/toaster';
+import type { ErrorReporter } from '../reporting/error-reporter';
 import { NullErrorReporter } from '../reporting/null-error-reporter';
 import { MemoryStorage } from '../storage/memory-storage';
 import { SupportError } from '../support/support-error';
@@ -181,6 +182,9 @@ interface CoreTyping<T extends FoundationConfig> {
     /** The logger factory's settings parameter. */
     readonly logger: SettingsOf<ObservabilityOptions<T>['logger']>;
 
+    /** The configuration the HTTP client factory receives. */
+    readonly httpClient: Parameters<NonNullable<NonNullable<FoundationCoreOptions<T>['http']>['client']>>[0]['config'];
+
     /** What booting with the configuration resolves to. */
     readonly boot: ReturnType<typeof bootFoundationCore<T>>;
 }
@@ -207,6 +211,9 @@ interface ExpectedCoreTyping<T extends FoundationConfig> {
 
     /** Deeply read-only settings for the logger factory. */
     readonly logger: DeepReadonly<T>;
+
+    /** Deeply read-only settings for the HTTP client factory. */
+    readonly httpClient: DeepReadonly<T>;
 
     /** The core typed by the configuration. */
     readonly boot: Promise<FoundationCore<T>>;
@@ -599,6 +606,73 @@ describe('bootFoundationCore', () => {
         expect(api()).toBe(core.http);
     });
 
+    describe('the default feature flags', () => {
+        /**
+         * Boot with the default flags over a reporter whose capture is given.
+         */
+        async function bootFlags(captureError: ErrorReporter['captureError']): Promise<StaticFeatureFlags> {
+            const reporter: ErrorReporter = { captureError, captureMessage: vi.fn(), setUser: vi.fn() };
+            const core = await bootFoundationCore(
+                {
+                    createEnvironment: () => environmentOf(),
+                    define: () => createConfig(),
+                    storage: new MemoryStorage(),
+                    toasts: createToasterStub(),
+                    confirm: createConfirmerStub(),
+                    observability: { reporter: () => reporter },
+                    collectHttpContributions: () => createContributions(),
+                },
+                { fetchFn: createFetchStub() },
+            );
+
+            return core.flags as StaticFeatureFlags;
+        }
+
+        it('reports a failing change handler to the installed reporter', async () => {
+            const failure = new Error('handler failed');
+            const captureError = vi.fn();
+            const later = vi.fn();
+            const flags = await bootFlags(captureError);
+
+            flags.onChange(() => {
+                throw failure;
+            });
+            flags.onChange(later);
+            flags.replace({});
+
+            expect(captureError).toHaveBeenCalledExactlyOnceWith(failure, { source: 'feature-flags' });
+            expect(later).toHaveBeenCalledOnce();
+        });
+
+        it.each([
+            [
+                'a throwing reporter',
+                (): void => {
+                    throw new Error('reporter failed');
+                },
+                false,
+            ],
+            ['no installed reporter', vi.fn(), true],
+        ])('contains %s and runs the remaining handlers', async (_case, captureError, reset) => {
+            const later = vi.fn();
+            const flags = await bootFlags(captureError);
+
+            if (reset) {
+                resetFoundationServices();
+            }
+
+            flags.onChange(() => {
+                throw new Error('handler failed');
+            });
+            flags.onChange(later);
+
+            expect(() => {
+                flags.replace({});
+            }).not.toThrow();
+            expect(later).toHaveBeenCalledOnce();
+        });
+    });
+
     it('passes the fetched runtime document into createEnvironment', async () => {
         const runtimeDocument = Object.fromEntries([['API_URL', 'https://runtime.example.com']]);
         const fetchFn = vi.fn().mockResolvedValue(new Response(JSON.stringify(runtimeDocument), { status: 200 }));
@@ -659,7 +733,10 @@ describe('bootFoundationCore', () => {
 
         await expect(boot).rejects.toBeInstanceOf(RuntimeEnvironmentError);
         expect(createEnvironment).not.toHaveBeenCalled();
-        expect(() => appConfig()).toThrow();
+        expect(errorOf(() => appConfig())).toStrictEqual(
+            new SupportError('configuration accessed before initialisation'),
+        );
+        expect(() => appConfig()).toThrow(SupportError);
     });
 
     it('holds the runtime document to the configured timeout', async () => {
@@ -811,6 +888,33 @@ describe('bootFoundationCore', () => {
             expect(received[0]).toBe(core.settings);
             expect(core.settings.support.emails).toStrictEqual(['support@example.com']);
             expect(Object.isFrozen(core.settings.support.emails)).toBe(true);
+        });
+
+        it('hands the HTTP client factory the frozen settings, nested arrays read-only', async () => {
+            const received: DeepReadonly<InterfaceAppConfig>[] = [];
+
+            const core = await bootFoundationCore<InterfaceAppConfig>(
+                {
+                    ...interfaceBootOptions(),
+                    define: () => createAppConfig(),
+                    http: {
+                        client: tools => {
+                            received.push(tools.config);
+
+                            expectTypeOf(() => {
+                                // @ts-expect-error the nested configuration is read-only
+                                tools.config.support.emails.push('other@example.com');
+                            }).toBeFunction();
+
+                            return createHttpClientStub();
+                        },
+                    },
+                },
+                { fetchFn: createFetchStub() },
+            );
+
+            expect(received).toStrictEqual([core.settings]);
+            expect(received[0]).toBe(core.settings);
         });
     });
 

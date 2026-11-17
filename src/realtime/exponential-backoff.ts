@@ -5,8 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-/** The largest delay timers honour; a longer one fires almost at once. */
-const MAX_TIMER_DELAY = 2 ** 31 - 1;
+import { clampTimerDelay } from '../support/timer';
 
 /**
  * How a delay is randomised below its cap.
@@ -85,7 +84,7 @@ export class ExponentialBackoff {
 
         this.#initialDelay = initialDelay;
         this.#multiplier = multiplier;
-        this.#cap = Math.min(maxDelay, MAX_TIMER_DELAY);
+        this.#cap = clampTimerDelay(maxDelay);
         this.#jitter = options?.jitter ?? 'none';
         this.#random = options?.random;
     }

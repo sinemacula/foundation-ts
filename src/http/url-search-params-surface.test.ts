@@ -215,6 +215,32 @@ describe('ApiQuery - serialisation on a minimal URLSearchParams', () => {
     });
 });
 
+describe('ApiQuery - lone surrogates', () => {
+    it.each(IMPLEMENTATIONS)(
+        'replaces each lone surrogate with U+FFFD and keeps valid pairs with %s',
+        (_case, minimal) => {
+            useSearchParams(minimal);
+
+            const query = ApiQuery.create()
+                .where('name', 'a\uD800')
+                .search('b\uDC00')
+                .orderBy('c\uD800')
+                .cursor('h\uD800')
+                .fieldsFor('d\uD800', ['e\uDC00', '😀'])
+                .aggregatesFor('f\uD800', ['g\uDC00']);
+
+            expect(query.toQueryString().split('&')).toStrictEqual([
+                'filters=%7B%22name%22%3A%22a%5Cud800%22%7D',
+                'search=b%EF%BF%BD',
+                'order=c%EF%BF%BD',
+                'cursor=h%EF%BF%BD',
+                'fields%5Bd%EF%BF%BD%5D=e%EF%BF%BD%2C%F0%9F%98%80',
+                'aggregates%5Bf%EF%BF%BD%5D=g%EF%BF%BD',
+            ]);
+        },
+    );
+});
+
 describe('FetchHttpClient - abort classification without abort reasons', () => {
     /**
      * A fetch that rejects with an AbortError once its signal aborts.
