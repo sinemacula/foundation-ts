@@ -1,12 +1,6 @@
 /**
  * Generic typed HTTP resource client over the laravel-api-toolkit envelope.
  *
- * Module gateways instantiate one `ResourceClient` per resource, passing a
- * {@link ResourceMapper} that validates and maps the wire shape onto a domain
- * type. This kills per-module envelope/mapping re-implementation: list, show,
- * create, update, and destroy all share the same envelope-unwrapping and
- * query-merging logic.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -44,8 +38,6 @@ export class ResourceClient<Value> {
 
     /**
      * Construct a client bound to one API resource collection.
-     *
-     * @param options - the HTTP client, resource path, and response mapper
      */
     constructor(options: ResourceClientOptions<Value>) {
         this.#client = options.client;
@@ -56,11 +48,8 @@ export class ResourceClient<Value> {
     /**
      * Fetch a page of the resource collection.
      *
-     * @param query - an optional {@link ApiQuery} merged into the request's
-     * query parameters
-     * @param options - optional request options; `options.query` entries win
-     * over `query` on collision
-     * @returns the mapped items and pagination metadata
+     * @param query - merged into the request's query parameters
+     * @param options - `options.query` entries win over `query` on collision
      * @throws {@link QueryError} when the response does not match the expected
      * envelope shape
      */
@@ -73,12 +62,8 @@ export class ResourceClient<Value> {
     /**
      * Fetch a single resource by id.
      *
-     * @param id - the resource identifier
-     * @param query - an optional {@link ApiQuery} merged into the request's
-     * query parameters
-     * @param options - optional request options; `options.query` entries win
-     * over `query` on collision
-     * @returns the mapped resource
+     * @param query - merged into the request's query parameters
+     * @param options - `options.query` entries win over `query` on collision
      * @throws {@link QueryError} when the response does not match the expected
      * envelope shape
      */
@@ -91,12 +76,9 @@ export class ResourceClient<Value> {
     /**
      * Create a new resource.
      *
-     * @param body - the request body
-     * @param query - an optional {@link ApiQuery} shaping the returned record,
-     * merged into the request's query parameters
-     * @param options - optional request options; `options.query` entries win
-     * over `query` on collision
-     * @returns the mapped created resource
+     * @param query - shapes the returned record, merged into the request's
+     * query parameters
+     * @param options - `options.query` entries win over `query` on collision
      * @throws {@link QueryError} when the response body is missing or does not
      * match the expected envelope shape
      */
@@ -113,13 +95,9 @@ export class ResourceClient<Value> {
     /**
      * Update an existing resource.
      *
-     * @param id - the resource identifier
-     * @param body - the request body
-     * @param query - an optional {@link ApiQuery} shaping the returned record,
-     * merged into the request's query parameters
-     * @param options - optional request options; `options.query` entries win
-     * over `query` on collision
-     * @returns the mapped updated resource
+     * @param query - shapes the returned record, merged into the request's
+     * query parameters
+     * @param options - `options.query` entries win over `query` on collision
      * @throws {@link QueryError} when the response body is missing or does not
      * match the expected envelope shape
      */
@@ -141,10 +119,6 @@ export class ResourceClient<Value> {
     /**
      * Apply an update whose endpoint answers with no content, such as a 204
      * action; any response body is ignored.
-     *
-     * @param id - the resource identifier
-     * @param body - the request body
-     * @param options - optional request options
      */
     async updateWithoutContent(
         id: string,
@@ -156,9 +130,6 @@ export class ResourceClient<Value> {
 
     /**
      * Delete a resource by id.
-     *
-     * @param id - the resource identifier
-     * @param options - optional request options
      */
     async destroy(id: string, options?: HttpRequestOptions): Promise<void> {
         await this.#client.delete<void>(joinPath(this.#path, id), options);
@@ -170,10 +141,6 @@ export class ResourceClient<Value> {
  *
  * The trailing trim walks the string rather than using a `+`-then-anchor regex,
  * which backtracks polynomially on slash runs.
- *
- * @param path - the resource's base path
- * @param id - the resource identifier
- * @returns the joined path
  */
 function joinPath(path: string, id: string): string {
     let end = path.length;
@@ -189,8 +156,6 @@ function joinPath(path: string, id: string): string {
  * Merge an {@link ApiQuery}'s parameters into request options, letting explicit
  * `options.query` entries win on key collision.
  *
- * @param query - an optional query builder
- * @param options - optional request options carrying an explicit query record
  * @returns request options with the merged query record, or the original
  * options when there is nothing to merge
  */
@@ -211,8 +176,6 @@ function buildRequestOptions(
  * Merge query parameters from an `ApiQuery` with an explicit parameter record,
  * letting the explicit record win on key collision.
  *
- * @param query - an optional query builder
- * @param explicit - an optional explicit query-parameter record
  * @returns the merged record, or undefined when neither source is present
  */
 function mergeQueryParameters(

@@ -22,7 +22,7 @@ interface Widget {
     readonly name: string;
 }
 
-/** The shape of a single call recorded by {@link FakeHttpClient}. */
+/** A call recorded by {@link FakeHttpClient}. */
 interface RecordedCall {
     /** The HTTP method called. */
     readonly method: string;
@@ -59,77 +59,48 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Queue a response payload for the next call.
-     *
-     * @param value - the payload the next call resolves with
      */
     queueResponse(value: unknown): void {
         this.#queue.push(value);
     }
 
     /**
-     * Record a GET call.
-     *
-     * @param path - the request path
-     * @param options - the request options
-     * @returns the next queued payload
+     * Record a GET call and resolve with the next queued payload.
      */
     get<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('GET', path, undefined, options);
     }
 
     /**
-     * Record a POST call.
-     *
-     * @param path - the request path
-     * @param body - the request body
-     * @param options - the request options
-     * @returns the next queued payload
+     * Record a POST call and resolve with the next queued payload.
      */
     post<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('POST', path, body, options);
     }
 
     /**
-     * Record a PUT call.
-     *
-     * @param path - the request path
-     * @param body - the request body
-     * @param options - the request options
-     * @returns the next queued payload
+     * Record a PUT call and resolve with the next queued payload.
      */
     put<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('PUT', path, body, options);
     }
 
     /**
-     * Record a PATCH call.
-     *
-     * @param path - the request path
-     * @param body - the request body
-     * @param options - the request options
-     * @returns the next queued payload
+     * Record a PATCH call and resolve with the next queued payload.
      */
     patch<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('PATCH', path, body, options);
     }
 
     /**
-     * Record a DELETE call.
-     *
-     * @param path - the request path
-     * @param options - the request options
-     * @returns the next queued payload
+     * Record a DELETE call and resolve with the next queued payload.
      */
     delete<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('DELETE', path, undefined, options);
     }
 
     /**
-     * Record a download call.
-     *
-     * @param path - the request path
-     * @param options - the request options
-     * @returns the next queued payload
+     * Record a download call and resolve with the next queued payload.
      */
     download(path: string, options?: HttpRequestOptions): Promise<Blob> {
         return this.#consume('DOWNLOAD', path, undefined, options);
@@ -137,12 +108,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Record a call and resolve with the next queued payload.
-     *
-     * @param method - the HTTP method called
-     * @param path - the request path
-     * @param body - the request body, if any
-     * @param options - the request options
-     * @returns the next queued payload
      */
     #consume<T>(method: string, path: string, body: unknown, options: HttpRequestOptions | undefined): Promise<T> {
         this.calls.push({ method, path, body, options });
@@ -152,12 +117,8 @@ class FakeHttpClient implements HttpClient {
 }
 
 /**
- * Build a `Record<string, unknown>` from an array of `[key, value]` pairs.
- *
- * Keeps snake_case wire-field names out of object-literal key positions.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain `Record<string, unknown>`
+ * Build a record from `[key, value]` pairs, keeping snake_case wire-field names
+ * out of object-literal key positions.
  */
 function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string, unknown> {
     return Object.fromEntries(entries);
@@ -165,10 +126,6 @@ function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string
 
 /**
  * Build a raw widget wire record.
- *
- * @param id - the widget id
- * @param name - the widget name
- * @returns the wire record
  */
 function widgetRecord(id: string, name: string): Record<string, unknown> {
     return wire([
@@ -179,10 +136,6 @@ function widgetRecord(id: string, name: string): Record<string, unknown> {
 
 /**
  * Build a valid single-widget envelope.
- *
- * @param id - the widget id
- * @param name - the widget name
- * @returns the envelope payload
  */
 function widgetEnvelope(id: string, name: string): Record<string, unknown> {
     return { data: widgetRecord(id, name) };
@@ -191,8 +144,6 @@ function widgetEnvelope(id: string, name: string): Record<string, unknown> {
 /**
  * Validate and map a raw record onto a `Widget`.
  *
- * @param raw - the raw wire record
- * @returns the mapped widget
  * @throws Error when required fields are missing or of the wrong type
  */
 function mapWidget(raw: RawRecord): Widget {
@@ -205,9 +156,6 @@ function mapWidget(raw: RawRecord): Widget {
 
 /**
  * Build a `ResourceClient<Widget>` wired against a fresh `FakeHttpClient`.
- *
- * @param path - the resource collection path
- * @returns the fake client and the resource bound to it
  */
 function createResource(path = 'widgets'): ResourceFixture {
     const client = new FakeHttpClient();
@@ -257,7 +205,7 @@ describe('ResourceClient', () => {
             await expect(resource.list()).rejects.toThrow('The widget response did not match the expected shape.');
         });
 
-        it('sends no query parameters when neither an ApiQuery nor explicit options are given', async () => {
+        it('sends no options without a query or options', async () => {
             const { client, resource } = createResource();
             client.queueResponse({ data: [] });
 
@@ -275,7 +223,7 @@ describe('ResourceClient', () => {
             expect(client.calls.at(0)?.options?.query).toEqual({ page: 2, limit: 10 });
         });
 
-        it('merges ApiQuery parameters with explicit options.query, explicit wins on collision', async () => {
+        it('merges the ApiQuery under explicit options.query entries', async () => {
             const { client, resource } = createResource();
             client.queueResponse({ data: [] });
 
@@ -318,7 +266,7 @@ describe('ResourceClient', () => {
             expect(call?.path).toBe('widgets/w1');
         });
 
-        it('joins a trailing-slash path and a leading-slash id without a double slash', async () => {
+        it('joins a trailing-slash path and a leading-slash id with one slash', async () => {
             const { client, resource } = createResource('widgets/');
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
 
@@ -327,7 +275,7 @@ describe('ResourceClient', () => {
             expect(client.calls.at(0)?.path).toBe('widgets/w1');
         });
 
-        it('trims runs of slashes at the join without touching interior path slashes', async () => {
+        it('trims slash runs at the join only', async () => {
             const { client, resource } = createResource('v1/widgets//');
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
 
@@ -396,7 +344,7 @@ describe('ResourceClient', () => {
             expect(client.calls.at(0)?.options).toEqual({ signal: controller.signal });
         });
 
-        it('shapes the returned record with an ApiQuery, explicit options.query winning on collision', async () => {
+        it('shapes the returned record, letting options.query win on collision', async () => {
             const { client, resource } = createResource();
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
 
@@ -499,7 +447,7 @@ describe('ResourceClient', () => {
             ]);
         });
 
-        it('resolves with no value whatever the server answers', async () => {
+        it('ignores any response body', async () => {
             const { client, resource } = createResource();
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
 
