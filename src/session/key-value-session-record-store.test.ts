@@ -19,6 +19,17 @@ describeSessionRecordStoreContract({
 
         return () => new KeyValueSessionRecordStore(storage, { lock });
     },
+    failing: record => {
+        const storage = new MemoryStorage();
+        const lock = new InProcessSessionLock();
+
+        storage.set('auth.session', record);
+        storage.set = (): void => {
+            throw new Error('quota');
+        };
+
+        return () => new KeyValueSessionRecordStore(storage, { lock });
+    },
     broken: () => {
         const storage = new MemoryStorage();
 
@@ -55,15 +66,5 @@ describe('KeyValueSessionRecordStore', () => {
         await new KeyValueSessionRecordStore(storage).swap(() => null);
 
         expect(writes).toStrictEqual([]);
-    });
-
-    it('rejects when the storage cannot be written', async () => {
-        const storage = new MemoryStorage();
-
-        storage.set = (): void => {
-            throw new Error('quota');
-        };
-
-        await expect(new KeyValueSessionRecordStore(storage).swap(() => 'record')).rejects.toThrow('quota');
     });
 });

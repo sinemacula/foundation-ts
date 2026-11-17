@@ -20,9 +20,28 @@ export interface SessionRecordStoreContractHarness {
     create(): () => SessionRecordStore;
 
     /**
+     * Start a store holding the record, whose every swap fails to store what it
+     * decided.
+     *
+     * @returns a factory of handles on that one store
+     */
+    failing(record: string): () => SessionRecordStore;
+
+    /**
      * Build a store whose backing storage fails every read and write.
      */
     broken(): SessionRecordStore;
+}
+
+/**
+ * Let pending callbacks run, giving a store the chance to call back late.
+ */
+async function drain(): Promise<void> {
+    for (let turn = 0; turn < 5; turn += 1) {
+        await new Promise<void>(resolve => {
+            setTimeout(resolve, 0);
+        });
+    }
 }
 
 /**
@@ -57,6 +76,8 @@ export function describeSessionRecordStoreContract(harness: SessionRecordStoreCo
 
                 return 'second';
             });
+
+            await drain();
 
             expect(seen).toStrictEqual([null, 'first']);
             await expect(store.read()).resolves.toBe('second');
@@ -94,14 +115,36 @@ export function describeSessionRecordStoreContract(harness: SessionRecordStoreCo
             expect(seen).toBe('record');
         });
 
-        it('runs concurrent swaps from every handle one at a time, each deciding on the last', async () => {
+        it('runs concurrent swaps from every handle one at a time, each deciding once on the last', async () => {
             const handles = harness.create();
+            const decisions = [0, 0, 0, 0, 0];
 
             await Promise.all(
-                Array.from({ length: 5 }, () => handles().swap(current => String(Number(current ?? '0') + 1))),
-            );
+                decisions.map((_count, index) =>
+                    handles().swap(current => {
+                        decisions[index] = (decisions[index] ?? 0) + 1;
 
+                        return String(Number(current ?? '0') + 1);
+                    }),
+                ),
+            );
+            await drain();
+
+            expect(decisions).toStrictEqual([1, 1, 1, 1, 1]);
             await expect(handles().read()).resolves.toBe('5');
+        });
+
+        it('rejects a swap that fails to store, leaving the record every handle sees as it was', async () => {
+            const handles = harness.failing('kept');
+            const writer = handles();
+            const reader = handles();
+
+            const [swapped, read] = await Promise.allSettled([writer.swap(() => 'replaced'), reader.read()]);
+
+            expect(swapped.status).toBe('rejected');
+            expect(read).toStrictEqual({ status: 'fulfilled', value: 'kept' });
+            await expect(reader.read()).resolves.toBe('kept');
+            await expect(writer.read()).resolves.toBe('kept');
         });
 
         it('rejects a read and a swap when the backing storage fails', async () => {
