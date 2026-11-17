@@ -6,6 +6,7 @@
  */
 
 import { isRecord } from '../support/is-record';
+import { encodeQuery } from '../support/url';
 import type { QueryParameters } from '../http/http-client';
 import type {
     FilterDocumentBuilder,
@@ -686,20 +687,13 @@ export class ApiQuery {
 
     /**
      * Emit the query as a `URLSearchParams`-encoded string, which parses back
-     * to the values of {@link toQueryParameters} in a stable key order.
+     * to the values of {@link toQueryParameters} in a stable key order, each
+     * lone surrogate replaced with U+FFFD.
      *
      * @returns the query string, without a leading `?`
      */
     toQueryString(): string {
-        const params = this.#buildParams();
-        const search = new URLSearchParams();
-
-        for (const [key, value] of Object.entries(params)) {
-            // Some minimal URLSearchParams implementations ship append only.
-            search.append(key, String(value));
-        }
-
-        return search.toString();
+        return encodeQuery(Object.entries(this.#buildParams()).map(([key, value]) => [key, String(value)] as const));
     }
 
     /**

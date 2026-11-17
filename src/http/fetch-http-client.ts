@@ -7,7 +7,7 @@
 
 import { ExponentialBackoff } from '../realtime/exponential-backoff';
 import { clampTimerDelay, MAX_TIMER_DELAY } from '../support/timer';
-import { stripQueryAndFragment } from '../support/url';
+import { encodeQuery, stripQueryAndFragment } from '../support/url';
 import { onAbort, openAbortScope, untilAborted } from './abort-scope';
 import type { AbortScope } from './abort-scope';
 import type {
@@ -562,16 +562,11 @@ export class FetchHttpClient implements HttpClient {
         const hashAt = path.indexOf('#');
         const resource = (hashAt === -1 ? path : path.slice(0, hashAt)).replace(/^\/+/u, '');
         const fragment = hashAt === -1 ? '' : path.slice(hashAt);
-        const parameters = new URLSearchParams();
-
-        for (const [key, value] of Object.entries(query ?? {})) {
-            if (value !== undefined) {
-                // Minimal URLSearchParams implementations may ship append only.
-                parameters.append(toWellFormed(key), toWellFormed(String(value)));
-            }
-        }
-
-        const encoded = parameters.toString();
+        const encoded = encodeQuery(
+            Object.entries(query ?? {}).flatMap(([key, value]) =>
+                value === undefined ? [] : [[key, String(value)] as const],
+            ),
+        );
         const search = encoded === '' ? '' : `${querySeparator(resource)}${encoded}`;
 
         return `${this.#baseUrl}/${resource}${search}${fragment}`;
@@ -639,14 +634,6 @@ function querySeparator(resource: string): string {
     }
 
     return resource.endsWith('?') || resource.endsWith('&') ? '' : '&';
-}
-
-/**
- * Replace lone surrogates with U+FFFD, as Node's encoder does, since a strict
- * encoder throws on them instead.
- */
-function toWellFormed(value: string): string {
-    return value.replace(/[\uD800-\uDFFF]/gu, '\uFFFD');
 }
 
 /**
