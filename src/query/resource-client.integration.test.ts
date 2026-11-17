@@ -144,6 +144,14 @@ describe('ResourceClient over FetchHttpClient', () => {
         expect(urls).toStrictEqual([`${BASE_URL}/widgets?limit=5`]);
     });
 
+    it('keeps reserved characters of an id inside the requested path', async () => {
+        const { urls, widgets } = wire([[200, { data: { id: 'a?b#c' } }]]);
+
+        await widgets.show('a?b#c');
+
+        expect(urls).toStrictEqual([`${BASE_URL}/widgets/a%3Fb%23c`]);
+    });
+
     it('rejects a query over a cost cap with the cap details', async () => {
         const meta = {
             parameter: 'filters',
