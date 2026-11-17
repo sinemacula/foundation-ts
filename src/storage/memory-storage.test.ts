@@ -8,6 +8,9 @@
 import { describe, expect, it } from 'vitest';
 
 import { MemoryStorage } from './memory-storage';
+import { describeKeyValueStorageContract } from './test-support/key-value-storage-contract';
+
+describeKeyValueStorageContract({ create: () => new MemoryStorage() });
 
 describe('MemoryStorage', () => {
     it('returns null for a key that has not been set', () => {

@@ -9,6 +9,9 @@ import { describe, expect, it } from 'vitest';
 
 import { MemoryStorage } from './memory-storage';
 import { NamespacedStorage } from './namespaced-storage';
+import { describeKeyValueStorageContract } from './test-support/key-value-storage-contract';
+
+describeKeyValueStorageContract({ create: () => new NamespacedStorage(new MemoryStorage(), 'app') });
 
 describe('NamespacedStorage', () => {
     describe('set', () => {
