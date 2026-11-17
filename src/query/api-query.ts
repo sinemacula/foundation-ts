@@ -402,7 +402,8 @@ export class ApiQuery {
      * Add an equality filter on `field`.
      *
      * Every scalar is a real condition: `''`, `0` and `false` filter for that
-     * value rather than clearing the filter.
+     * value rather than clearing the filter, and an operator string such as
+     * `'$neq'` filters for that string; pass an operator with its value.
      */
     where(field: string, value: FilterScalar): ApiQuery;
 
