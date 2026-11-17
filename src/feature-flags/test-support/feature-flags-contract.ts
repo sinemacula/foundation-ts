@@ -40,8 +40,8 @@ export interface FeatureFlagsContractHarness {
 export function describeFeatureFlagsContract(harness: FeatureFlagsContractHarness): void {
     describe('FeatureFlags contract', () => {
         describe('isEnabled', () => {
-            it.each([true, false])('returns a stored %s', stored => {
-                expect(harness.create({ flag: stored }).flags.isEnabled('flag')).toBe(stored);
+            it.each([true, false])('returns a stored %s over the opposite fallback', stored => {
+                expect(harness.create({ flag: stored }).flags.isEnabled('flag', !stored)).toBe(stored);
             });
 
             it('defaults a missing flag to false', () => {
@@ -52,16 +52,25 @@ export function describeFeatureFlagsContract(harness: FeatureFlagsContractHarnes
                 expect(harness.create({}).flags.isEnabled('missing', true)).toBe(true);
             });
 
-            it.each(['on', 1])('returns the fallback for the non-boolean %j', stored => {
-                expect(harness.create({ flag: stored }).flags.isEnabled('flag', true)).toBe(true);
+            it.each([
+                ['on', true],
+                ['off', false],
+                ['', true],
+                [1, false],
+                [0, true],
+            ])('returns the fallback for the non-boolean %j over a %s fallback', (stored, fallback) => {
+                expect(harness.create({ flag: stored }).flags.isEnabled('flag', fallback)).toBe(fallback);
             });
         });
 
         describe('variant', () => {
             it.each([
                 ['checkout-v2', 'checkout-v1'],
+                ['', 'default'],
                 [100, 0],
+                [0, 1],
                 [true, false],
+                [false, true],
             ])('returns the stored %j for a fallback of the same type', (stored, fallback) => {
                 expect(harness.create({ flag: stored }).flags.variant('flag', fallback)).toBe(stored);
             });
