@@ -992,6 +992,31 @@ function defineBeforeReconnectCases({ it }: RealtimeContractSuite, harness: Real
         expect(transports).toHaveLength(1);
     });
 
+    it('reconnects when a listener on the aborted hook signal calls connect()', async () => {
+        const states: RealtimeState[] = [];
+        const { connection, transports } = harness.create({
+            url: 'realtime://test',
+            backoff: fixedBackoff(100),
+            beforeReconnect: signal => {
+                signal.addEventListener('abort', () => connection.connect());
+
+                return deferred<void>().promise;
+            },
+        });
+
+        connection.connect();
+        transports.at(0)?.fail();
+        await vi.advanceTimersByTimeAsync(100);
+        connection.onStateChange(state => states.push(state));
+
+        connection.disconnect();
+
+        expect(states).toEqual(['closed', 'connecting']);
+        expect(transports).toHaveLength(2);
+        expect(transports.at(1)?.closeCalls).toBe(0);
+        expect(connection.state).toBe('connecting');
+    });
+
     it('keeps a lifecycle started by a listener on the aborted hook signal', async () => {
         const signals: AbortSignal[] = [];
         const { connection, transports } = harness.create({

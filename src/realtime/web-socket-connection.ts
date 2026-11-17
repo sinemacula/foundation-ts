@@ -144,18 +144,13 @@ export class WebSocketConnection implements RealtimeConnection {
      */
     disconnect(): void {
         const previous = this.#lifecycle;
-        const lifecycle = new AbortController();
 
-        this.#lifecycle = lifecycle;
+        this.#lifecycle = new AbortController();
         this.#attempt = 0;
         this.#cancelReconnect();
         this.#release()?.close();
+        this.#setState('closed');
         previous.abort();
-
-        // An abort listener may have started a newer lifecycle already.
-        if (this.#lifecycle === lifecycle) {
-            this.#setState('closed');
-        }
     }
 
     /**
