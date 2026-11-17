@@ -35,8 +35,9 @@ function relativeSpecifiers(node) {
 }
 
 /**
- * Parse every declaration file reachable from the export entries, keyed by
- * `dist`-relative path, failing on a relative import that resolves to no file.
+ * Parse every declaration file reachable from the export entries through
+ * relative imports and triple-slash path references, keyed by `dist`-relative
+ * path, failing on a reference that resolves to no file.
  */
 function reachableDeclarations(entries) {
     const files = new Map();
@@ -53,11 +54,16 @@ function reachableDeclarations(entries) {
 
         files.set(path, source);
 
-        for (const specifier of relativeSpecifiers(source)) {
-            const target = posix.join(posix.dirname(path), specifier.replace(/\.js$/, '.d.ts'));
+        const references = [
+            ...relativeSpecifiers(source).map(specifier => specifier.replace(/\.js$/, '.d.ts')),
+            ...source.referencedFiles.map(({ fileName }) => fileName),
+        ];
+
+        for (const reference of references) {
+            const target = posix.join(posix.dirname(path), reference);
 
             if (!existsSync(join('dist', target))) {
-                console.error(`dist/${path} imports ${specifier}, which resolves to no declaration file.`);
+                console.error(`dist/${path} references ${reference}, which resolves to no declaration file.`);
                 process.exit(1);
             }
 
