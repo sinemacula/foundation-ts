@@ -134,22 +134,23 @@ export class ColorSchemeService {
     /**
      * Apply the resolved scheme and begin tracking OS changes, notifying
      * listeners when the OS changed the scheme since it was last resolved. A
-     * no-op while started; calling it after {@link dispose} starts again.
+     * failed start commits nothing, so a retry still notifies. A no-op while
+     * started; calling it after {@link dispose} starts again.
      */
     start(): void {
         if (this.#unsubscribe !== null) {
             return;
         }
 
-        const previous = this.#resolved;
+        const resolved = this.#derive();
 
-        this.#resolved = this.#derive();
-        this.#applier.apply(this.#resolved, this.#preference);
+        this.#applier.apply(resolved, this.#preference);
         this.#unsubscribe = this.#source.subscribe(() => {
             this.#handleOsChange();
         });
 
-        if (this.#resolved !== previous) {
+        if (resolved !== this.#resolved) {
+            this.#resolved = resolved;
             this.#notify();
         }
     }

@@ -279,6 +279,30 @@ describe('ColorSchemeService', () => {
 
             expect(listener).toHaveBeenCalledExactlyOnceWith('dark', 'system');
         });
+
+        it.each([
+            ['the applier', (fixture: ServiceFixture) => vi.spyOn(fixture.applier, 'apply')],
+            ['the OS subscription', (fixture: ServiceFixture) => vi.spyOn(fixture.source, 'subscribe')],
+        ])('commits nothing when %s throws, so a retry notifies', (_, spyOn) => {
+            const error = new Error('start failed');
+            const fixture = makeService({ dark: false });
+            const listener = vi.fn();
+
+            spyOn(fixture).mockImplementationOnce(() => {
+                throw error;
+            });
+            fixture.service.subscribe(listener);
+            fixture.source.dark = true;
+
+            expect(() => fixture.service.start()).toThrow(error);
+            expect(fixture.service.resolved()).toBe('light');
+            expect(listener).not.toHaveBeenCalled();
+
+            fixture.service.start();
+
+            expect(fixture.service.resolved()).toBe('dark');
+            expect(listener).toHaveBeenCalledExactlyOnceWith('dark', 'system');
+        });
     });
 
     describe('setPreference', () => {
