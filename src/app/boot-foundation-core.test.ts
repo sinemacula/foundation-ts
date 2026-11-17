@@ -5,9 +5,10 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { NullAnalyticsTracker } from '../analytics/null-analytics-tracker';
+import type { ConfigRepository, DeepReadonly } from '../config/config-repository';
 import { Environment } from '../config/environment';
 import { ObjectEnvironmentSource } from '../config/object-environment-source';
 import { RuntimeEnvironmentError } from '../config/runtime-environment-error';
@@ -151,6 +152,66 @@ function createRecordingToaster(): RecordingToaster {
     };
 }
 
+/** The settings parameter of an optional settings factory. */
+type SettingsOf<F> = NonNullable<F> extends (settings: infer S) => unknown ? S : never;
+
+/** The observability factories a boot accepts. */
+type ObservabilityOptions<T extends FoundationConfig> = NonNullable<FoundationCoreOptions<T>['observability']>;
+
+/** Every boot surface typed by the application configuration. */
+interface CoreTyping<T extends FoundationConfig> {
+    /** The frozen settings on the boot result. */
+    readonly settings: FoundationCore<T>['settings'];
+
+    /** The repository on the boot result. */
+    readonly repository: FoundationCore<T>['repository'];
+
+    /** The repository handed to module registration. */
+    readonly registration: FoundationCoreRegistration<T>['config'];
+
+    /** The feature-flag factory's settings parameter. */
+    readonly featureFlags: SettingsOf<FoundationCoreOptions<T>['featureFlags']>;
+
+    /** The reporter factory's settings parameter. */
+    readonly reporter: SettingsOf<ObservabilityOptions<T>['reporter']>;
+
+    /** The analytics factory's settings parameter. */
+    readonly analytics: SettingsOf<ObservabilityOptions<T>['analytics']>;
+
+    /** The logger factory's settings parameter. */
+    readonly logger: SettingsOf<ObservabilityOptions<T>['logger']>;
+
+    /** What booting with the configuration resolves to. */
+    readonly boot: ReturnType<typeof bootFoundationCore<T>>;
+}
+
+/** The type each boot surface must have for a given configuration. */
+interface ExpectedCoreTyping<T extends FoundationConfig> {
+    /** Deeply read-only settings. */
+    readonly settings: DeepReadonly<T>;
+
+    /** A repository typed by the configuration itself. */
+    readonly repository: ConfigRepository<T>;
+
+    /** The same repository type for module registration. */
+    readonly registration: ConfigRepository<T>;
+
+    /** Deeply read-only settings for the feature-flag factory. */
+    readonly featureFlags: DeepReadonly<T>;
+
+    /** Deeply read-only settings for the reporter factory. */
+    readonly reporter: DeepReadonly<T>;
+
+    /** Deeply read-only settings for the analytics factory. */
+    readonly analytics: DeepReadonly<T>;
+
+    /** Deeply read-only settings for the logger factory. */
+    readonly logger: DeepReadonly<T>;
+
+    /** The core typed by the configuration. */
+    readonly boot: Promise<FoundationCore<T>>;
+}
+
 /**
  * Return what a call throws, or undefined when it returns.
  */
@@ -169,6 +230,53 @@ const RUNTIME_URL = '/runtime-env.json';
 
 /** Build an environment that defines no keys. */
 const environmentOf = (): Environment => new Environment(new ObjectEnvironmentSource({}));
+
+/** An application configuration declared as an interface. */
+interface InterfaceAppConfig extends FoundationConfig {
+    /** Application-specific support settings. */
+    readonly support: {
+        /** The support contact addresses. */
+        readonly emails: string[];
+    };
+}
+
+/** An application configuration declared as a type alias. */
+type AliasAppConfig = FoundationConfig & {
+    /** Application-specific support settings. */
+    readonly support: {
+        /** The support contact addresses. */
+        readonly emails: string[];
+    };
+};
+
+/**
+ * Build an interface-declared application configuration fixture.
+ */
+function createAppConfig(): InterfaceAppConfig {
+    return { ...createConfig(), support: { emails: ['support@example.com'] } };
+}
+
+/**
+ * Build an application configuration that omits the feature flags.
+ */
+function createConfigWithoutFlags(): Omit<InterfaceAppConfig, 'featureFlags'> {
+    const { api: apiSettings, app, locales, support } = createAppConfig();
+
+    return { api: apiSettings, app, locales, support };
+}
+
+/**
+ * Build every boot option for an interface config except its definition.
+ */
+function interfaceBootOptions(): Omit<FoundationCoreOptions<InterfaceAppConfig>, 'define'> {
+    return {
+        createEnvironment: () => environmentOf(),
+        storage: new MemoryStorage(),
+        toasts: createToasterStub(),
+        confirm: createConfirmerStub(),
+        collectHttpContributions: () => createContributions(),
+    };
+}
 
 /** The accessor of every service the core boot installs, by name. */
 const CORE_SERVICES = {
@@ -619,6 +727,14 @@ describe('bootFoundationCore', () => {
         expect(api()).toBe(core.http);
     });
 
+    it('freezes the whole settings tree it hands out', async () => {
+        const core = await bootWith(createCollaborators());
+
+        expect(Object.isFrozen(core.settings.api)).toBe(true);
+        expect(Object.isFrozen(core.settings.locales.enabled)).toBe(true);
+        expect(Object.isFrozen(core.settings.featureFlags.flags)).toBe(true);
+    });
+
     it.each(bootFailureCases)(
         'rejects with the original error when $point throws, keeps what it installed, and reboots cleanly',
         async ({ inject, lastPhase, installed }) => {
@@ -651,6 +767,51 @@ describe('bootFoundationCore', () => {
         expect(analytics()).toBe(core.observability.analytics);
         expect(logger()).toBe(core.observability.logger);
         expect(api()).toBe(core.http);
+    });
+
+    describe('typing', () => {
+        it('types every configuration-shaped surface for interface and alias configs', () => {
+            expectTypeOf<CoreTyping<InterfaceAppConfig>>().toEqualTypeOf<ExpectedCoreTyping<InterfaceAppConfig>>();
+            expectTypeOf<CoreTyping<AliasAppConfig>>().toEqualTypeOf<ExpectedCoreTyping<AliasAppConfig>>();
+            expectTypeOf<FoundationCore<InterfaceAppConfig>['settings']['support']['emails']>().toEqualTypeOf<
+                readonly string[]
+            >();
+        });
+
+        it('rejects a definition without the feature flags at compile time', () => {
+            expectTypeOf(() =>
+                bootFoundationCore<InterfaceAppConfig>(
+                    {
+                        ...interfaceBootOptions(),
+                        // @ts-expect-error the definition must carry the feature flags
+                        define: () => createConfigWithoutFlags(),
+                    },
+                    { fetchFn: createFetchStub() },
+                ),
+            ).toBeFunction();
+        });
+
+        it('boots an interface config and hands the factories its frozen settings', async () => {
+            const received: DeepReadonly<InterfaceAppConfig>[] = [];
+
+            const core = await bootFoundationCore<InterfaceAppConfig>(
+                {
+                    ...interfaceBootOptions(),
+                    define: () => createAppConfig(),
+                    featureFlags: settings => {
+                        received.push(settings);
+
+                        return new StaticFeatureFlags(settings.featureFlags.flags);
+                    },
+                },
+                { fetchFn: createFetchStub() },
+            );
+
+            expect(received).toHaveLength(1);
+            expect(received[0]).toBe(core.settings);
+            expect(core.settings.support.emails).toStrictEqual(['support@example.com']);
+            expect(Object.isFrozen(core.settings.support.emails)).toBe(true);
+        });
     });
 
     it('honours every override and reports the core phases in order', async () => {

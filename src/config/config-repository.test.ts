@@ -5,9 +5,54 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
+import type { DeepReadonly } from './config-repository';
 import { ConfigRepository } from './config-repository';
+
+/** A configuration tree exercising every shape the read-only typing maps. */
+interface ShapedConfig {
+    /** Nested settings with an array and an optional branch. */
+    readonly api: {
+        /** Mutable as declared, read-only once frozen. */
+        headers: string[];
+
+        /** An optional nested branch. */
+        retry?: {
+            /** The retry budget. */
+            attempts: number;
+        };
+    };
+
+    /** A fixed-length tuple. */
+    readonly pair: [string, number];
+
+    /** A function leaf. */
+    readonly format: (value: number) => string;
+}
+
+/** The read-only view expected of {@link ShapedConfig.api} once frozen. */
+interface FrozenApiSettings {
+    /** The headers, as a read-only array. */
+    readonly headers: readonly string[];
+
+    /** The optional branch, still optional and read-only. */
+    readonly retry?: {
+        /** The retry budget. */
+        readonly attempts: number;
+    };
+}
+
+/**
+ * Build a fresh configuration tree of every mapped shape.
+ */
+function createShapedConfig(): ShapedConfig {
+    return {
+        api: { headers: ['accept'], retry: { attempts: 3 } },
+        pair: ['timeout', 30],
+        format: value => `#${String(value)}`,
+    };
+}
 
 describe('ConfigRepository', () => {
     describe('all', () => {
@@ -23,6 +68,60 @@ describe('ConfigRepository', () => {
 
             expect(Object.isFrozen(all)).toBe(true);
             expect(Object.isFrozen(all.app)).toBe(true);
+        });
+    });
+
+    describe('typing', () => {
+        it('types the tree as deeply read-only, keeping optional branches and function signatures', () => {
+            const all = new ConfigRepository(createShapedConfig()).all();
+
+            expectTypeOf(all).toEqualTypeOf<DeepReadonly<ShapedConfig>>();
+            expectTypeOf(all.api).toEqualTypeOf<FrozenApiSettings>();
+            expectTypeOf(all.pair).toEqualTypeOf<readonly [string, number]>();
+            expectTypeOf(all.format).toEqualTypeOf<(value: number) => string>();
+        });
+
+        it('rejects mutation of nested values at compile time', () => {
+            const all = new ConfigRepository(createShapedConfig()).all();
+
+            expectTypeOf(() => {
+                // @ts-expect-error nested arrays are read-only
+                all.api.headers.push('x-trace');
+            }).toBeFunction();
+            expectTypeOf(() => {
+                // @ts-expect-error nested properties are read-only
+                all.api.headers = [];
+            }).toBeFunction();
+            expectTypeOf(() => {
+                // @ts-expect-error tuple elements are read-only
+                all.pair[1] = 60;
+            }).toBeFunction();
+        });
+
+        it('accepts a configuration declared as an interface', () => {
+            expectTypeOf(new ConfigRepository<ShapedConfig>(createShapedConfig())).toEqualTypeOf<
+                ConfigRepository<ShapedConfig>
+            >();
+        });
+    });
+
+    describe('freezing', () => {
+        it('freezes the supplied object in place and holds that reference', () => {
+            const values = { app: { name: 'MyApp' } };
+            const config = new ConfigRepository(values);
+
+            expect(config.all()).toBe(values);
+            expect(Object.isFrozen(values)).toBe(true);
+            expect(Object.isFrozen(values.app)).toBe(true);
+        });
+
+        it('fully freezes a frozen root whose children are mutable', () => {
+            const app = { urls: { api: 'https://api.example.com' } };
+            const config = new ConfigRepository(Object.freeze({ app }));
+
+            expect(Object.isFrozen(config.all())).toBe(true);
+            expect(Object.isFrozen(app)).toBe(true);
+            expect(Object.isFrozen(app.urls)).toBe(true);
         });
     });
 

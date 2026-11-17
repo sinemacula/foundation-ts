@@ -5,7 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
     analytics,
@@ -37,6 +37,7 @@ import * as services from './services';
 import type { Confirmer } from '../notifications/confirmer';
 import type { Toaster } from '../notifications/toaster';
 import { NullAnalyticsTracker } from '../analytics/null-analytics-tracker';
+import type { DeepReadonly } from '../config/config-repository';
 import { ConfigRepository } from '../config/config-repository';
 import { StaticFeatureFlags } from '../feature-flags/static-feature-flags';
 import type { HttpClient } from '../http/http-client';
@@ -45,6 +46,7 @@ import type { RealtimeConnection } from '../realtime/realtime-connection';
 import { NullErrorReporter } from '../reporting/null-error-reporter';
 import { MemoryStorage } from '../storage/memory-storage';
 import type { ColorSchemeService } from '../theme/color-scheme-service';
+import type { FoundationConfig } from './foundation-config';
 
 /** Build an HTTP client stand-in that fails loudly if any method is invoked. */
 function createHttpClientStub(): HttpClient {
@@ -106,6 +108,24 @@ interface VersionedAppConfig {
     readonly app: VersionedApp;
 }
 
+/** An application configuration declared as an interface. */
+interface InterfaceAppConfig extends FoundationConfig {
+    /** Application-specific support settings. */
+    readonly support: {
+        /** The support contact address. */
+        readonly email: string;
+    };
+}
+
+/** An application configuration declared as a type alias. */
+type AliasAppConfig = FoundationConfig & {
+    /** Application-specific support settings. */
+    readonly support: {
+        /** The support contact address. */
+        readonly email: string;
+    };
+};
+
 /** One service accessor and how to install what it resolves. */
 interface ServiceCase {
     /** The accessor's name, for the test title. */
@@ -122,6 +142,19 @@ interface ServiceCase {
 
     /** Resolve the service through its accessor. */
     readonly accessor: () => unknown;
+}
+
+/**
+ * Build an interface-declared application configuration fixture.
+ */
+function createAppConfig(): InterfaceAppConfig {
+    return {
+        api: { baseUrl: 'https://api.example.com', timeout: 30_000 },
+        app: { name: 'Test App', environment: 'production', version: '1.0.0' },
+        featureFlags: { flags: {} },
+        locales: { default: 'en-GB', enabled: ['en-GB'], supported: { 'en-GB': { direction: 'ltr' } } },
+        support: { email: 'support@example.com' },
+    };
 }
 
 const serviceCases: readonly ServiceCase[] = [
@@ -369,6 +402,14 @@ describe('foundation services', () => {
             expect(tree.app.version).toBe('1.2.3');
         });
 
+        it('types the tree as deeply read-only, or unknown without a shape', () => {
+            expectTypeOf(appConfig<InterfaceAppConfig>).returns.toEqualTypeOf<DeepReadonly<InterfaceAppConfig>>();
+            expectTypeOf(appConfig<InterfaceAppConfig>)
+                .returns.toHaveProperty('locales')
+                .toHaveProperty('enabled')
+                .toEqualTypeOf<readonly string[]>();
+            expectTypeOf(appConfig).returns.toBeUnknown();
+        });
     });
 
     describe('appConfigRepository', () => {
@@ -379,5 +420,17 @@ describe('foundation services', () => {
             expect(appConfigRepository().get('app.missing', 'fallback')).toBe('fallback');
         });
 
+        it('accepts application configs declared as an interface or a type alias', () => {
+            expectTypeOf(appConfigRepository<InterfaceAppConfig>).returns.toEqualTypeOf<
+                ConfigRepository<InterfaceAppConfig>
+            >();
+            expectTypeOf(appConfigRepository<AliasAppConfig>).returns.toEqualTypeOf<ConfigRepository<AliasAppConfig>>();
+        });
+
+        it('lets an application repository stand in for an untyped one', () => {
+            expectTypeOf<ConfigRepository<InterfaceAppConfig>>().toExtend<ConfigRepository<Record<string, unknown>>>();
+            expectTypeOf<ConfigRepository<AliasAppConfig>>().toExtend<ConfigRepository<Record<string, unknown>>>();
+            expectTypeOf(installConfig).toBeCallableWith(new ConfigRepository<InterfaceAppConfig>(createAppConfig()));
+        });
     });
 });
