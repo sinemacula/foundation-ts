@@ -8,7 +8,8 @@
 import type { EnvironmentSource } from './environment';
 
 /**
- * Read environment values from the first source in the chain that defines them.
+ * Read environment values from the first source in the chain that sets them. An
+ * empty string counts as not set, so it falls through to later sources.
  */
 export class ChainEnvironmentSource implements EnvironmentSource {
     /** The ordered chain of sources consulted in turn. */
@@ -19,15 +20,15 @@ export class ChainEnvironmentSource implements EnvironmentSource {
     }
 
     /**
-     * Return the value from the first source in the chain that defines `key`.
+     * Return the value from the first source in the chain that sets `key`.
      *
-     * @returns the first defined value, or undefined when no source defines it
+     * @returns the first non-empty value, or undefined when no source sets it
      */
     get(key: string): string | undefined {
         for (const source of this.#sources) {
             const value = source.get(key);
 
-            if (value !== undefined) {
+            if (value !== undefined && value !== '') {
                 return value;
             }
         }

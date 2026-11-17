@@ -27,7 +27,7 @@ platform-specific arrives through a port.
 |----------------------|--------------------------------------------------------------------------------------------------------------------|---------------------------|
 | `src/analytics/`     | Records product events through a swappable tracker (console + no-op adapters), plus route page tracking            | `AnalyticsTracker`        |
 | `src/app/`           | The boot core: `bootFoundationCore` runs the agnostic phases, plus the service registry and base wiring            | `bootFoundationCore`      |
-| `src/authorization/` | Evaluates flat permission grants with wildcard-prefix matching                                                     | `PermissionSet` (no port) |
+| `src/authorization/` | Evaluates flat permission grants with the server's `*` glob grammar                                                | `PermissionSet` (no port) |
 | `src/config/`        | Reads typed configuration from environment sources, fetches the runtime document and freezes the repository        | `EnvironmentSource`       |
 | `src/connectivity/`  | The connectivity-observation contract each platform adapts                                                         | `ConnectivityMonitor`     |
 | `src/feature-flags/` | Resolves feature flags through a swappable provider (static adapter included)                                      | `FeatureFlags`            |
@@ -137,6 +137,35 @@ non-string `data` re-serialised as JSON. `onError` receives failures the connect
 `url()` builder or socket factory); the same failure inside `connect()` throws a `RealtimeError` with the original as
 its `cause`.
 
+### Contained failures
+
+`StaticFeatureFlags`, `ColorSchemeService` and `installPageTracking` take an optional `onError` sink, as
+`WebSocketConnection` does: a synchronous throw from a change handler, listener, tracker or breadcrumb trail goes to the
+sink and never stops the others or reaches the caller. Page tracking records only completed navigations, by path: query
+strings and hashes never reach the tracker or the trail.
+
+### Adapter contracts
+
+Each port a platform adapts ships a Vitest contract suite to run against its adapters, under the area's `test-support`:
+`describeFeatureFlagsContract`, `describeRealtimeContract`, `describeSessionPersistenceContract`,
+`describeSessionLockContract`, `describeKeyValueStorageContract` and `describeConnectivityMonitorContract`. An adapter
+proves its behaviour by running the suite from its own tests:
+
+```ts
+import { describeFeatureFlagsContract } from '@sinemacula/foundation/feature-flags/test-support/feature-flags-contract';
+
+describeFeatureFlagsContract({
+    create(initial) {
+        const flags = new RemoteFeatureFlags(initial);
+
+        return { flags, change: next => flags.update(next) };
+    },
+});
+```
+
+`session/test-support/fake-auth-server` serves the session endpoints from memory, with rotation, its grace window,
+replay revocation and cookie sign-out, for integration tests of a session wiring.
+
 ### React Native
 
 Every subpath resolves under Metro and Jest through the `default` export condition, and CI loads the whole public
@@ -144,18 +173,10 @@ surface under Metro, Hermes and React Native's Jest preset. The package ships ES
 `transformIgnorePatterns` allow-list. `KeyValueStorage` is synchronous, so back it with a synchronous store; an
 asynchronous secure store implements `SessionPersistence` directly.
 
-### Adapter contracts
-
-Each port a platform adapts ships a Vitest contract suite to run against its adapters, under the area's `test-support`:
-`describeRealtimeContract`, `describeSessionPersistenceContract`, `describeSessionLockContract`,
-`describeKeyValueStorageContract` and `describeConnectivityMonitorContract`. `session/test-support/fake-auth-server`
-serves the session endpoints from memory, with rotation, its grace window, replay revocation and cookie sign-out, for
-integration tests of a session wiring.
-
 ## Requirements
 
 - Node.js 22+
-- Vitest 3+, only for the contract suites in `test-support`
+- Vitest 3+, only for the contract suites under `*/test-support`
 
 ## Testing
 

@@ -99,6 +99,12 @@ interface ServiceOptions {
 
     /** The preference used when nothing is stored. */
     readonly defaultPreference?: ColorSchemePreference;
+
+    /** The storage to persist to, when a test needs to prepare it. */
+    readonly storage?: MemoryStorage;
+
+    /** The sink for contained failures. */
+    readonly onError?: (error: unknown) => void;
 }
 
 /** The service under test and its collaborators. */
@@ -120,7 +126,7 @@ interface ServiceFixture {
  * Build a colour-scheme service over stub collaborators.
  */
 function makeService(options?: ServiceOptions): ServiceFixture {
-    const storage = new MemoryStorage();
+    const storage = options?.storage ?? new MemoryStorage();
 
     if (options?.initialStored !== undefined) {
         storage.set(options.storageKey ?? 'theme', options.initialStored);
@@ -135,6 +141,7 @@ function makeService(options?: ServiceOptions): ServiceFixture {
         applier,
         ...(options?.storageKey !== undefined ? { storageKey: options.storageKey } : {}),
         ...(options?.defaultPreference !== undefined ? { defaultPreference: options.defaultPreference } : {}),
+        ...(options?.onError !== undefined ? { onError: options.onError } : {}),
     });
 
     return { service, storage, source, applier };
@@ -162,6 +169,39 @@ describe('ColorSchemeService', () => {
 
         it('honours a custom default preference', () => {
             expect(makeService({ defaultPreference: 'dark' }).service.preference()).toBe('dark');
+        });
+
+        it('falls back to the default and reports when the storage read throws', () => {
+            const error = new Error('storage unavailable');
+            const storage = new MemoryStorage();
+            const onError = vi.fn();
+
+            vi.spyOn(storage, 'get').mockImplementation(() => {
+                throw error;
+            });
+
+            expect(makeService({ storage, defaultPreference: 'dark', onError }).service.preference()).toBe('dark');
+            expect(onError).toHaveBeenCalledExactlyOnceWith(error);
+        });
+
+        it.each([
+            ['no sink', undefined],
+            [
+                'a throwing sink',
+                () => {
+                    throw new Error('sink failed');
+                },
+            ],
+        ])('survives a throwing storage read with %s', (_, onError) => {
+            const storage = new MemoryStorage();
+
+            vi.spyOn(storage, 'get').mockImplementation(() => {
+                throw new Error('storage unavailable');
+            });
+
+            expect(makeService({ storage, ...(onError === undefined ? {} : { onError }) }).service.preference()).toBe(
+                'system',
+            );
         });
     });
 
@@ -218,6 +258,51 @@ describe('ColorSchemeService', () => {
 
             expect(source.subscribeCount).toBe(1);
         });
+
+        it('does not notify when the OS is unchanged since construction', () => {
+            const { service } = makeService({ dark: false });
+            const listener = vi.fn();
+
+            service.subscribe(listener);
+            service.start();
+
+            expect(listener).not.toHaveBeenCalled();
+        });
+
+        it('notifies once when the OS changed since construction', () => {
+            const { service, source } = makeService({ dark: false });
+            const listener = vi.fn();
+
+            service.subscribe(listener);
+            source.dark = true;
+            service.start();
+
+            expect(listener).toHaveBeenCalledExactlyOnceWith('dark', 'system');
+        });
+
+        it.each([
+            ['the applier', (fixture: ServiceFixture) => vi.spyOn(fixture.applier, 'apply')],
+            ['the OS subscription', (fixture: ServiceFixture) => vi.spyOn(fixture.source, 'subscribe')],
+        ])('commits nothing when %s throws, so a retry notifies', (_, spyOn) => {
+            const error = new Error('start failed');
+            const fixture = makeService({ dark: false });
+            const listener = vi.fn();
+
+            spyOn(fixture).mockImplementationOnce(() => {
+                throw error;
+            });
+            fixture.service.subscribe(listener);
+            fixture.source.dark = true;
+
+            expect(() => fixture.service.start()).toThrow(error);
+            expect(fixture.service.resolved()).toBe('light');
+            expect(listener).not.toHaveBeenCalled();
+
+            fixture.service.start();
+
+            expect(fixture.service.resolved()).toBe('dark');
+            expect(listener).toHaveBeenCalledExactlyOnceWith('dark', 'system');
+        });
     });
 
     describe('setPreference', () => {
@@ -234,7 +319,7 @@ describe('ColorSchemeService', () => {
             expect(listener).toHaveBeenCalledWith('light', 'light');
         });
 
-        it('removes the stored key and applies under system', () => {
+        it('persists system and applies under it', () => {
             const { service, storage, applier } = makeService({ initialStored: 'dark', dark: false });
             const listener = vi.fn();
 
@@ -242,7 +327,7 @@ describe('ColorSchemeService', () => {
             service.subscribe(listener);
             service.setPreference('system');
 
-            expect(storage.get('theme')).toBeNull();
+            expect(storage.get('theme')).toBe('system');
             expect(applier.calls.at(-1)).toStrictEqual({ resolved: 'light', preference: 'system' });
             expect(listener).toHaveBeenCalledWith('light', 'system');
         });
@@ -258,6 +343,44 @@ describe('ColorSchemeService', () => {
 
         it('reads back an explicit choice from a custom storage key', () => {
             expect(makeService({ storageKey: 'ns.theme', initialStored: 'dark' }).service.preference()).toBe('dark');
+        });
+
+        it.each(['light', 'dark'] as const)(
+            'keeps a system choice across restarts under a %s default',
+            defaultPreference => {
+                const { service, storage } = makeService({ defaultPreference });
+
+                service.setPreference('system');
+
+                expect(storage.get('theme')).toBe('system');
+                expect(makeService({ storage, defaultPreference }).service.preference()).toBe('system');
+            },
+        );
+
+        it('persists a choice equal to the default', () => {
+            const { service, storage } = makeService({ defaultPreference: 'dark' });
+
+            service.setPreference('dark');
+
+            expect(storage.get('theme')).toBe('dark');
+        });
+
+        it.each(['dark', 'system'] as const)('leaves every state untouched when persisting %s throws', pref => {
+            const error = new Error('quota');
+            const { service, storage, applier } = makeService({ initialStored: 'light', dark: true });
+            const listener = vi.fn();
+
+            service.start();
+            service.subscribe(listener);
+            vi.spyOn(storage, 'set').mockImplementation(() => {
+                throw error;
+            });
+
+            expect(() => service.setPreference(pref)).toThrow(error);
+            expect(service.preference()).toBe('light');
+            expect(service.resolved()).toBe('light');
+            expect(applier.calls).toHaveLength(1);
+            expect(listener).not.toHaveBeenCalled();
         });
     });
 
@@ -312,6 +435,105 @@ describe('ColorSchemeService', () => {
 
             expect(() => service.dispose()).not.toThrow();
             expect(source.unsubscribeCount).toBe(0);
+        });
+
+        it('unsubscribes only once when called twice', () => {
+            const { service, source } = makeService();
+
+            service.start();
+            service.dispose();
+            service.dispose();
+
+            expect(source.unsubscribeCount).toBe(1);
+        });
+
+        it('lets start subscribe and apply again', () => {
+            const { service, source, applier } = makeService();
+
+            service.start();
+            service.dispose();
+            service.start();
+
+            expect(source.subscribeCount).toBe(2);
+            expect(applier.calls).toHaveLength(2);
+        });
+
+        it('catches up with an OS change made while disposed', () => {
+            const { service, source } = makeService({ dark: false });
+            const listener = vi.fn();
+
+            service.start();
+            service.dispose();
+            service.subscribe(listener);
+            source.dark = true;
+            service.start();
+
+            expect(service.resolved()).toBe('dark');
+            expect(listener).toHaveBeenCalledExactlyOnceWith('dark', 'system');
+        });
+
+        it('tracks OS changes again after a restart', () => {
+            const { service, source } = makeService({ dark: false });
+            const listener = vi.fn();
+
+            service.start();
+            service.dispose();
+            service.start();
+            service.subscribe(listener);
+            source.dark = true;
+            source.fireChange();
+
+            expect(listener).toHaveBeenCalledExactlyOnceWith('dark', 'system');
+        });
+    });
+
+    describe('throwing listeners', () => {
+        it.each([
+            ['setPreference', (fixture: ServiceFixture) => fixture.service.setPreference('dark')],
+            [
+                'an OS change',
+                (fixture: ServiceFixture) => {
+                    fixture.source.dark = true;
+                    fixture.source.fireChange();
+                },
+            ],
+        ])('reports the error and notifies later listeners after %s', (_, change) => {
+            const error = new Error('listener failed');
+            const onError = vi.fn();
+            const fixture = makeService({ dark: false, onError });
+            const listener = vi.fn();
+
+            fixture.service.start();
+            fixture.service.subscribe(() => {
+                throw error;
+            });
+            fixture.service.subscribe(listener);
+
+            expect(() => change(fixture)).not.toThrow();
+            expect(fixture.service.resolved()).toBe('dark');
+            expect(listener).toHaveBeenCalledExactlyOnceWith('dark', fixture.service.preference());
+            expect(onError).toHaveBeenCalledExactlyOnceWith(error);
+        });
+
+        it.each([
+            ['no sink', undefined],
+            [
+                'a throwing sink',
+                () => {
+                    throw new Error('sink failed');
+                },
+            ],
+        ])('contains the failure with %s', (_, onError) => {
+            const { service } = makeService(onError === undefined ? {} : { onError });
+            const listener = vi.fn();
+
+            service.subscribe(() => {
+                throw new Error('listener failed');
+            });
+            service.subscribe(listener);
+
+            expect(() => service.setPreference('dark')).not.toThrow();
+            expect(listener).toHaveBeenCalledExactlyOnceWith('dark', 'dark');
         });
     });
 

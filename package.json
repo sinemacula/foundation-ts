@@ -103,6 +103,10 @@
             "types": "./dist/feature-flags/static-feature-flags.d.ts",
             "default": "./dist/feature-flags/static-feature-flags.js"
         },
+        "./feature-flags/test-support/feature-flags-contract": {
+            "types": "./dist/feature-flags/test-support/feature-flags-contract.d.ts",
+            "default": "./dist/feature-flags/test-support/feature-flags-contract.js"
+        },
         "./http/bearer-token-interceptor": {
             "types": "./dist/http/bearer-token-interceptor.d.ts",
             "default": "./dist/http/bearer-token-interceptor.js"

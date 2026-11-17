@@ -45,10 +45,16 @@ export class BreadcrumbTrail {
     /**
      * Start an empty trail.
      *
-     * @param capacity - maximum number of breadcrumbs to retain (default 50)
+     * @param capacity - maximum number of breadcrumbs to retain (default 50);
+     * 0 records nothing
      * @param clock - epoch-millisecond timestamp source (default Date.now)
+     * @throws {RangeError} when `capacity` is not a non-negative integer
      */
     constructor(capacity: number = DEFAULT_CAPACITY, clock: () => number = () => Date.now()) {
+        if (!Number.isInteger(capacity) || capacity < 0) {
+            throw new RangeError('The breadcrumb capacity must be a non-negative integer.');
+        }
+
         this.#capacity = capacity;
         this.#clock = clock;
     }
@@ -57,6 +63,10 @@ export class BreadcrumbTrail {
      * Append a breadcrumb to the trail, evicting the oldest when at capacity.
      */
     add(breadcrumb: Breadcrumb): void {
+        if (this.#capacity === 0) {
+            return;
+        }
+
         if (this.#entries.length >= this.#capacity) {
             this.#entries.shift();
         }
