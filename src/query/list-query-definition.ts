@@ -49,7 +49,7 @@ export interface ListQueryDefinition<Filters extends Record<string, ListFilter<n
     /** Number of items per page emitted as the `limit` parameter; defaults to 25. */
     readonly pageSize?: number;
 
-    /** Always-applied base shaping, compiled before any screen-set filters or sorts. */
+    /** Always-applied base, compiled first; filters built on the query they are given can only narrow it. */
     readonly base?: (query: ApiQuery) => ApiQuery;
 }
 

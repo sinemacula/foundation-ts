@@ -17,8 +17,8 @@ const { writtenFiles } = await mkdist({
     cleanDist: true,
     format: 'esm',
     ext: 'js',
-    // test-support ships: it holds the published realtime connection contract.
-    pattern: ['**/*.ts', '!**/*.test.ts'],
+    // test-support ships the realtime contract; the fake socket stays private.
+    pattern: ['**/*.ts', '!**/*.test.ts', '!**/test-support/fake-web-socket.ts'],
     declaration: true,
     addRelativeDeclarationExtensions: true,
 });
