@@ -2,57 +2,114 @@
  * Loader for a runtime environment document.
  *
  * Fetches a JSON document of environment values at boot and keeps only its
- * string-valued entries. Every failure mode (missing document, network error,
- * malformed payload) resolves to an empty record so the environment chain falls
- * through to the platform's build-time variables. Where the document lives is
- * the caller's concern; each kernel supplies its own URL convention.
+ * string-valued entries. A missing document (404) resolves to an empty record
+ * so the environment chain falls through to the platform's build-time values;
+ * any other failure rejects, because a document that is deployed but cannot be
+ * read must not be silently ignored. Where the document lives is the caller's
+ * concern; each kernel supplies its own URL convention.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 
+import { isRecord } from '../support/is-record';
+import { RuntimeEnvironmentError } from './runtime-environment-error';
+
+/** The default allowance for the request and its body, in milliseconds. */
+const DEFAULT_TIMEOUT = 5000;
+
+/** The longest delay a timer honours before firing immediately. */
+const MAX_TIMEOUT = 2_147_483_647;
+
+/**
+ * Where the runtime environment document lives and how long to wait for it.
+ */
+export interface RuntimeEnvironmentSource {
+    /** The document location. */
+    readonly url: string;
+
+    /** Milliseconds allowed for the request and its body together. Default 5000. */
+    readonly timeout?: number;
+}
+
 /**
  * Fetch and normalise the runtime environment document.
  *
- * @param url - the document location
+ * @param source - the document location and timeout
  * @param fetchFn - the fetch implementation to use
- * @returns the string-valued entries of the document, or an empty record
+ * @returns the string-valued entries of the document, or an empty record when
+ * it does not exist
+ * @throws {RangeError} when the timeout is not a positive timer delay
+ * @throws {RuntimeEnvironmentError} when the document cannot be loaded in time,
+ * responds with an error status, or is not a JSON object
  */
 export async function fetchRuntimeEnvironment(
-    url: string,
+    source: RuntimeEnvironmentSource,
     fetchFn: typeof fetch = (input, init) => globalThis.fetch(input, init),
 ): Promise<Record<string, string>> {
+    const timeout = source.timeout ?? DEFAULT_TIMEOUT;
+
+    if (!(timeout > 0 && timeout <= MAX_TIMEOUT)) {
+        throw new RangeError(`The runtime environment timeout must be between 1 and ${MAX_TIMEOUT} ms.`);
+    }
+
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const deadline = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            controller.abort();
+            reject(new RuntimeEnvironmentError(`The runtime environment document did not load within ${timeout} ms.`));
+        }, timeout);
+    });
+
     try {
-        const response = await fetchFn(url, { cache: 'no-store', headers: { accept: 'application/json' } });
-
-        if (!response.ok) {
-            return {};
-        }
-
-        return normaliseRuntimeValues(await response.json());
-    } catch {
-        return {};
+        return await Promise.race([load(source.url, fetchFn, controller.signal), deadline]);
+    } finally {
+        clearTimeout(timer);
     }
 }
 
 /**
- * Keep only the string-valued entries of a parsed payload.
+ * Request the document and read its string-valued entries.
  *
- * @param payload - the parsed JSON payload
- * @returns the string-valued entries, or an empty record for non-objects
+ * @param url - the document location
+ * @param fetchFn - the fetch implementation
+ * @param signal - aborts the request once the deadline passes
+ * @returns the string-valued entries, or an empty record when it does not exist
+ * @throws {RuntimeEnvironmentError} when the document cannot be loaded or is
+ * not a JSON object
  */
-function normaliseRuntimeValues(payload: unknown): Record<string, string> {
-    if (payload === null || typeof payload !== 'object' || Array.isArray(payload)) {
+async function load(url: string, fetchFn: typeof fetch, signal: AbortSignal): Promise<Record<string, string>> {
+    let response: Response;
+
+    try {
+        response = await fetchFn(url, { cache: 'no-store', headers: { accept: 'application/json' }, signal });
+    } catch (error) {
+        throw new RuntimeEnvironmentError('The runtime environment document could not be fetched.', { cause: error });
+    }
+
+    if (response.status === 404) {
         return {};
     }
 
-    const values: Record<string, string> = {};
-
-    for (const [key, value] of Object.entries(payload)) {
-        if (typeof value === 'string') {
-            values[key] = value;
-        }
+    if (!response.ok) {
+        throw new RuntimeEnvironmentError(`The runtime environment document responded with ${response.status}.`);
     }
 
-    return values;
+    let payload: unknown;
+
+    try {
+        payload = await response.json();
+    } catch (error) {
+        throw new RuntimeEnvironmentError('The runtime environment document is not valid JSON.', { cause: error });
+    }
+
+    if (!isRecord(payload)) {
+        throw new RuntimeEnvironmentError('The runtime environment document must be a JSON object.');
+    }
+
+    return Object.fromEntries(
+        Object.entries(payload).filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+    );
 }

@@ -72,11 +72,24 @@ environment, configuration, storage, feature flags, notifications, observability
 bridges the platform's module-registration step so modules contribute interceptors before the client is built.
 
 ```ts
-const core = await bootFoundationCore(options, { fetchFn }, runtimeUrl);
+const core = await bootFoundationCore({ ...options, runtime: { url: '/runtime-env.json' } }, { fetchFn });
 ```
+
+`runtime` is optional. When set, the core fetches that JSON document within `timeout` (default 5000 ms) and hands
+its string values to `createEnvironment`; a missing document (404) counts as empty, and any other failure rejects
+the boot with a `RuntimeEnvironmentError` (`@sinemacula/foundation/config/runtime-environment-error`). Omit it where
+configuration ships with the build, as on mobile, and nothing is fetched.
 
 Everything the core installs is reachable afterwards through the service accessors in
 `@sinemacula/foundation/app/services`.
+
+## React Native
+
+Every subpath resolves under Metro and Jest through the `default` export condition. CI bundles the public surface
+for iOS and Android, compiles it to Hermes bytecode, loads it against React Native's globals and requires each
+subpath under React Native's Jest preset (`npm run smoke:react-native`). The package ships ES modules, so add it to
+the Jest `transformIgnorePatterns` allow-list. `KeyValueStorage` is synchronous, so back it with a synchronous store;
+an asynchronous secure store implements the `SessionPersistence` port directly.
 
 ## Realtime
 
@@ -138,14 +151,15 @@ The toolkit enforces cost caps server-side and answers a request over one with a
 
 ## Quality gates
 
-| Command                 | What it runs                                           |
-|-------------------------|--------------------------------------------------------|
-| `npm run check`         | Static analysis and lint via qlty (Biome, ESLint)      |
-| `npm run typecheck`     | Type-checking with tsc                                 |
-| `npm run test:coverage` | The unit suite, with 100% coverage enforced            |
-| `npm run test:mutation` | Mutation testing with Stryker                          |
-| `npm run deadcode`      | Dead-code detection with knip                          |
-| `npm run check:pkg`     | Packaging checks (publint + attw) on the built tarball |
+| Command                      | What it runs                                           |
+|------------------------------|--------------------------------------------------------|
+| `npm run check`              | Static analysis and lint via qlty (Biome, ESLint)      |
+| `npm run typecheck`          | Type-checking with tsc                                 |
+| `npm run test:coverage`      | The unit suite, with 100% coverage enforced            |
+| `npm run test:mutation`      | Mutation testing with Stryker                          |
+| `npm run deadcode`           | Dead-code detection with knip                          |
+| `npm run check:pkg`          | Packaging checks (publint + attw) on the built tarball |
+| `npm run smoke:react-native` | The React Native smoke check (Metro, Hermes, Jest)     |
 
 ## Releases
 

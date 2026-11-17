@@ -15,6 +15,7 @@
 import type { AnalyticsTracker } from '../analytics/analytics-tracker';
 import { ConfigRepository } from '../config/config-repository';
 import type { Environment } from '../config/environment';
+import type { RuntimeEnvironmentSource } from '../config/runtime-environment';
 import { fetchRuntimeEnvironment } from '../config/runtime-environment';
 import type { FeatureFlags } from '../feature-flags/feature-flags';
 import { StaticFeatureFlags } from '../feature-flags/static-feature-flags';
@@ -69,6 +70,9 @@ export interface FoundationCoreRegistration<T extends FoundationConfig> {
  * Construction options for {@link bootFoundationCore}.
  */
 export interface FoundationCoreOptions<T extends FoundationConfig> {
+    /** The runtime environment document to fetch at boot; omitted, nothing is fetched and the environment is built over no runtime values. */
+    readonly runtime?: RuntimeEnvironmentSource;
+
     /** Caller-owned environment construction over the fetched runtime values. */
     readonly createEnvironment: (runtime: Readonly<Record<string, string>>) => Environment;
 
@@ -149,17 +153,18 @@ export interface FoundationCore<T extends FoundationConfig> {
  *
  * @param options - the core construction options and platform bridges
  * @param platform - the resolved platform seams
- * @param runtimeUrl - the runtime environment document location
  * @returns everything the core boot produced
+ * @throws {RuntimeEnvironmentError} when a configured runtime document cannot
+ * be loaded
  */
 export async function bootFoundationCore<T extends FoundationConfig>(
     options: FoundationCoreOptions<T>,
     platform: PlatformCore,
-    runtimeUrl: string,
 ): Promise<FoundationCore<T>> {
     options.onPhase?.('runtime-environment');
 
-    const runtime = await fetchRuntimeEnvironment(runtimeUrl, platform.fetchFn);
+    const runtime =
+        options.runtime === undefined ? {} : await fetchRuntimeEnvironment(options.runtime, platform.fetchFn);
 
     options.onPhase?.('configuration');
 

@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NullAnalyticsTracker } from '../analytics/null-analytics-tracker';
 import { Environment } from '../config/environment';
 import { ObjectEnvironmentSource } from '../config/object-environment-source';
+import { RuntimeEnvironmentError } from '../config/runtime-environment-error';
 import { StaticFeatureFlags } from '../feature-flags/static-feature-flags';
 import type { HttpClient, HttpRequest, RequestInterceptor } from '../http/http-client';
 import type { ModuleHttpContributions } from '../http/module-http-contributions';
@@ -151,6 +152,9 @@ function createRecordingToaster(): RecordingToaster {
     };
 }
 
+/** The runtime environment document location every boot fetches. */
+const RUNTIME_URL = '/runtime-env.json';
+
 /** Build an environment that defines no keys. */
 const environmentOf = (): Environment => new Environment(new ObjectEnvironmentSource({}));
 
@@ -203,6 +207,7 @@ describe('bootFoundationCore', () => {
         const core = await bootFoundationCore(
             {
                 createEnvironment: () => environment,
+                runtime: { url: RUNTIME_URL },
                 define: () => createConfig(),
                 storage,
                 toasts: toaster,
@@ -210,7 +215,6 @@ describe('bootFoundationCore', () => {
                 collectHttpContributions: collect,
             },
             { fetchFn: createFetchStub() },
-            '/runtime-env.json',
         );
 
         expect(core.environment).toBe(environment);
@@ -238,6 +242,7 @@ describe('bootFoundationCore', () => {
         await bootFoundationCore(
             {
                 createEnvironment,
+                runtime: { url: RUNTIME_URL },
                 define: () => createConfig(),
                 storage: new MemoryStorage(),
                 toasts: createToasterStub(),
@@ -245,10 +250,79 @@ describe('bootFoundationCore', () => {
                 collectHttpContributions: () => createContributions(),
             },
             { fetchFn: fetchFn as unknown as typeof fetch },
-            '/runtime-env.json',
         );
 
         expect(createEnvironment).toHaveBeenCalledWith(runtimeDocument);
+    });
+
+    it('builds the environment over no runtime values without fetching when no runtime document is configured', async () => {
+        const fetchFn = vi.fn();
+        const createEnvironment = vi.fn().mockReturnValue(environmentOf());
+
+        await bootFoundationCore(
+            {
+                createEnvironment,
+                define: () => createConfig(),
+                storage: new MemoryStorage(),
+                toasts: createToasterStub(),
+                confirm: createConfirmerStub(),
+                collectHttpContributions: () => createContributions(),
+            },
+            { fetchFn: fetchFn as unknown as typeof fetch },
+        );
+
+        expect(fetchFn).not.toHaveBeenCalled();
+        expect(createEnvironment).toHaveBeenCalledWith({});
+    });
+
+    it('rejects the boot before configuring anything when the runtime document fails', async () => {
+        const fetchFn = vi.fn().mockResolvedValue(new Response('{}', { status: 500 }));
+        const createEnvironment = vi.fn();
+
+        const boot = bootFoundationCore(
+            {
+                runtime: { url: RUNTIME_URL },
+                createEnvironment,
+                define: () => createConfig(),
+                storage: new MemoryStorage(),
+                toasts: createToasterStub(),
+                confirm: createConfirmerStub(),
+                collectHttpContributions: () => createContributions(),
+            },
+            { fetchFn: fetchFn as unknown as typeof fetch },
+        );
+
+        await expect(boot).rejects.toBeInstanceOf(RuntimeEnvironmentError);
+        expect(createEnvironment).not.toHaveBeenCalled();
+        expect(() => appConfig()).toThrow();
+    });
+
+    it('holds the runtime document to the configured timeout', async () => {
+        vi.useFakeTimers();
+
+        try {
+            const boot = bootFoundationCore(
+                {
+                    runtime: { url: RUNTIME_URL, timeout: 50 },
+                    createEnvironment: () => environmentOf(),
+                    define: () => createConfig(),
+                    storage: new MemoryStorage(),
+                    toasts: createToasterStub(),
+                    confirm: createConfirmerStub(),
+                    collectHttpContributions: () => createContributions(),
+                },
+                { fetchFn: () => new Promise<Response>(() => undefined) },
+            );
+            const settled = boot.catch((error: unknown) => error);
+
+            await vi.advanceTimersByTimeAsync(50);
+
+            await expect(settled).resolves.toStrictEqual(
+                new RuntimeEnvironmentError('The runtime environment document did not load within 50 ms.'),
+            );
+        } finally {
+            vi.useRealTimers();
+        }
     });
 
     it('invokes the registration bridge once, after installs, with the repository and environment', async () => {
@@ -259,6 +333,7 @@ describe('bootFoundationCore', () => {
         const core = await bootFoundationCore(
             {
                 createEnvironment: () => environment,
+                runtime: { url: RUNTIME_URL },
                 define: () => createConfig(),
                 storage: new MemoryStorage(),
                 toasts: createToasterStub(),
@@ -274,7 +349,6 @@ describe('bootFoundationCore', () => {
                 },
             },
             { fetchFn: createFetchStub() },
-            '/runtime-env.json',
         );
 
         expect(observed).toHaveLength(1);
@@ -297,6 +371,7 @@ describe('bootFoundationCore', () => {
         const core = await bootFoundationCore(
             {
                 createEnvironment: () => environmentOf(),
+                runtime: { url: RUNTIME_URL },
                 define: () => createConfig(),
                 storage: new MemoryStorage(),
                 toasts: createToasterStub(),
@@ -319,7 +394,6 @@ describe('bootFoundationCore', () => {
                 },
             },
             { fetchFn: createFetchStub() },
-            '/runtime-env.json',
         );
 
         expect(phases).toStrictEqual([
@@ -356,6 +430,7 @@ describe('bootFoundationCore', () => {
             return bootFoundationCore(
                 {
                     createEnvironment: () => environmentOf(),
+                    runtime: { url: RUNTIME_URL },
                     define: () => createConfig(),
                     storage: new MemoryStorage(),
                     toasts: toaster,
@@ -364,7 +439,6 @@ describe('bootFoundationCore', () => {
                     collectHttpContributions: () => createContributions(),
                 },
                 { fetchFn: fetch.fetchFn },
-                '/runtime-env.json',
             );
         }
 
@@ -380,7 +454,7 @@ describe('bootFoundationCore', () => {
 
             await core.http.get('items');
 
-            expect(fetch.urls).toStrictEqual(['/runtime-env.json', 'https://api.example.com/items']);
+            expect(fetch.urls).toStrictEqual([RUNTIME_URL, 'https://api.example.com/items']);
             expect(fetch.inits[1]?.headers).toMatchObject({ 'x-preset': 'stamped' });
         });
 

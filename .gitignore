@@ -21,3 +21,5 @@ Thumbs.db
 .env.*.local
 
 /.pack/
+
+/smoke/react-native/generated/

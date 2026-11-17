@@ -1,0 +1,14 @@
+{
+    "name": "foundation-react-native-smoke",
+    "private": true,
+    "description": "Loads the packed package under React Native's Metro, Hermes and Jest toolchain.",
+    "type": "module",
+    "devDependencies": {
+        "@react-native/babel-preset": "^0.88.1",
+        "@react-native/jest-preset": "^0.88.1",
+        "@react-native/metro-config": "^0.88.1",
+        "jest": "^29.7.0",
+        "react": "^19.3.1",
+        "react-native": "^0.88.1"
+    }
+}
