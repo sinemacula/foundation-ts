@@ -13,10 +13,9 @@
 
 </div>
 
-`@sinemacula/foundation` is the platform-agnostic foundation on which Sine Macula application kernels are
-built. It provides the framework-free logic every client needs - configuration, HTTP, sessions, queries,
-realtime, storage and more - as small, port-driven TypeScript units with no framework, DOM or node-only
-dependencies anywhere in the tree.
+`@sinemacula/foundation` is the platform-agnostic base of the Sine Macula application kernels: configuration, HTTP,
+sessions, queries, realtime, storage and the rest of the shared client logic, as small port-driven TypeScript units
+with no framework, DOM or node-only dependencies.
 
 Applications do not normally consume this package directly: each platform kernel (web, mobile) boots the
 foundation core, binds the generic contracts to its own router and UI vocabulary, and layers its platform
@@ -76,9 +75,10 @@ const core = await bootFoundationCore({ ...options, runtime: { url: '/runtime-en
 ```
 
 `runtime` is optional. When set, the core fetches that JSON document within `timeout` (default 5000 ms) and hands
-its string values to `createEnvironment`; a missing document (404) counts as empty, and any other failure rejects
-the boot with a `RuntimeEnvironmentError` (`@sinemacula/foundation/config/runtime-environment-error`). Omit it where
-configuration ships with the build, as on mobile, and nothing is fetched.
+its string values to `createEnvironment`. A missing document (404) counts as empty, a `timeout` that is not positive
+or exceeds 2147483647 ms rejects the boot with a `RangeError`, and any other failure rejects it with a
+`RuntimeEnvironmentError` (`@sinemacula/foundation/config/runtime-environment-error`). Omit it where configuration
+ships with the build, as on mobile, and nothing is fetched.
 
 Everything the core installs is reachable afterwards through the service accessors in
 `@sinemacula/foundation/app/services`.
@@ -105,9 +105,12 @@ const connection = new WebSocketConnection({
     onError: error => reporter.captureError(error),
 });
 
-connection.on('order.updated', message => applyOrderUpdate(message.data));
+connection.on('order.updated', message => applyOrderUpdate(JSON.parse(message.data)));
 connection.connect();
 ```
+
+`on('message')` receives every text frame. A frame that parses as a `{ event, data }` envelope also reaches that
+event's subscribers, with `data` as text: a non-string payload arrives re-serialised as JSON.
 
 `onError` receives the errors the connection contains rather than throws: a subscriber that threw, or a reconnect
 whose `url()` builder or socket factory threw. The same failure inside `connect()` surfaces to the caller as a
@@ -135,15 +138,15 @@ const query = ApiQuery.create()
 
 - `andWhere` / `orWhere` take one builder per document; keys inside a document AND together, and repeated calls
   append documents to the same group. An empty group or document throws a `QueryError`.
-- Conditions on one relation, through repeated `whereRelation` or `whereHas` calls, merge into one document, so the
-  same related row must match all of them.
+- Repeated `whereRelation` calls on one relation merge into one document, as do repeated `whereHas` calls, so the
+  same related row must match all of them. `whereHasNot` conditions never merge.
 - Free-text search is the `search` parameter (`search(term)`), never a filter operator.
 - Aggregates render under the record's `aggregates` field only when `aggregates` is in `fields[type]` or the
   resource's default fields.
 - `withTrashed()` / `onlyTrashed()` set `trashed=with` / `trashed=only`.
-- Changing the order clears any cursor; random order under cursor pagination throws.
-- `ResourceClient.list` returns `meta` (`{ mode: 'length-aware', total, count, hasMore }` or
-  `{ mode: 'cursor', hasMore }`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
+- Changing the order drops any cursor token but keeps cursor pagination; random order under cursor pagination throws.
+- `ResourceClient.list` returns the mapped `items`, `meta` (`{ mode: 'length-aware', total, count, hasMore }`,
+  `{ mode: 'cursor', hasMore }`, or `null`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
 
 The toolkit enforces cost caps server-side and answers a request over one with a 422. The defaults are: `limit` 100,
 3 order keys, 5 aggregates, an offset of 500000 rows, 500 `$in` items, 100 filter nodes, a filter depth of 3, and

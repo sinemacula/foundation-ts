@@ -72,17 +72,17 @@ Single test file or test:
 
 ```bash
 npx vitest run src/session/session-core.test.ts
-npx vitest run -t "shares one request across concurrent rehydrations"
+npx vitest run -t "rehydrateSessionUser"
 ```
 
 ### Standards
 
 - The package stays platform-agnostic: no framework, DOM or node-only dependencies anywhere in `src/`. Every
-  platform seam (fetch, storage, sockets, notifications) arrives as an injected port, and adapters stay behind
-  ports-and-adapters at the edges.
+  platform seam (fetch, storage, sockets, notifications) arrives as an injected port, with adapters at the edges.
 - No barrel files; consumers import by subpath (e.g. `@sinemacula/foundation/http/http-client`). The manifest
   `exports` map is the public-surface allow-list - anything unlisted is internal.
-- Wire-format keys (snake_case) never appear as object-literal keys; build records through entry tuples.
+- Wire-format keys (snake_case) never appear as literal object keys; read them with bracket access and write them
+  through a named constant or entry tuples.
 - New code ships with colocated tests; the 100% coverage thresholds and the mutation-testing gate
   (`npm run test:mutation`) are the enforced floors.
 
