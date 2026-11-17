@@ -553,6 +553,101 @@ describe('WebSocketConnection', () => {
         });
     });
 
+    describe('transport errors', () => {
+        it('closes a socket that only errors and reconnects once', () => {
+            const { sockets, factory } = createFakeWebSocketFactory();
+            const conn = new WebSocketConnection({
+                url: 'ws://test',
+                backoff: fixedBackoff(100),
+                webSocketFactory: factory,
+            });
+
+            conn.connect();
+            sockets.at(0)?.emitError();
+
+            expect(sockets.at(0)?.closeCalls).toBe(1);
+            expect(vi.getTimerCount()).toBe(1);
+            expect(conn.state).toBe('connecting');
+
+            vi.advanceTimersByTime(100);
+
+            expect(sockets).toHaveLength(2);
+        });
+
+        it.each([
+            [
+                'an error followed by a close',
+                (socket: FakeWebSocket): void => {
+                    socket.emitError();
+                    socket.emitClose();
+                },
+            ],
+            [
+                'a repeated error',
+                (socket: FakeWebSocket): void => {
+                    socket.emitError();
+                    socket.emitError();
+                },
+            ],
+        ])('schedules a single reconnect for %s', (_label, fail) => {
+            const { sockets, factory } = createFakeWebSocketFactory();
+            const conn = new WebSocketConnection({
+                url: 'ws://test',
+                backoff: fixedBackoff(100),
+                webSocketFactory: factory,
+            });
+
+            conn.connect();
+            sockets.at(0)?.emitOpen();
+            fail(sockets[0] as FakeWebSocket);
+
+            expect(sockets.at(0)?.closeCalls).toBe(1);
+            expect(vi.getTimerCount()).toBe(1);
+
+            vi.advanceTimersByTime(300);
+
+            expect(sockets).toHaveLength(2);
+        });
+
+        it('ignores an error from a released socket', () => {
+            const { sockets, factory } = createFakeWebSocketFactory();
+            const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
+
+            conn.connect();
+            conn.disconnect();
+            sockets.at(0)?.emitError();
+
+            expect(sockets.at(0)?.closeCalls).toBe(1);
+            expect(vi.getTimerCount()).toBe(0);
+            expect(conn.state).toBe('closed');
+        });
+
+        it.each([
+            [4_999, 200],
+            [5_000, 100],
+        ])('after %s ms of uptime, an error waits %s ms', (uptime, delay) => {
+            const { sockets, factory } = createFakeWebSocketFactory();
+            const conn = new WebSocketConnection({
+                url: 'ws://test',
+                backoff: new ExponentialBackoff({ initialDelay: 100, multiplier: 2 }),
+                webSocketFactory: factory,
+            });
+
+            conn.connect();
+            sockets.at(0)?.emitError();
+            vi.advanceTimersByTime(100);
+            sockets.at(1)?.emitOpen();
+            vi.advanceTimersByTime(uptime);
+            sockets.at(1)?.emitError();
+
+            vi.advanceTimersByTime(delay - 1);
+            expect(sockets).toHaveLength(2);
+
+            vi.advanceTimersByTime(1);
+            expect(sockets).toHaveLength(3);
+        });
+    });
+
     describe('open failures', () => {
         it('wraps a throwing socket factory in a RealtimeError on connect()', () => {
             const cause = new Error('factory failed');

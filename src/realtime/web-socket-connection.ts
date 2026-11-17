@@ -51,12 +51,13 @@ export interface WebSocketConnectionOptions {
  * WebSocket adapter implementing {@link RealtimeConnection}, with an extra
  * {@link WebSocketConnection.send} for outbound frames.
  *
- * Reconnects with backoff whenever the socket closes without a `disconnect()`;
- * subscriptions survive reconnects, and the backoff resets only once a socket
- * stays open for {@link STABLE_CONNECTION_MS}. Every text frame goes to
- * `'message'` subscribers, and a frame that parses as a `{ event, data }` JSON
- * envelope also goes to that event's subscribers, with non-string `data` as
- * JSON. Binary frames are dropped and reported to `onError`.
+ * Reconnects with backoff whenever the socket closes or errors without a
+ * `disconnect()`; subscriptions survive reconnects, and the backoff resets only
+ * once a socket stays open for {@link STABLE_CONNECTION_MS}. Every text frame
+ * goes to `'message'` subscribers, and a frame that parses as a
+ * `{ event, data }` JSON envelope also goes to that event's subscribers, with
+ * non-string `data` as JSON. Binary frames are dropped and reported to
+ * `onError`.
  */
 export class WebSocketConnection implements RealtimeConnection {
     /** The endpoint URL, or a factory returning it per connect. */
@@ -208,19 +209,29 @@ export class WebSocketConnection implements RealtimeConnection {
             }
         };
 
-        socket.onclose = () => {
-            if (this.#socket === socket) {
-                if (performance.now() >= this.#stableAt) {
-                    this.#attempt = 0;
-                }
-
-                this.#release();
-                this.#scheduleReconnect();
-            }
-        };
+        socket.onclose = () => this.#lose(socket);
+        socket.onerror = () => this.#lose(socket);
 
         this.#socket = socket;
         this.#setState('connecting');
+    }
+
+    /**
+     * Release an owned socket that closed or errored without a `disconnect()`,
+     * close it in case only the error arrives, and schedule a reconnect.
+     */
+    #lose(socket: WebSocket): void {
+        if (this.#socket !== socket) {
+            return;
+        }
+
+        if (performance.now() >= this.#stableAt) {
+            this.#attempt = 0;
+        }
+
+        this.#release();
+        socket.close();
+        this.#scheduleReconnect();
     }
 
     /**

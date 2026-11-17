@@ -6,6 +6,7 @@
  */
 
 import { EventEmitter, once } from 'node:events';
+import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -63,7 +64,10 @@ class TestServer extends EventEmitter {
     /** Settles as each accepted socket closes. */
     readonly #closures: Promise<void>[] = [];
 
-    /** The underlying server. */
+    /** The HTTP server the upgrades arrive on. */
+    readonly #http: Server = createServer();
+
+    /** The WebSocket server handling the upgrades. */
     readonly #server: WebSocketServer;
 
     /** Upgrades held until their release, while holding is on. */
@@ -72,6 +76,9 @@ class TestServer extends EventEmitter {
     /** Whether new upgrades are held. */
     #holding: boolean = false;
 
+    /** Whether the next upgrade is refused. */
+    #refusing: boolean = false;
+
     /**
      * Start listening on an ephemeral port.
      */
@@ -79,19 +86,22 @@ class TestServer extends EventEmitter {
         super();
 
         this.#server = new WebSocketServer({
-            port: 0,
-            host: '127.0.0.1',
+            server: this.#http,
             verifyClient: (info, accept) => {
                 this.attempts.push(info.req.url ?? '');
                 this.emit('attempt');
 
-                if (this.#holding) {
+                if (this.#refusing) {
+                    this.#refusing = false;
+                    accept(false, 401);
+                } else if (this.#holding) {
                     this.#held.push(() => accept(true));
                 } else {
                     accept(true);
                 }
             },
         });
+        this.#http.listen(0, '127.0.0.1');
         this.#server.on('connection', socket => {
             this.#closures.push(new Promise(resolve => socket.once('close', () => resolve())));
             this.accepted.push(socket);
@@ -102,14 +112,14 @@ class TestServer extends EventEmitter {
      * The URL clients connect to, with `query` appended.
      */
     url(query: string = ''): string {
-        return `ws://127.0.0.1:${(this.#server.address() as AddressInfo).port}/${query}`;
+        return `ws://127.0.0.1:${(this.#http.address() as AddressInfo).port}/${query}`;
     }
 
     /**
      * Resolve once the server is listening.
      */
     async listening(): Promise<void> {
-        await within(once(this.#server, 'listening'), 'the server to listen');
+        await within(once(this.#http, 'listening'), 'the server to listen');
     }
 
     /**
@@ -117,6 +127,13 @@ class TestServer extends EventEmitter {
      */
     hold(): void {
         this.#holding = true;
+    }
+
+    /**
+     * Refuse the next upgrade with a 401.
+     */
+    refuseNext(): void {
+        this.#refusing = true;
     }
 
     /**
@@ -141,7 +158,10 @@ class TestServer extends EventEmitter {
         }
 
         await within(Promise.all(this.#closures), 'every accepted socket to close');
-        await within(new Promise<void>(resolve => this.#server.close(() => resolve())), 'the server to close');
+        this.#server.close();
+        // A cancelled handshake can leave its connection open.
+        this.#http.closeAllConnections();
+        await within(new Promise<void>(resolve => this.#http.close(() => resolve())), 'the server to close');
     }
 }
 
@@ -161,9 +181,12 @@ describe('WebSocketConnection against a real WebSocket server', () => {
             webSocketFactory: url => {
                 const socket = new WebSocket(url);
 
-                // Closing a connecting socket fires its close event in close().
+                // Some platforms end a failed handshake with only an error.
                 closures.push(
-                    new Promise(resolve => socket.addEventListener('close', () => resolve(), { once: true })),
+                    new Promise(resolve => {
+                        socket.addEventListener('close', () => resolve(), { once: true });
+                        socket.addEventListener('error', () => resolve(), { once: true });
+                    }),
                 );
                 sockets.push(socket);
 
@@ -189,8 +212,11 @@ describe('WebSocketConnection against a real WebSocket server', () => {
             connection.disconnect();
         }
 
-        await within(Promise.all(closures), 'every client socket to close');
-        await server.close();
+        try {
+            await within(Promise.all(closures), 'every client socket to settle');
+        } finally {
+            await server.close();
+        }
     });
 
     it('delivers an envelope frame to the named and the message subscribers', async () => {
@@ -243,6 +269,20 @@ describe('WebSocketConnection against a real WebSocket server', () => {
         expect(server.attempts).toEqual(['/?token=first', '/?token=second']);
     });
 
+    it('reconnects after the server refuses a handshake', async () => {
+        const connection = connectionFor({ url: server.url() });
+        const states: RealtimeState[] = [];
+        const opened = untilState(connection, 'open');
+
+        server.refuseNext();
+        connection.onStateChange(state => states.push(state));
+        connection.connect();
+        await opened;
+
+        expect(server.attempts).toHaveLength(2);
+        expect(states).toEqual(['connecting', 'open']);
+    });
+
     it('cancels a socket that is still connecting without further notifications or upgrades', async () => {
         const connection = connectionFor({ url: server.url() });
         const states: RealtimeState[] = [];
@@ -260,7 +300,7 @@ describe('WebSocketConnection against a real WebSocket server', () => {
         expect(states).toEqual(['closed']);
 
         server.release();
-        await within(Promise.all(closures), 'the client socket to close');
+        await within(Promise.all(closures), 'the client socket to settle');
 
         expect(states).toEqual(['closed']);
         expect(server.attempts).toHaveLength(1);

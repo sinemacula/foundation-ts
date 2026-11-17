@@ -117,10 +117,10 @@ The toolkit enforces cost caps server-side and answers a request over one with a
 
 ### Realtime
 
-`WebSocketConnection` (`realtime/web-socket-connection`) reconnects after any close it did not initiate, with an
-equal-jittered `ExponentialBackoff` by default so clients dropped together do not return together. The backoff resets
-only once a socket has stayed open for `STABLE_CONNECTION_MS` (5 s), so a server that accepts and closes at once still
-sees growing delays. `disconnect()` stops reconnecting until the next `connect()`.
+`WebSocketConnection` (`realtime/web-socket-connection`) reconnects after any close or socket error it did not initiate,
+with an equal-jittered `ExponentialBackoff` by default so clients dropped together do not return together. The backoff
+resets only once a socket has stayed open for `STABLE_CONNECTION_MS` (5 s), so a server that accepts and closes at once
+still sees growing delays. `disconnect()` stops reconnecting until the next `connect()`.
 
 `beforeReconnect` receives an `AbortSignal` that aborts on `disconnect()`, and skips the attempt when it resolves
 `false` or rejects. Map a classified refresh explicitly and act on its outcome only while the signal is live:

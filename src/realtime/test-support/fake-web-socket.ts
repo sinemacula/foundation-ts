@@ -46,6 +46,9 @@ export class FakeWebSocket {
     /** The close handler the connection installs. */
     #onclose: ((event: CloseEvent) => void) | null = null;
 
+    /** The error handler the connection installs. */
+    #onerror: ((event: Event) => void) | null = null;
+
     /**
      * Record the construction arguments.
      */
@@ -111,6 +114,20 @@ export class FakeWebSocket {
     }
 
     /**
+     * The installed error handler.
+     */
+    get onerror(): ((event: Event) => void) | null {
+        return this.#onerror;
+    }
+
+    /**
+     * Install the error handler.
+     */
+    set onerror(handler: ((event: Event) => void) | null) {
+        this.#onerror = handler;
+    }
+
+    /**
      * Record an outbound frame.
      */
     send(data: string): void {
@@ -150,6 +167,13 @@ export class FakeWebSocket {
         this.#readyState = CLOSED;
         // CloseEvent is only a global from node 23, and the handler ignores it.
         this.#onclose?.(new Event('close') as CloseEvent);
+    }
+
+    /**
+     * Simulate an error event, which some platforms raise without a close.
+     */
+    emitError(): void {
+        this.#onerror?.(new Event('error'));
     }
 
     /**
