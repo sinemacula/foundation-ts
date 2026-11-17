@@ -338,6 +338,7 @@
         "@types/node": "^25.9.3",
         "@vitest/coverage-v8": "^4.1.8",
         "knip": "^6.16.1",
+        "minimatch": "^11.0.8",
         "mkdist": "^2.4.1",
         "publint": "^0.3.21",
         "typescript": "^6.0.3",
