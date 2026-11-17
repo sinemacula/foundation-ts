@@ -27,7 +27,7 @@ jobs:
     # ==========================================================================
     # No browser surface, so the e2e job is off.
     tests:
-        uses: sinemacula/.github/.github/workflows/node-tests.yml@v3.0.2
+        uses: sinemacula/.github/.github/workflows/node-tests.yml@v3.2.0
         # The shared jobs inherit only what this job grants; the coverage upload
         # signs in through OIDC.
         permissions:
