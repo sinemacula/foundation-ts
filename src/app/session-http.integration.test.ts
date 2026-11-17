@@ -1,7 +1,7 @@
 /**
  * Integration tests for the authentication chain: the session core signing in
- * and refreshing through the wired HTTP client, against the fake
- * authentication server behind a fetch that speaks its wire format.
+ * and refreshing through the wired HTTP client, against the fake authentication
+ * server behind a fetch that speaks its wire format.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -178,84 +178,109 @@ async function rejectedStatus(promise: Promise<unknown>): Promise<number> {
     return (error as HttpError).status;
 }
 
-/**
- * Wire the session core, the default session API and the HTTP client over a
- * fake server.
- *
- * The unauthorized handler follows the stale-token policy, scoped to a
- * session: a request sent with a token of a session since replaced is refused
- * outright, one sent with a token its own session has since rotated is retried
- * without a refresh, and any other is refreshed, retrying only while the
- * session it started on is still held. Every request may also carry its
- * session's abort signal, which a sign-in or sign-out aborts before it starts,
- * cancelling a retry approved just before.
- */
-function createHarness(): Harness {
-    let now = 1_000_000;
-    let lineages = 0;
-    let scope = new AbortController();
-    const server = new FakeAuthServer({ now: () => now, accessTtlMs: ACCESS_TTL_MS });
-    const state = createInitialSessionState();
-    const issuedBy = new Map<string, object>();
-    const holds = new Map<string, Promise<void>>();
-    const failures = new Map<string, number>();
-    const outcomes: RefreshOutcome[] = [];
-    const reporter: ErrorReporter = { captureError: vi.fn(), captureMessage: vi.fn(), setUser: vi.fn() };
+/** One request as the fake fetch hands it to a route. */
+interface AuthCall {
+    /** The server's gateway, authenticated by the request's bearer token. */
+    readonly gateway: ReturnType<FakeAuthServer['api']>;
+
+    /** The bearer token the request carried, or null. */
+    readonly bearer: string | null;
+
+    /** The parsed JSON request body, or an empty record. */
+    readonly body: Record<string, unknown>;
+}
+
+/** A fetch over the fake server, with hooks to hold or fail a request. */
+interface AuthFetch {
+    /** The fetch. */
+    readonly fetchFn: ReturnType<typeof vi.fn<(...args: FetchArgs) => Promise<Response>>>;
 
     /**
-     * Answer the session endpoints through the server's gateway and any other
-     * path as a protected resource.
+     * Hold the response to the next request to a path until released.
+     *
+     * @returns the release
      */
-    const serve = async (path: string, init: RequestInit | undefined): Promise<Response> => {
-        const bearer = bearerOf(authorizationOf(init));
-        const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
-        const gateway = server.api({ accessToken: () => bearer });
+    hold(path: string): () => void;
 
-        /**
-         * Answer with a token set in the wire format.
-         */
-        const tokens = (issued: SessionTokens): Response =>
-            Response.json({
-                access_token: issued.accessToken,
-                expires_in: ((issued.expiresAtEpochMs ?? now) - now) / 1000,
-                refresh_token: issued.refreshToken,
+    /**
+     * Answer the next request to a path with a bare status.
+     */
+    failNext(path: string, status: number): void;
+}
+
+/**
+ * Build the session routes over the fake server, answering in the wire format
+ * the default session API reads.
+ */
+function authRoutes(now: () => number): Readonly<Record<string, (call: AuthCall) => Promise<Response>>> {
+    /**
+     * Answer with a token set in the wire format.
+     */
+    const tokens = (issued: SessionTokens): Response =>
+        Response.json({
+            access_token: issued.accessToken,
+            expires_in: ((issued.expiresAtEpochMs ?? now()) - now()) / 1000,
+            refresh_token: issued.refreshToken,
+        });
+
+    return {
+        '/auth/sign-in': async ({ gateway, body }) => {
+            const credentials = { email: String(body['email']), password: String(body['password']) };
+            const result = await gateway.login(credentials, DEVICE, refreshTokenOf(body));
+
+            return result.kind === 'authenticated' ? tokens(result.tokens) : failureResponse(null);
+        },
+        '/auth/refresh': async ({ gateway, body }) => {
+            const result = await gateway.refresh(refreshTokenOf(body));
+
+            return result.kind === 'refreshed'
+                ? tokens(result.tokens)
+                : failureResponse('error' in result ? result.error : null);
+        },
+        '/auth/logout': async ({ gateway, bearer, body }) => {
+            await gateway.logout({
+                accessToken: bearer ?? '',
+                refreshToken: refreshTokenOf(body),
+                expiresAtEpochMs: null,
             });
 
-        switch (path) {
-            case '/auth/sign-in': {
-                const credentials = { email: String(body['email']), password: String(body['password']) };
-                const result = await gateway.login(credentials, DEVICE, refreshTokenOf(body));
+            return new Response(null, { status: 204 });
+        },
+        '/users/self': async ({ gateway }) => {
+            const user = await gateway.currentUser();
 
-                return result.kind === 'authenticated' ? tokens(result.tokens) : failureResponse(null);
-            }
-            case '/auth/refresh': {
-                const result = await gateway.refresh(refreshTokenOf(body));
+            return Response.json({ data: { id: user.id, email: user.email } });
+        },
+    };
+}
 
-                return result.kind === 'refreshed'
-                    ? tokens(result.tokens)
-                    : failureResponse('error' in result ? result.error : null);
-            }
-            case '/auth/logout':
-                await gateway.logout({
-                    accessToken: bearer ?? '',
-                    refreshToken: refreshTokenOf(body),
-                    expiresAtEpochMs: null,
-                });
+/**
+ * Build a fetch that serves the session endpoints through the fake server and
+ * any other path as a resource of the session the bearer token belongs to. A
+ * held response is decided as the server stands on release.
+ */
+function createAuthFetch(server: FakeAuthServer, now: () => number): AuthFetch {
+    const routes = authRoutes(now);
+    const holds = new Map<string, Promise<void>>();
+    const failures = new Map<string, number>();
 
-                return new Response(null, { status: 204 });
-            case '/users/self': {
-                const user = await gateway.currentUser();
+    /**
+     * Answer a request through its route, or as a protected resource.
+     */
+    const serve = (path: string, init: RequestInit | undefined): Promise<Response> => {
+        const bearer = bearerOf(authorizationOf(init));
+        const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+        const route = routes[path];
 
-                return Response.json({ data: { id: user.id, email: user.email } });
-            }
-            default: {
-                const session = server.sessionOf(bearer);
-
-                return session === undefined
-                    ? new Response('', { status: 401 })
-                    : Response.json({ path, session: session.id });
-            }
+        if (route !== undefined) {
+            return route({ gateway: server.api({ accessToken: () => bearer }), bearer, body });
         }
+
+        const session = server.sessionOf(bearer);
+
+        return Promise.resolve(
+            session === undefined ? new Response('', { status: 401 }) : Response.json({ path, session: session.id }),
+        );
     };
 
     const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>(async (input, init) => {
@@ -279,6 +304,50 @@ function createHarness(): Harness {
             return failureResponse(error);
         }
     });
+
+    return {
+        fetchFn,
+        hold: path => {
+            let release!: () => void;
+
+            holds.set(
+                path,
+                new Promise<void>(resolve => {
+                    release = resolve;
+                }),
+            );
+
+            return release;
+        },
+        failNext: (path, status) => {
+            failures.set(path, status);
+        },
+    };
+}
+
+/**
+ * Wire the session core, the default session API and the HTTP client over a
+ * fake server.
+ *
+ * The unauthorized handler follows the stale-token policy, scoped to a session:
+ * a request sent with a token of a session since replaced is refused outright,
+ * one sent with a token its own session has since rotated is retried without a
+ * refresh, and any other is refreshed, retrying only while the session it
+ * started on is still held. Every request may also carry its session's abort
+ * signal, which a sign-in or sign-out aborts before it starts, cancelling a
+ * retry approved just before.
+ */
+function createHarness(): Harness {
+    let now = 1_000_000;
+    let lineages = 0;
+    let scope = new AbortController();
+    const server = new FakeAuthServer({ now: () => now, accessTtlMs: ACCESS_TTL_MS });
+    const state = createInitialSessionState();
+    const issuedBy = new Map<string, object>();
+    const outcomes: RefreshOutcome[] = [];
+    const reporter: ErrorReporter = { captureError: vi.fn(), captureMessage: vi.fn(), setUser: vi.fn() };
+
+    const { fetchFn, hold, failNext } = createAuthFetch(server, () => now);
 
     const attachBearer = createBearerTokenInterceptor({ getAccessToken: () => state.accessToken });
 
@@ -334,21 +403,8 @@ function createHarness(): Harness {
 
             return http.get<ResourceBody>(path, signals.length === 0 ? {} : { signal: AbortSignal.any(signals) });
         },
-        hold: path => {
-            let release!: () => void;
-
-            holds.set(
-                path,
-                new Promise<void>(resolve => {
-                    release = resolve;
-                }),
-            );
-
-            return release;
-        },
-        failNext: (path, status) => {
-            failures.set(path, status);
-        },
+        hold,
+        failNext,
         advance: ms => {
             now += ms;
         },
