@@ -12,7 +12,14 @@
     "bugs": {
         "url": "https://github.com/sinemacula/foundation-ts/issues"
     },
-    "keywords": ["sine macula", "foundation", "kernel", "typescript", "framework-agnostic", "ports"],
+    "keywords": [
+        "sine macula",
+        "foundation",
+        "kernel",
+        "typescript",
+        "framework-agnostic",
+        "ports"
+    ],
     "type": "module",
     "engines": {
         "node": ">=22"
@@ -356,7 +363,11 @@
             "default": "./dist/theme/color-scheme-service.js"
         }
     },
-    "files": ["dist", "README.md", "LICENSE"],
+    "files": [
+        "dist",
+        "README.md",
+        "LICENSE"
+    ],
     "publishConfig": {
         "access": "public",
         "registry": "https://registry.npmjs.org/"
