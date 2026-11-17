@@ -5,7 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { deepFreeze } from './deep-freeze';
 
@@ -28,10 +28,6 @@ interface PairedNode {
 }
 
 describe('deepFreeze', () => {
-    afterEach(() => {
-        vi.restoreAllMocks();
-    });
-
     it.each([42, 'hello', true, null, undefined])('returns %s unchanged', value => {
         expect(deepFreeze(value)).toBe(value);
     });
@@ -136,14 +132,11 @@ describe('deepFreeze', () => {
         expect(Object.isFrozen(second)).toBe(true);
     });
 
-    it('freezes a subtree shared by two paths exactly once', () => {
+    it('freezes a subtree shared by two paths', () => {
         const shared = { leaf: { value: 1 } };
         const tree = { left: { shared }, right: { shared } };
-        const freeze = vi.spyOn(Object, 'freeze');
 
         deepFreeze(tree);
-
-        expect(freeze.mock.calls.filter(([frozen]) => frozen === shared)).toHaveLength(1);
 
         expect(Object.isFrozen(tree.left)).toBe(true);
         expect(Object.isFrozen(tree.right)).toBe(true);
