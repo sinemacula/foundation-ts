@@ -137,6 +137,22 @@ non-string `data` re-serialised as JSON. `onError` receives failures the connect
 `url()` builder or socket factory); the same failure inside `connect()` throws a `RealtimeError` with the original as
 its `cause`.
 
+### Adapter contracts
+
+A `FeatureFlags` or `RealtimeConnection` adapter proves its behaviour by running the shared suite from its own tests:
+
+```ts
+import { describeFeatureFlagsContract } from '@sinemacula/foundation/feature-flags/test-support/feature-flags-contract';
+
+describeFeatureFlagsContract({
+    create(initial) {
+        const flags = new RemoteFeatureFlags(initial);
+
+        return { flags, change: next => flags.update(next) };
+    },
+});
+```
+
 ### React Native
 
 Every subpath resolves under Metro and Jest through the `default` export condition, and CI loads the whole public
@@ -147,7 +163,7 @@ asynchronous secure store implements `SessionPersistence` directly.
 ## Requirements
 
 - Node.js 22+
-- Vitest 3+, only for the realtime contract suite in `realtime/test-support`
+- Vitest 3+, only for the contract suites under `*/test-support`
 
 ## Testing
 
