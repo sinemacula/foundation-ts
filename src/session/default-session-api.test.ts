@@ -5,7 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 
 import { createBearerTokenInterceptor } from '../http/bearer-token-interceptor';
 import type { FetchHttpClientOptions } from '../http/fetch-http-client';
@@ -14,7 +14,7 @@ import type { HttpClient, HttpRequestOptions } from '../http/http-client';
 import { HttpError, NetworkError, TimeoutError } from '../http/http-error';
 import type { DefaultSessionApiOptions } from './default-session-api';
 import { createDefaultSessionApi } from './default-session-api';
-import type { SessionApi } from './session-api';
+import type { PasswordCredentials, SessionApi, SessionDevice } from './session-api';
 import { SessionError } from './session-error';
 import type { SessionUser } from './session-user';
 
@@ -682,6 +682,44 @@ describe('createDefaultSessionApi', () => {
 
             expect(seen).toStrictEqual([{ role: 'raw' }]);
             expect(user).toStrictEqual({ id: 'mapped', email: null, name: null, permissions: [], role: 'admin' });
+        });
+
+        it('types the gateway by its credentials and user mapping', () => {
+            const http = new FakeHttpClient();
+
+            /** Credentials signing in with a one-time code. */
+            interface CodeCredentials {
+                /** The one-time code. */
+                readonly code: string;
+            }
+
+            /**
+             * Build the sign-in body for a one-time code.
+             */
+            const loginBody = (credentials: CodeCredentials, device: SessionDevice): unknown => ({
+                code: credentials.code,
+                platform: device.os,
+            });
+
+            /**
+             * Map any payload onto an administrator.
+             */
+            const mapUser = (): AdminUser => ({ id: 1, email: null, name: null, permissions: [], role: 'admin' });
+
+            expectTypeOf(createDefaultSessionApi(http)).toEqualTypeOf<SessionApi<SessionUser, PasswordCredentials>>();
+            expectTypeOf(createDefaultSessionApi(http, { loginBody })).toEqualTypeOf<
+                SessionApi<SessionUser, CodeCredentials>
+            >();
+            expectTypeOf(createDefaultSessionApi(http, { mapUser })).toEqualTypeOf<
+                SessionApi<AdminUser, PasswordCredentials>
+            >();
+            expectTypeOf(createDefaultSessionApi(http, { loginBody, mapUser })).toEqualTypeOf<
+                SessionApi<AdminUser, CodeCredentials>
+            >();
+            expectTypeOf(() =>
+                // @ts-expect-error a mapping must produce a session user
+                createDefaultSessionApi(http, { mapUser: () => ({ role: 'admin' }) }),
+            ).toBeFunction();
         });
 
         it('requires a mapping for a richer user type', () => {
