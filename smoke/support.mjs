@@ -36,7 +36,10 @@ export class SmokeError extends Error {
 
 /** Pack the package into `scratch` and return the tarball's path. */
 export function packInto(scratch) {
-    execFileSync('npm', ['pack', '--silent', '--pack-destination', scratch], { cwd: ROOT, stdio: 'ignore' });
+    execFileSync('npm', ['pack', '--silent', '--pack-destination', scratch], {
+        cwd: ROOT,
+        stdio: ['ignore', 'ignore', 'inherit'],
+    });
 
     return join(
         scratch,

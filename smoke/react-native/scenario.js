@@ -33,6 +33,8 @@ const EXPECTED_QUERY =
     'filters=%7B%22status%22%3A%22active%22%2C%22total%22%3A%7B%22%24ge%22%3A100%7D%2C%22customer%22%3A%7B%22country' +
     '%22%3A%22GB%22%7D%7D&order=created_at%3Adesc%2Cid&page=2&limit=25&fields%5Border%5D=id%2Ctotal';
 
+const SIGNED_IN_USER = { id: 7, email: 'ada@example.test', name: 'Ada Lovelace', permissions: [] };
+
 const ROUTES = {
     'POST auth/sign-in': [200, { data: { access_token: 'access-1', expires_in: 3600, refresh_token: 'refresh-1' } }],
     'GET users/self': [200, { data: { id: 7, email: 'ada@example.test', first_name: 'Ada', last_name: 'Lovelace' } }],
@@ -131,11 +133,16 @@ async function session() {
     const state = createInitialSessionState();
 
     await hydrateSession(state, context);
-    await loginWithCredentials(state, context, { email: 'ada@example.test', password: 'secret' });
+    const login = await loginWithCredentials(state, context, { email: 'ada@example.test', password: 'secret' });
+
+    assertEqual('login outcome', login, { kind: 'authenticated' });
+    assertEqual('signed-in state', [state.accessToken, state.refreshToken], ['access-1', 'refresh-1']);
+    assertEqual('signed-in user', state.user, SIGNED_IN_USER);
 
     const refresh = await refreshSession(state, context);
     const { tokens } = await persistence.load();
 
+    assertEqual('refresh outcome', refresh, { kind: 'refreshed' });
     assertEqual('refreshed state', [state.accessToken, state.refreshToken], ['access-2', 'refresh-2']);
     assertEqual('persisted refresh token', tokens.refreshToken, 'refresh-2');
 
