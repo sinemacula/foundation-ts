@@ -5,7 +5,9 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { bench, describe } from 'vitest';
+import { describe } from 'vitest';
+
+import { measure } from './support/measure';
 
 import { PermissionSet } from '../src/authorization/permission-set';
 
@@ -18,7 +20,7 @@ describe('PermissionSet.allows', () => {
             ['the last hit', `resource_${String(count - 1)}.view`],
             ['a miss', 'unknown.view'],
         ] as const) {
-            bench(`checks ${label} over ${String(count)} grants`, () => {
+            measure(`checks ${label} over ${String(count)} grants`, () => {
                 set.allows(permission);
             });
         }
