@@ -55,7 +55,7 @@ export interface FetchHttpClientRetryOptions {
     /** Number of retries attempted after the first try. Defaults to 2. */
     readonly attempts?: number;
 
-    /** Delay strategy between attempts. Defaults to a new {@link ExponentialBackoff}. */
+    /** Delay strategy between attempts. Defaults to `new ExponentialBackoff({ jitter: 'equal' })`. */
     readonly backoff?: RetryBackoff;
 }
 
@@ -190,7 +190,7 @@ export class FetchHttpClient implements HttpClient {
         this.#onUnauthorized = options.onUnauthorized ?? null;
         this.#onResponseError = options.onResponseError ?? null;
         this.#retryAttempts = options.retry?.attempts ?? (options.retry === undefined ? 0 : 2);
-        this.#retryBackoff = options.retry?.backoff ?? new ExponentialBackoff();
+        this.#retryBackoff = options.retry?.backoff ?? new ExponentialBackoff({ jitter: 'equal' });
     }
 
     /**
