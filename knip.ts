@@ -18,11 +18,12 @@ const config: KnipConfig = {
         ...sourceEntries,
         'src/**/*.test.ts',
         'test/**/*.test.ts',
+        'bench/**/*.bench.ts',
         'stryker.config.json',
         'scripts/*.mjs',
         'smoke/*/run.mjs',
     ],
-    project: ['src/**/*.ts', 'test/**/*.ts', 'scripts/**/*.mjs', 'smoke/**/*.{js,mjs}'],
+    project: ['src/**/*.ts', 'test/**/*.ts', 'bench/**/*.ts', 'scripts/**/*.mjs', 'smoke/**/*.{js,mjs}'],
     ignoreBinaries: ['qlty'],
     ignoreExportsUsedInFile: true,
 };

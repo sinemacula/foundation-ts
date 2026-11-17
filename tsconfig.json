@@ -5,6 +5,6 @@
         "types": ["node"],
         "noEmit": true
     },
-    "include": ["src", "test", "vitest.config.ts", "knip.ts"],
+    "include": ["src", "test", "bench", "vitest.config.ts", "knip.ts"],
     "exclude": ["node_modules", "dist", "coverage"]
 }
