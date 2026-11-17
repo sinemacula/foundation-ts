@@ -133,15 +133,23 @@ describe('FetchHttpClient - URL construction', () => {
 
 describe('FetchHttpClient - query parameters', () => {
     it.each([
-        ['appends a string query param', { q: 'hello' }, '/items?q=hello'],
-        ['appends a number query param', { page: 2 }, '/items?page=2'],
-        ['appends a boolean query param', { active: true }, '/items?active=true'],
-        ['skips an undefined query param', { page: undefined }, '/items'],
-    ])('%s', async (_case, query, expected) => {
+        ['appends a string query param', '/items', { q: 'hello' }, '/items?q=hello'],
+        ['appends a number query param', '/items', { page: 2 }, '/items?page=2'],
+        ['appends a boolean query param', '/items', { active: true }, '/items?active=true'],
+        ['skips an undefined query param', '/items', { page: undefined }, '/items'],
+        ['extends a query already in the path', '/items?x=1', { y: 2 }, '/items?x=1&y=2'],
+        ['leaves a path query alone when every param is undefined', '/items?x=1', { y: undefined }, '/items?x=1'],
+        ['fills an empty path query', '/items?', { y: 2 }, '/items?y=2'],
+        ['extends a path query ending in &', '/items?x=1&', { y: 2 }, '/items?x=1&y=2'],
+        ['keeps a fragment after the query', '/items#frag', { y: 2 }, '/items?y=2#frag'],
+        ['keeps a fragment after an extended path query', '/items?x=1#frag', { y: 2 }, '/items?x=1&y=2#frag'],
+        ['keeps a fragment when no query is added', '/items#frag', {}, '/items#frag'],
+        ['sends a key in both the path and the params twice', '/items?x=1', { x: 2 }, '/items?x=1&x=2'],
+    ])('%s', async (_case, path, query, expected) => {
         const fetchFn = makeFetch(async () => jsonResponse([]));
         const client = makeClient(fetchFn);
 
-        await client.get('/items', { query });
+        await client.get(path, { query });
 
         expect(lastUrl(fetchFn)).toBe(`https://api.example.com${expected}`);
     });
@@ -187,16 +195,13 @@ describe('FetchHttpClient - body and content-type', () => {
         expect(headers['x-request-id']).toBe('abc');
     });
 
-    it('keeps a title-case Content-Type the caller sets', async () => {
+    it('sends a title-case Content-Type the caller sets under its lower-case name', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ id: 1 }));
         const client = makeClient(fetchFn);
 
         await client.post('/upload', { data: 1 }, { headers: { 'Content-Type': 'text/csv' } });
 
-        const headers = lastHeaders(fetchFn);
-
-        expect(headers['Content-Type']).toBe('text/csv');
-        expect(headers['content-type']).toBeUndefined();
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/json', 'content-type': 'text/csv' });
     });
 
     it('keeps a lowercase content-type the caller sets', async () => {
@@ -237,6 +242,41 @@ describe('FetchHttpClient - body and content-type', () => {
         expect(headerKeys).not.toContain('content-type');
     });
 
+    it.each([
+        ['the default headers', { defaultHeaders: { 'Content-Type': 'application/json' } }, {}],
+        [
+            'an interceptor',
+            {
+                requestInterceptors: [
+                    (request: HttpRequest): HttpRequest => ({
+                        ...request,
+                        headers: { ...request.headers, 'Content-Type': 'application/json' },
+                    }),
+                ],
+            },
+            {},
+        ],
+        ['the request', {}, { headers: { 'Content-Type': 'application/json' } }],
+    ])('drops a content-type set by %s from a FormData body', async (_source, extra, options) => {
+        const fetchFn = makeFetch(async () => jsonResponse({ ok: true }));
+        const client = makeClient(fetchFn, extra);
+        const body = formDataWithFile();
+
+        await client.post('/uploads', body, options);
+
+        expect(lastInit(fetchFn).body).toBe(body);
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/json' });
+    });
+
+    it('keeps an explicit content-type on a Blob body', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({ ok: true }));
+        const client = makeClient(fetchFn);
+
+        await client.post('/uploads', new Blob(['png']), { headers: { 'content-type': 'image/png' } });
+
+        expect(lastHeaders(fetchFn)['content-type']).toBe('image/png');
+    });
+
     it('preserves other headers alongside a FormData body', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ ok: true }));
         const client = makeClient(fetchFn);
@@ -265,6 +305,85 @@ describe('FetchHttpClient - defaultHeaders', () => {
         await client.get('/items', { headers: { 'x-api-key': 'override' } });
 
         expect(lastHeaders(fetchFn)['x-api-key']).toBe('override');
+    });
+
+    it.each([
+        ['authorization', { Authorization: 'Bearer default' }, { authorization: 'Bearer override' }, 'Bearer override'],
+        ['content-type', { 'content-type': 'application/json' }, { 'Content-Type': 'text/csv' }, 'text/csv'],
+        ['accept', { Accept: 'application/vnd.api+json' }, { accept: 'text/csv' }, 'text/csv'],
+    ])(
+        'sends only the per-request %s when its case differs from the default',
+        async (name, defaults, headers, value) => {
+            const fetchFn = makeFetch(async () => jsonResponse({}));
+            const client = makeClient(fetchFn, { defaultHeaders: defaults });
+
+            await client.post('/items', { a: 1 }, { headers });
+
+            const sent = lastHeaders(fetchFn);
+
+            expect(new Headers(sent).get(name)).toBe(value);
+            expect(Object.keys(sent).filter(key => key.toLowerCase() === name)).toStrictEqual([name]);
+        },
+    );
+
+    it('lets the later of two names differing in case win within one record', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn);
+
+        await client.get('/items', { headers: { 'X-A': '1', 'x-a': '2' } });
+
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/json', 'x-a': '2' });
+    });
+
+    it('canonicalises what an interceptor returns before the next one and fetch see it', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const seen: Record<string, string>[] = [];
+        const client = makeClient(fetchFn, {
+            defaultHeaders: { authorization: 'Bearer default' },
+            requestInterceptors: [
+                request => ({ ...request, headers: { ...request.headers, Authorization: 'Bearer x' } }),
+                request => {
+                    seen.push({ ...request.headers });
+
+                    return request;
+                },
+            ],
+        });
+
+        await client.get('/items');
+
+        expect(seen).toStrictEqual([{ accept: 'application/json', authorization: 'Bearer x' }]);
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/json', authorization: 'Bearer x' });
+    });
+
+    it('sends no header an interceptor removed', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn, {
+            defaultHeaders: { 'X-Trace': 'abc' },
+            requestInterceptors: [
+                request => ({
+                    ...request,
+                    headers: Object.fromEntries(Object.entries(request.headers).filter(([name]) => name !== 'x-trace')),
+                }),
+            ],
+        });
+
+        await client.get('/items');
+
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/json' });
+    });
+
+    it('sends a __proto__ header as an own key without touching the prototype', async () => {
+        const fetchFn = makeFetch(async () => jsonResponse({}));
+        const client = makeClient(fetchFn);
+        const headers = JSON.parse('{"__proto__": "polluted"}') as Record<string, string>;
+
+        await client.get('/items', { headers });
+
+        const sent = lastHeaders(fetchFn);
+
+        expect(Object.getPrototypeOf(sent)).toBe(Object.prototype);
+        expect(Object.getOwnPropertyDescriptor(sent, '__proto__')?.value).toBe('polluted');
     });
 });
 
@@ -306,7 +425,7 @@ describe('FetchHttpClient - accept header', () => {
 
         await client.get('/items');
 
-        expect(lastHeaders(fetchFn)).toStrictEqual({ Accept: 'application/vnd.api+json' });
+        expect(lastHeaders(fetchFn)).toStrictEqual({ accept: 'application/vnd.api+json' });
     });
 
     it('lets a per-request header replace the default accept', async () => {

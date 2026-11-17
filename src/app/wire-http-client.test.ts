@@ -228,6 +228,23 @@ describe('wireHttpClient', () => {
             expect(api()).toBe(client);
         });
 
+        it('rejects a timeout above the timer maximum and installs no client', () => {
+            const config: FoundationConfig = {
+                ...createConfig(),
+                api: { baseUrl: 'https://api.example.com', timeout: Infinity },
+            };
+
+            /**
+             * Wire the client over the out-of-range configuration.
+             */
+            const wire = (): HttpClient =>
+                wireHttpClient({ config, fetchFn: failingFetch, contributions: createContributions() });
+
+            expect(wire).toThrow(RangeError);
+            expect(wire).toThrow('The request timeout must be at most 2147483647 ms; pass zero or less for none.');
+            expect(() => api()).toThrow('http client accessed before initialisation');
+        });
+
         it('sends requests to the base URL through the fetch seam with a timeout signal', async () => {
             const stub = createFetchStub(() => jsonOk());
             const client = wireHttpClient({

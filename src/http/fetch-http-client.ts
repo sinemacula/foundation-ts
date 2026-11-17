@@ -7,7 +7,7 @@
 
 import { ExponentialBackoff } from '../realtime/exponential-backoff';
 import { stripQueryAndFragment } from '../support/url';
-import { onAbort, openAbortScope } from './abort-scope';
+import { onAbort, openAbortScope, untilAborted } from './abort-scope';
 import type { AbortScope } from './abort-scope';
 import type {
     HttpClient,
@@ -66,10 +66,10 @@ export interface FetchHttpClientOptions {
     /** Fetch implementation to use; defaults to the global fetch. */
     readonly fetchFn?: typeof fetch;
 
-    /** Per-request timeout in milliseconds, covering the response body; omit, or pass zero or less, for none. */
+    /** Per-request timeout in milliseconds, covering the response body, at most 2147483647; omit, or pass zero or less, for none. */
     readonly timeout?: number;
 
-    /** Headers sent on every request unless overridden. An `accept` header here or per request replaces the JSON default. */
+    /** Headers sent on every request unless overridden, names compared case-insensitively. An `accept` header here or per request replaces the JSON default. */
     readonly defaultHeaders?: Readonly<Record<string, string>>;
 
     /** Interceptors applied to each request in registration order. */
@@ -87,6 +87,9 @@ export interface FetchHttpClientOptions {
 
 /** How a successful response body is read: parsed JSON/text, or a raw Blob. */
 type BodyParseMode = 'json' | 'blob';
+
+/** The longest delay a timer accepts; a longer one fires at once. */
+const MAX_TIMER_DELAY = 2_147_483_647;
 
 /** HTTP statuses treated as transient, and therefore retryable, failures. */
 const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
@@ -124,12 +127,16 @@ interface SendRequest {
 }
 
 /**
- * Mutable holder for the most recently resolved request, read for final-outcome
- * error notification.
+ * Mutable record of one attempt: its most recently resolved request, read for
+ * final-outcome error notification, and whether it spent the call's single
+ * unauthorized-handler invocation.
  */
 interface AttemptContext {
     /** The most recently resolved request, or null before dispatch. */
     request: HttpRequest | null;
+
+    /** Whether the unauthorized handler has been invoked. */
+    unauthorizedHandled: boolean;
 }
 
 /**
@@ -165,12 +172,20 @@ export class FetchHttpClient implements HttpClient {
 
     /**
      * Construct a new HTTP client.
+     *
+     * @throws {RangeError} when the timeout exceeds the timer maximum or is NaN
      */
     constructor(options: FetchHttpClientOptions) {
-        this.#baseUrl = trimTrailingSlashes(options.baseUrl);
-        this.#fetchFn = options.fetchFn ?? ((input, init) => globalThis.fetch(input, init));
         const timeout = options.timeout ?? 0;
 
+        if (!(timeout <= MAX_TIMER_DELAY)) {
+            throw new RangeError(
+                `The request timeout must be at most ${String(MAX_TIMER_DELAY)} ms; pass zero or less for none.`,
+            );
+        }
+
+        this.#baseUrl = trimTrailingSlashes(options.baseUrl);
+        this.#fetchFn = options.fetchFn ?? ((input, init) => globalThis.fetch(input, init));
         this.#timeout = timeout > 0 ? timeout : null;
         this.#defaultHeaders = options.defaultHeaders ?? {};
         this.#interceptors = options.requestInterceptors ?? [];
@@ -266,12 +281,13 @@ export class FetchHttpClient implements HttpClient {
 
     /**
      * Run a request, retrying transient failures on idempotent requests until
-     * the retry budget runs out, and report only the final failure.
+     * the retry budget runs out, and report only the final failure. The
+     * unauthorized handler runs at most once across all attempts.
      *
      * @param attempt - zero-based attempt counter for this call
      */
     async #sendAttempt<T>(sendRequest: SendRequest, attempt: number): Promise<T> {
-        const context: AttemptContext = { request: null };
+        const context: AttemptContext = { request: null, unauthorizedHandled: false };
 
         try {
             return await this.#dispatchOnce<T>(sendRequest, context);
@@ -279,7 +295,9 @@ export class FetchHttpClient implements HttpClient {
             if (sendRequest.idempotent && attempt < this.#retryAttempts && isTransientError(error)) {
                 await this.#awaitBackoff(attempt, sendRequest, context.request);
 
-                return this.#sendAttempt<T>(sendRequest, attempt + 1);
+                const shouldRetryUnauthorized = sendRequest.shouldRetryUnauthorized && !context.unauthorizedHandled;
+
+                return this.#sendAttempt<T>({ ...sendRequest, shouldRetryUnauthorized }, attempt + 1);
             }
 
             if (context.request !== null && !(error instanceof CancelledError)) {
@@ -322,25 +340,28 @@ export class FetchHttpClient implements HttpClient {
      * handler; the caller does that for the final outcome.
      *
      * @param context - records the resolved request for the caller's error
-     * notification
+     * notification, and the handler invocation
      */
     async #dispatchOnce<T>(sendRequest: SendRequest, context: AttemptContext): Promise<T> {
         const { method, path, body, options, parse } = sendRequest;
 
-        const request = await this.#applyInterceptors({
-            method,
-            url: this.#buildUrl(path, options?.query),
-            headers: withDefaultAccept({ ...this.#defaultHeaders, ...options?.headers }, parse),
-            body,
-            ...(options?.credentials === undefined ? {} : { credentials: options.credentials }),
-        });
+        const request = await this.#applyInterceptors(
+            {
+                method,
+                url: this.#buildUrl(path, options?.query),
+                headers: mergeHeaders({ accept: DEFAULT_ACCEPT[parse] }, this.#defaultHeaders, options?.headers),
+                body,
+                ...(options?.credentials === undefined ? {} : { credentials: options.credentials }),
+            },
+            options?.signal,
+        );
 
         context.request = request;
 
         try {
             return await this.#exchange<T>(request, sendRequest);
         } catch (error) {
-            if (!(await this.#refreshedAfter(error, sendRequest))) {
+            if (!(await this.#refreshedAfter(error, sendRequest, request, context))) {
                 throw error;
             }
         }
@@ -353,6 +374,8 @@ export class FetchHttpClient implements HttpClient {
      * configured timeout covers the body as well as the headers.
      */
     async #exchange<T>(request: HttpRequest, sendRequest: SendRequest): Promise<T> {
+        throwIfCancelled(request, sendRequest.options?.signal);
+
         const scope = openAbortScope(this.#timeout, sendRequest.options?.signal);
 
         try {
@@ -371,28 +394,39 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Run the unauthorized handler when a failure is an eligible 401. A
-     * rejecting handler counts as a failed refresh, so the original 401 stands.
+     * Run the unauthorized handler with the request that received an eligible
+     * 401. A rejecting handler counts as a failed refresh, so the original 401
+     * stands; a caller abort stops the wait but never the handler, whose work
+     * may be shared with other requests.
      *
+     * @param request - the resolved request that received the failure
+     * @param context - marks the handler as invoked for this call
      * @returns true when a refresh succeeded and the request should be retried
      */
-    async #refreshedAfter(error: unknown, sendRequest: SendRequest): Promise<boolean> {
+    async #refreshedAfter(
+        error: unknown,
+        sendRequest: SendRequest,
+        request: HttpRequest,
+        context: AttemptContext,
+    ): Promise<boolean> {
         const { options, shouldRetryUnauthorized } = sendRequest;
+        const handler = this.#onUnauthorized;
         const eligible =
             error instanceof HttpError &&
             error.status === 401 &&
             shouldRetryUnauthorized &&
             options?.retryOnUnauthorized !== false;
 
-        if (!eligible || this.#onUnauthorized === null) {
+        if (!eligible || handler === null) {
             return false;
         }
 
-        try {
-            return await this.#onUnauthorized();
-        } catch {
-            return false;
-        }
+        const signal = options?.signal;
+
+        throwIfCancelled(request, signal);
+        context.unauthorizedHandled = true;
+
+        return await untilAborted(canRetry(handler, request), signal, reason => cancelledError(request, reason));
     }
 
     /**
@@ -412,13 +446,23 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Thread the request through every interceptor in registration order.
+     * Thread the request through every interceptor in registration order,
+     * canonicalising the header names each one returns. A caller abort stops
+     * the chain at once, and no later interceptor runs.
      */
-    async #applyInterceptors(initial: HttpRequest): Promise<HttpRequest> {
+    async #applyInterceptors(initial: HttpRequest, signal: AbortSignal | undefined): Promise<HttpRequest> {
         let request = initial;
 
         for (const interceptor of this.#interceptors) {
-            request = await interceptor(request);
+            const input = request;
+
+            throwIfCancelled(input, signal);
+
+            const output = await untilAborted(Promise.resolve(interceptor(input)), signal, reason =>
+                cancelledError(input, reason),
+            );
+
+            request = { ...output, headers: mergeHeaders(output.headers) };
         }
 
         return request;
@@ -503,38 +547,44 @@ export class FetchHttpClient implements HttpClient {
             case 'timeout':
                 return new TimeoutError(`${target} timed out after ${String(this.#timeout)}ms.`, { cause: error });
             case 'caller':
-                return new CancelledError(`${target} was cancelled.`, { cause: error });
+                return cancelledError(request, error);
             case 'none':
                 return new NetworkError(`${target} ${failure}.`, { cause: error });
         }
     }
 
     /**
-     * Join the base URL with a request path and append encoded query
-     * parameters, dropping undefined values.
+     * Join the base URL with a request path and merge in the encoded query
+     * parameters, dropping undefined values. A query already in the path is
+     * kept and extended, and a fragment stays last.
      *
      * @param path - the request path, whose leading slashes are trimmed
      */
     #buildUrl(path: string, query: QueryParameters | undefined): string {
-        const url = `${this.#baseUrl}/${path.replace(/^\/+/u, '')}`;
+        const hashAt = path.indexOf('#');
+        const resource = (hashAt === -1 ? path : path.slice(0, hashAt)).replace(/^\/+/u, '');
+        const fragment = hashAt === -1 ? '' : path.slice(hashAt);
         const parameters = new URLSearchParams();
 
         for (const [key, value] of Object.entries(query ?? {})) {
             if (value !== undefined) {
                 // Minimal URLSearchParams implementations may ship append only.
-                parameters.append(key, String(value));
+                parameters.append(toWellFormed(key), toWellFormed(String(value)));
             }
         }
 
         const encoded = parameters.toString();
+        const search = encoded === '' ? '' : `${querySeparator(resource)}${encoded}`;
 
-        return encoded === '' ? url : `${url}?${encoded}`;
+        return `${this.#baseUrl}/${resource}${search}${fragment}`;
     }
 }
 
 /**
  * Build the fetch `RequestInit`, passing FormData and Blob bodies through
- * unchanged and JSON-serialising any other body with a default content-type.
+ * unchanged and JSON-serialising any other body with a default content-type. A
+ * FormData body drops any content-type, since only fetch knows its multipart
+ * boundary.
  *
  * @param signal - the effective abort signal, or null when none applies
  */
@@ -551,14 +601,13 @@ function buildRequestInit(request: HttpRequest, signal: AbortSignal | null): Req
         init.credentials = request.credentials;
     }
 
-    if (isUploadBody(request.body)) {
-        // fetch sets the multipart boundary or Blob content-type itself.
+    if (request.body instanceof FormData) {
+        delete headers['content-type'];
+        init.body = request.body;
+    } else if (request.body instanceof Blob) {
         init.body = request.body;
     } else if (request.body !== undefined) {
-        if (!hasHeader(headers, 'content-type')) {
-            headers['content-type'] = 'application/json';
-        }
-
+        headers['content-type'] ??= 'application/json';
         init.body = JSON.stringify(request.body);
     }
 
@@ -566,11 +615,70 @@ function buildRequestInit(request: HttpRequest, signal: AbortSignal | null): Req
 }
 
 /**
- * Add the default `accept` header unless one is already present, so the API
- * renders errors as JSON rather than an HTML page or a redirect.
+ * Merge header records into one keyed by lower-case name, a later source
+ * replacing an earlier one whatever the case of either.
  */
-function withDefaultAccept(headers: Record<string, string>, parse: BodyParseMode): Record<string, string> {
-    return hasHeader(headers, 'accept') ? headers : { accept: DEFAULT_ACCEPT[parse], ...headers };
+function mergeHeaders(...sources: ReadonlyArray<Readonly<Record<string, string>> | undefined>): Record<string, string> {
+    const merged = new Map<string, string>();
+
+    for (const source of sources) {
+        for (const [name, value] of Object.entries(source ?? {})) {
+            merged.set(name.toLowerCase(), value);
+        }
+    }
+
+    // Own properties, so a `__proto__` header never reaches the prototype.
+    return Object.fromEntries(merged);
+}
+
+/**
+ * Choose the separator that appends a query to a path that may already carry
+ * one.
+ */
+function querySeparator(resource: string): string {
+    if (!resource.includes('?')) {
+        return '?';
+    }
+
+    return resource.endsWith('?') || resource.endsWith('&') ? '' : '&';
+}
+
+/**
+ * Replace lone surrogates with U+FFFD, as Node's encoder does, since a strict
+ * encoder throws on them instead.
+ */
+function toWellFormed(value: string): string {
+    return value.replace(/[\uD800-\uDFFF]/gu, '\uFFFD');
+}
+
+/**
+ * Ask the unauthorized handler whether to retry, counting a rejection or a
+ * synchronous throw as a refusal.
+ */
+async function canRetry(handler: UnauthorizedHandler, request: HttpRequest): Promise<boolean> {
+    try {
+        return await handler(request);
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Throw a {@link CancelledError} when the caller's signal has already aborted.
+ */
+function throwIfCancelled(request: Pick<HttpRequest, 'method' | 'url'>, signal: AbortSignal | undefined): void {
+    if (signal?.aborted === true) {
+        throw cancelledError(request, signal.reason);
+    }
+}
+
+/**
+ * Build the {@link CancelledError} for a request the caller aborted.
+ *
+ * @param cause - the abort reason, or the transport rejection it caused
+ */
+function cancelledError(request: Pick<HttpRequest, 'method' | 'url'>, cause: unknown): CancelledError {
+    return new CancelledError(`${describeRequest(request)} was cancelled.`, { cause });
 }
 
 /**
@@ -579,22 +687,6 @@ function withDefaultAccept(headers: Record<string, string>, parse: BodyParseMode
  */
 function describeRequest(request: Pick<HttpRequest, 'method' | 'url'>): string {
     return `${request.method} ${stripQueryAndFragment(request.url)}`;
-}
-
-/**
- * Determine whether a header is present, case-insensitively.
- *
- * @param name - the lower-case header name to look for
- */
-function hasHeader(headers: Record<string, string>, name: string): boolean {
-    return Object.keys(headers).some(key => key.toLowerCase() === name);
-}
-
-/**
- * Determine whether a body is a FormData or Blob, handed to fetch unchanged.
- */
-function isUploadBody(body: unknown): body is FormData | Blob {
-    return body instanceof FormData || body instanceof Blob;
 }
 
 /**

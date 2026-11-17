@@ -8,8 +8,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ExponentialBackoff } from '../realtime/exponential-backoff';
+import { createBearerTokenInterceptor } from './bearer-token-interceptor';
 import { FetchHttpClient } from './fetch-http-client';
-import type { RequestInterceptor } from './http-client';
+import type { RequestInterceptor, ResponseErrorHandler, UnauthorizedHandler } from './http-client';
 import { CancelledError, HttpError, MaintenanceError, NetworkError } from './http-error';
 
 /** The body a recovered retry resolves with. */
@@ -55,11 +56,41 @@ async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: Err
     return error as E;
 }
 
+/** A retrying client and the handler stubs it was built with. */
+interface RotatingClient {
+    /** The client under test. */
+    readonly client: FetchHttpClient;
+
+    /** The unauthorized handler, advancing the token on each call. */
+    readonly onUnauthorized: ReturnType<typeof vi.fn<UnauthorizedHandler>>;
+
+    /** The response-error handler. */
+    readonly onResponseError: ReturnType<typeof vi.fn<ResponseErrorHandler>>;
+}
+
 /**
  * Build a backoff that always waits the given delay.
  */
 function fixedBackoff(delay: number): ExponentialBackoff {
     return new ExponentialBackoff({ initialDelay: delay, multiplier: 1, maxDelay: delay });
+}
+
+/**
+ * Build a fetch stub answering each call with the next status in turn, a 200
+ * carrying JSON and any other status an empty body.
+ */
+function statusSequence(
+    statuses: readonly number[],
+): ReturnType<typeof vi.fn<(...args: FetchArgs) => Promise<Response>>> {
+    const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>();
+
+    for (const status of statuses) {
+        fetchFn.mockImplementationOnce(async () =>
+            status === 200 ? jsonResponse({ recovered: true }) : new Response('', { status }),
+        );
+    }
+
+    return fetchFn;
 }
 
 describe('FetchHttpClient - transient retry', () => {
@@ -296,5 +327,121 @@ describe('FetchHttpClient - transient retry', () => {
         await pending;
         expect(fetchFn).toHaveBeenCalledTimes(2);
         expect(onResponseError).not.toHaveBeenCalled();
+    });
+});
+
+describe('FetchHttpClient - transient retry with 401 handling', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('re-runs the interceptors so a retry carries a token rotated during the backoff', async () => {
+        let token = 'old';
+        const fetchFn = statusSequence([503, 200]);
+        const client = makeClient(fetchFn, {
+            retry: { attempts: 1, backoff: fixedBackoff(10) },
+            requestInterceptors: [createBearerTokenInterceptor({ getAccessToken: () => token })],
+        });
+
+        const pending = client.get('/items');
+
+        setTimeout(() => {
+            token = 'new';
+        }, 5);
+        await vi.advanceTimersByTimeAsync(10);
+
+        await expect(pending).resolves.toStrictEqual({ recovered: true });
+        expect(fetchFn.mock.calls.map(([, init]) => new Headers(init?.headers).get('authorization'))).toStrictEqual([
+            'Bearer old',
+            'Bearer new',
+        ]);
+    });
+
+    /**
+     * Build a retrying client whose bearer token advances with each handler
+     * invocation.
+     *
+     * @param refreshes - what the handler resolves with
+     */
+    function rotatingClient(fetchFn: typeof fetch, refreshes: boolean): RotatingClient {
+        let revision = 0;
+        const onUnauthorized = vi.fn<UnauthorizedHandler>(() => {
+            revision += 1;
+
+            return Promise.resolve(refreshes);
+        });
+        const onResponseError = vi.fn<ResponseErrorHandler>();
+        const client = makeClient(fetchFn, {
+            retry: { attempts: 2, backoff: fixedBackoff(10) },
+            requestInterceptors: [createBearerTokenInterceptor({ getAccessToken: () => `A${String(revision)}` })],
+            onUnauthorized,
+            onResponseError,
+        });
+
+        return { client, onUnauthorized, onResponseError };
+    }
+
+    it.each([
+        ['503, 401, 200', [503, 401, 200]],
+        ['401, 503, 200', [401, 503, 200]],
+    ])('resolves %s with one handler invocation', async (_case, statuses) => {
+        const fetchFn = statusSequence(statuses);
+        const { client, onUnauthorized, onResponseError } = rotatingClient(fetchFn, true);
+
+        const pending = client.get('/items');
+
+        await vi.advanceTimersByTimeAsync(100);
+
+        await expect(pending).resolves.toStrictEqual({ recovered: true });
+        expect(fetchFn).toHaveBeenCalledTimes(3);
+        expect(onUnauthorized).toHaveBeenCalledOnce();
+        expect(onResponseError).not.toHaveBeenCalled();
+    });
+
+    it.each([
+        ['401, 503, 401', [401, 503, 401], true, 'Bearer A1'],
+        ['401, 503, 503, 401', [401, 503, 503, 401], true, 'Bearer A1'],
+        ['a refused 401', [401], false, 'Bearer A0'],
+    ])('rejects %s with the 401 after one handler invocation', async (_case, statuses, refreshes, authorization) => {
+        const fetchFn = statusSequence(statuses);
+        const { client, onUnauthorized, onResponseError } = rotatingClient(fetchFn, refreshes);
+
+        const pending = rejectionOf(client.get('/items'), HttpError);
+
+        await vi.advanceTimersByTimeAsync(100);
+
+        const error = await pending;
+
+        expect(error.status).toBe(401);
+        expect(fetchFn).toHaveBeenCalledTimes(statuses.length);
+        expect(onUnauthorized).toHaveBeenCalledOnce();
+        expect(onResponseError).toHaveBeenCalledExactlyOnceWith(error, expect.anything());
+        expect(onResponseError.mock.calls[0]?.[1].headers['authorization']).toBe(authorization);
+    });
+
+    it('keeps the single handler invocation across transient retries of a download', async () => {
+        const fetchFn = statusSequence([401, 503, 503, 401]);
+        const onUnauthorized = vi.fn<UnauthorizedHandler>().mockResolvedValue(true);
+        const onResponseError = vi.fn<ResponseErrorHandler>();
+        const client = makeClient(fetchFn, {
+            retry: { attempts: 2, backoff: fixedBackoff(10) },
+            onUnauthorized,
+            onResponseError,
+        });
+
+        const pending = rejectionOf(client.download('/files/1'), HttpError);
+
+        await vi.advanceTimersByTimeAsync(100);
+
+        const error = await pending;
+
+        expect(error.status).toBe(401);
+        expect(fetchFn).toHaveBeenCalledTimes(4);
+        expect(onUnauthorized).toHaveBeenCalledOnce();
+        expect(onResponseError).toHaveBeenCalledExactlyOnceWith(error, expect.objectContaining({ method: 'GET' }));
     });
 });
