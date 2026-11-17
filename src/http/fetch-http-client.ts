@@ -6,6 +6,7 @@
  */
 
 import { ExponentialBackoff } from '../realtime/exponential-backoff';
+import { MAX_TIMER_DELAY } from '../support/timer';
 import { stripQueryAndFragment } from '../support/url';
 import { onAbort, openAbortScope, untilAborted } from './abort-scope';
 import type { AbortScope } from './abort-scope';
@@ -87,9 +88,6 @@ export interface FetchHttpClientOptions {
 
 /** How a successful response body is read: parsed JSON/text, or a raw Blob. */
 type BodyParseMode = 'json' | 'blob';
-
-/** The longest delay a timer accepts; a longer one fires at once. */
-const MAX_TIMER_DELAY = 2_147_483_647;
 
 /** HTTP statuses treated as transient, and therefore retryable, failures. */
 const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
