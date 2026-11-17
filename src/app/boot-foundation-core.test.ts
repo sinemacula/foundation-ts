@@ -733,7 +733,10 @@ describe('bootFoundationCore', () => {
 
         await expect(boot).rejects.toBeInstanceOf(RuntimeEnvironmentError);
         expect(createEnvironment).not.toHaveBeenCalled();
-        expect(() => appConfig()).toThrow();
+        expect(errorOf(() => appConfig())).toStrictEqual(
+            new SupportError('configuration accessed before initialisation'),
+        );
+        expect(() => appConfig()).toThrow(SupportError);
     });
 
     it('holds the runtime document to the configured timeout', async () => {
