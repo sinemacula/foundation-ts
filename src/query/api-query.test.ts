@@ -40,6 +40,20 @@ function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string
     return Object.fromEntries(entries);
 }
 
+/** The builder calls that take a field or relation name, keyed by method. */
+const NAMED_CALLS: ReadonlyArray<readonly [string, (query: ApiQuery, name: string) => ApiQuery]> = [
+    ['where', (q, name) => q.where(name, 1)],
+    ['where with an operator', (q, name) => q.where(name, '$ge', 1)],
+    ['whereIn', (q, name) => q.whereIn(name, [1])],
+    ['whereBetween', (q, name) => q.whereBetween(name, [1, 2])],
+    ['whereContains', (q, name) => q.whereContains(name, 'a')],
+    ['whereNull', (q, name) => q.whereNull(name)],
+    ['whereNotNull', (q, name) => q.whereNotNull(name)],
+    ['whereRelation', (q, name) => q.whereRelation(name, r => r.where('a', 1))],
+    ['whereHas', (q, name) => q.whereHas(name)],
+    ['whereHasNot', (q, name) => q.whereHasNot(name, r => r.where('a', 1))],
+];
+
 describe('ApiQuery', () => {
     describe('create', () => {
         it('returns an empty query with no parameters', () => {
@@ -58,17 +72,22 @@ describe('ApiQuery', () => {
             expect(parsedFilters(ApiQuery.create().where(field, value))).toEqual({ [field]: value });
         });
 
-        it('replaces an existing operator map with a scalar equality value', () => {
-            const base = ApiQuery.create().where('age', '$ge', 18);
-            const result = parsedFilters(base.where('age', 30));
+        it('ANDs a scalar equality beside an operator map on the field', () => {
+            const query = ApiQuery.create().where('age', '$ge', 18).where('age', 30);
 
-            expect(result).toEqual({ age: 30 });
+            expect(filtersParam(query)).toBe('{"age":{"$ge":18},"$and":[{"age":30}]}');
         });
 
-        it('replaces an existing scalar equality value with an operator map', () => {
-            const base = ApiQuery.create().where('status', 'draft');
+        it('ANDs an operator map beside a scalar equality on the field', () => {
+            const query = ApiQuery.create().where('status', 'draft').where('status', '$neq', 'archived');
 
-            expect(filtersParam(base.where('status', '$neq', 'archived'))).toBe('{"status":{"$neq":"archived"}}');
+            expect(filtersParam(query)).toBe('{"status":"draft","$and":[{"status":{"$neq":"archived"}}]}');
+        });
+
+        it('ANDs a different equality beside the first', () => {
+            const query = ApiQuery.create().where('status', 'published').where('status', 'draft');
+
+            expect(filtersParam(query)).toBe('{"status":"published","$and":[{"status":"draft"}]}');
         });
 
         it('emits falsy scalars as real equality conditions', () => {
@@ -110,11 +129,89 @@ describe('ApiQuery', () => {
             );
         });
 
-        it('replaces an existing scalar equality with an operator map', () => {
-            const base = ApiQuery.create().where('age', 30);
-            const result = parsedFilters(base.where('age', '$ge', 18));
+        it('ANDs an operator that collides with a different operand beside the map', () => {
+            const query = ApiQuery.create().where('n', '$ge', 1).where('n', '$le', 9).where('n', '$ge', 5);
 
-            expect(result).toEqual(wire([['age', wire([['$ge', 18]])]]));
+            expect(filtersParam(query)).toBe('{"n":{"$ge":1,"$le":9},"$and":[{"n":{"$ge":5}}]}');
+        });
+
+        it('ANDs a merged map beside an operator it collides with in part', () => {
+            const query = ApiQuery.create()
+                .whereRelation('a', q => q.where('n', '$ge', 5))
+                .whereRelation('a', q => q.where('n', '$ge', 1).where('n', '$le', 9));
+
+            expect(filtersParam(query)).toBe('{"a":{"n":{"$ge":5},"$and":[{"n":{"$ge":1,"$le":9}}]}}');
+        });
+
+        it.each([
+            ['an equality', (q: ApiQuery) => q.where('k', 'a'), '{"k":"a"}'],
+            ['an operator', (q: ApiQuery) => q.where('k', '$ge', 1), '{"k":{"$ge":1}}'],
+            ['a $in list', (q: ApiQuery) => q.whereIn('k', [1, 2]), '{"k":{"$in":[1,2]}}'],
+            ['a $between pair', (q: ApiQuery) => q.whereBetween('k', [1, 2]), '{"k":{"$between":[1,2]}}'],
+            ['a $contains list', (q: ApiQuery) => q.whereContains('k', ['a']), '{"k":{"$contains":["a"]}}'],
+            ['a $null check', (q: ApiQuery) => q.whereNull('k'), '{"k":{"$null":true}}'],
+        ])('keeps %s repeated with the same operand once', (_label, apply, expected) => {
+            expect(filtersParam(apply(apply(ApiQuery.create())))).toBe(expected);
+        });
+
+        it.each([
+            ['a longer list', (q: ApiQuery) => q.whereIn('k', [1]), (q: ApiQuery) => q.whereIn('k', [1, 2])],
+            ['a reordered list', (q: ApiQuery) => q.whereIn('k', [1, 2]), (q: ApiQuery) => q.whereIn('k', [2, 1])],
+            [
+                'a list differing in one item',
+                (q: ApiQuery) => q.whereIn('k', [1, 2]),
+                (q: ApiQuery) => q.whereIn('k', [1, 3]),
+            ],
+            ['a number then a string', (q: ApiQuery) => q.where('k', 1), (q: ApiQuery) => q.where('k', '1')],
+            [
+                'a list then a scalar',
+                (q: ApiQuery) => q.whereContains('k', ['a']),
+                (q: ApiQuery) => q.whereContains('k', 'a'),
+            ],
+            [
+                'a scalar then a list',
+                (q: ApiQuery) => q.whereContains('k', 'a'),
+                (q: ApiQuery) => q.whereContains('k', ['a']),
+            ],
+        ])('ANDs %s beside the earlier condition', (_label, first, second) => {
+            const earlier = first(ApiQuery.create()).filterTree();
+            const later = second(ApiQuery.create()).filterTree();
+
+            expect(second(first(ApiQuery.create())).filterTree()).toEqual(
+                wire([...Object.entries(earlier), ['$and', [later]]]),
+            );
+        });
+
+        it.each([
+            ['$eq', (q: ApiQuery) => q.where('x', '$eq', 1)],
+            ['$neq', (q: ApiQuery) => q.where('x', '$neq', 1)],
+            ['$gt', (q: ApiQuery) => q.where('x', '$gt', 1)],
+            ['$lt', (q: ApiQuery) => q.where('x', '$lt', 1)],
+            ['$ge', (q: ApiQuery) => q.where('x', '$ge', 1)],
+            ['$le', (q: ApiQuery) => q.where('x', '$le', 1)],
+            ['$in', (q: ApiQuery) => q.whereIn('x', [1])],
+            ['$between', (q: ApiQuery) => q.whereBetween('x', [1, 2])],
+            ['$contains', (q: ApiQuery) => q.whereContains('x', 'a')],
+            ['$null', (q: ApiQuery) => q.whereNull('x')],
+            ['$notNull', (q: ApiQuery) => q.whereNotNull('x')],
+        ])('keeps a %s map and a relation document on one key apart', (_operator, apply) => {
+            const operator = apply(ApiQuery.create()).filterTree();
+            const related = ApiQuery.create().whereRelation('x', r => r.where('y', 1));
+            const relation = related.filterTree();
+
+            expect(
+                apply(ApiQuery.create())
+                    .whereRelation('x', r => r.where('y', 1))
+                    .filterTree(),
+            ).toEqual(wire([...Object.entries(operator), ['$and', [relation]]]));
+            expect(apply(related).filterTree()).toEqual(wire([...Object.entries(relation), ['$and', [operator]]]));
+        });
+
+        it('treats an empty document as a relation document, not an operator map', () => {
+            const empty = ApiQuery.create().whereRelation('x', q => q);
+
+            expect(filtersParam(empty.where('x', '$ge', 1))).toBe('{"x":{},"$and":[{"x":{"$ge":1}}]}');
+            expect(filtersParam(empty.whereRelation('x', q => q.where('y', 1)))).toBe('{"x":{"y":1}}');
         });
 
         it('leaves unrelated fields untouched when merging operators', () => {
@@ -238,6 +335,28 @@ describe('ApiQuery', () => {
         });
     });
 
+    describe('names', () => {
+        it.each(
+            ['$and', '$or', '$has', '$hasnt', '$ge'].flatMap(name =>
+                NAMED_CALLS.map(([method, call]) => [method, name, call] as const),
+            ),
+        )('%s refuses the reserved name %s', (_method, name, call) => {
+            expect(() => call(ApiQuery.create(), name)).toThrow(
+                new QueryError(`"${name}" is not a field or relation name.`),
+            );
+        });
+
+        it.each(['__proto__', 'constructor', 'toString'])('treats %s as a plain name', name => {
+            const query = ApiQuery.create()
+                .where('active', true)
+                .where(name, 1)
+                .where(name, 1)
+                .whereRelation('author', a => a.whereRelation(name, r => r.where('id', 1)));
+
+            expect(filtersParam(query)).toBe(`{"active":true,"${name}":1,"author":{"${name}":{"id":1}}}`);
+        });
+    });
+
     describe('whereRelation', () => {
         it('nests a sub-query document under the relation key', () => {
             const query = ApiQuery.create().whereRelation('posts', q => q.where('title', 'News'));
@@ -261,12 +380,20 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"author":{"first_name":"Ada","last_name":"Lovelace"}}');
         });
 
-        it('replaces a scalar stored under the relation key', () => {
+        it('ANDs a relation document beside a scalar stored under the key', () => {
             const query = ApiQuery.create()
                 .where('author', 'stray')
                 .whereRelation('author', q => q.where('name', 'Alice'));
 
-            expect(filtersParam(query)).toBe('{"author":{"name":"Alice"}}');
+            expect(filtersParam(query)).toBe('{"author":"stray","$and":[{"author":{"name":"Alice"}}]}');
+        });
+
+        it('ANDs a scalar beside a relation document stored under the key', () => {
+            const query = ApiQuery.create()
+                .whereRelation('author', q => q.where('name', 'Alice'))
+                .where('author', 'stray');
+
+            expect(filtersParam(query)).toBe('{"author":{"name":"Alice"},"$and":[{"author":"stray"}]}');
         });
 
         it('merges repeated calls on a nested relation', () => {
@@ -285,20 +412,22 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"author":{"age":{"$ge":18,"$le":65}}}');
         });
 
-        it('replaces an earlier operator map on a relation field with a later scalar', () => {
+        it('ANDs a later scalar beside an operator map on a relation field', () => {
             const query = ApiQuery.create()
                 .whereRelation('author', a => a.where('bio', '$neq', 'x'))
                 .whereRelation('author', a => a.where('bio', 'exact'));
 
-            expect(filtersParam(query)).toBe('{"author":{"bio":"exact"}}');
+            expect(filtersParam(query)).toBe('{"author":{"bio":{"$neq":"x"},"$and":[{"bio":"exact"}]}}');
         });
 
-        it('replaces an array operand on a relation field', () => {
+        it('ANDs a different array operand beside the first on a relation field', () => {
             const query = ApiQuery.create()
                 .whereRelation('author', a => a.whereIn('role', ['admin']))
                 .whereRelation('author', a => a.whereIn('role', ['editor']));
 
-            expect(filtersParam(query)).toBe('{"author":{"role":{"$in":["editor"]}}}');
+            expect(filtersParam(query)).toBe(
+                '{"author":{"role":{"$in":["admin"]},"$and":[{"role":{"$in":["editor"]}}]}}',
+            );
         });
 
         it('keeps a single $or inside a relation document as built', () => {
@@ -335,22 +464,6 @@ describe('ApiQuery', () => {
                 .whereRelation('posts', p => p.andWhere([q => q.where('b', 2)]));
 
             expect(filtersParam(query)).toBe('{"posts":{"$and":[{"a":1},{"b":2}]}}');
-        });
-
-        it('replaces a non-list $and on the relation with the incoming documents', () => {
-            const query = ApiQuery.create()
-                .whereRelation('posts', p => p.where('$and', 'stray'))
-                .whereRelation('posts', p => p.andWhere([q => q.where('b', 2)]));
-
-            expect(filtersParam(query)).toBe('{"posts":{"$and":[{"b":2}]}}');
-        });
-
-        it('replaces a non-list $or on the relation with the incoming group', () => {
-            const query = ApiQuery.create()
-                .whereRelation('posts', p => p.where('$or', 'stray'))
-                .whereRelation('posts', p => p.orWhere([q => q.where('c', 3)]));
-
-            expect(filtersParam(query)).toBe('{"posts":{"$or":[{"c":3}]}}');
         });
 
         it('keeps nested bare $has lists in list form when merged', () => {
@@ -396,14 +509,6 @@ describe('ApiQuery', () => {
                 .whereRelation('author', a => a.whereHasNot('comments'));
 
             expect(filtersParam(query)).toBe('{"author":{"$hasnt":["posts","comments"]}}');
-        });
-
-        it('replaces a malformed nested $has value with the incoming relation list', () => {
-            const query = ApiQuery.create()
-                .whereRelation('author', a => a.where('$has', 'stray'))
-                .whereRelation('author', a => a.whereHas('posts'));
-
-            expect(filtersParam(query)).toBe('{"author":{"$has":["posts"]}}');
         });
     });
 
@@ -596,10 +701,30 @@ describe('ApiQuery', () => {
             );
         });
 
-        it('leaves a malformed $and alone when the merge changes nothing', () => {
-            const query = ApiQuery.create().where('$and', 'stray').whereHasNot('posts');
+        it('leaves the tree unchanged when a bare relation is refused again', () => {
+            const query = ApiQuery.create()
+                .andWhere([q => q.where('a', 1)])
+                .whereHasNot('posts')
+                .whereHasNot('posts');
 
-            expect(filtersParam(query)).toBe('{"$and":"stray","$hasnt":["posts"]}');
+            expect(filtersParam(query)).toBe('{"$and":[{"a":1}],"$hasnt":["posts"]}');
+        });
+
+        it.each([
+            [
+                'before',
+                ApiQuery.create()
+                    .whereHasNot('posts')
+                    .andWhere([q => q.whereHasNot('posts', p => p.where('spam', true))]),
+            ],
+            [
+                'after',
+                ApiQuery.create()
+                    .andWhere([q => q.whereHasNot('posts', p => p.where('spam', true))])
+                    .whereHasNot('posts'),
+            ],
+        ])('drops a conditioned $and document a bare relation refused %s it implies', (_order, query) => {
+            expect(filtersParam(query)).toBe('{"$hasnt":["posts"]}');
         });
 
         it('lets a nested bare relation absorb documents separated into the relation document', () => {
@@ -660,14 +785,6 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"$and":[{"$or":[{"a":1},{"b":2}]},{"$or":[{"c":3},{"d":4}]}]}');
         });
 
-        it('replaces a scalar collision on the group key', () => {
-            const query = ApiQuery.create()
-                .where('$and', 'stray')
-                .andWhere([q => q.where('status', 'active')]);
-
-            expect(filtersParam(query)).toBe('{"$and":[{"status":"active"}]}');
-        });
-
         it('rejects an empty group', () => {
             expect(() => ApiQuery.create().andWhere([])).toThrow(
                 new QueryError('A $and group needs at least one document.'),
@@ -707,12 +824,24 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"status":"active","$or":[{"name":"a"},{"email":"b"}]}');
         });
 
-        it('appends repeated calls as further branches of the same group', () => {
+        it('ANDs a second call beside the earlier group rather than widening it', () => {
             const query = ApiQuery.create()
-                .orWhere([q => q.where('name', 'alice')])
-                .orWhere([q => q.where('email', 'alice@example.com')]);
+                .orWhere([q => q.where('owner', 1), q => q.where('shared', true)])
+                .orWhere([q => q.where('status', 'draft'), q => q.where('status', 'review')]);
 
-            expect(filtersParam(query)).toBe('{"$or":[{"name":"alice"},{"email":"alice@example.com"}]}');
+            expect(filtersParam(query)).toBe(
+                '{"$or":[{"owner":1},{"shared":true}],"$and":[{"$or":[{"status":"draft"},{"status":"review"}]}]}',
+            );
+        });
+
+        it('keeps a group repeated from the same branch queries once', () => {
+            const owner = ApiQuery.create().where('owner', 1);
+            const shared = ApiQuery.create().where('shared', true);
+            const query = ApiQuery.create()
+                .orWhere([() => owner, () => shared])
+                .orWhere([() => owner, () => shared]);
+
+            expect(filtersParam(query)).toBe('{"$or":[{"owner":1},{"shared":true}]}');
         });
 
         it('keeps a relation document as one branch', () => {

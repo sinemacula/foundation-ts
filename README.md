@@ -99,8 +99,11 @@ const query = ApiQuery.create()
 //          &fields[user]=id,name,aggregates&aggregates[user]=posts_count
 ```
 
-- `andWhere` / `orWhere` take one builder per document; keys inside a document AND together, and repeated calls
-  append documents to the same group. An empty group or document throws a `QueryError`.
+- Filter calls AND together and never replace or widen an earlier condition: a different value for a field, a
+  colliding operator or a second `orWhere` group is ANDed beside the first under `$and`. Rebuild from a base query
+  to change a condition.
+- `andWhere` / `orWhere` take one builder per document; keys inside a document AND together. An empty group or
+  document throws a `QueryError`.
 - Repeated `whereRelation` calls on one relation merge into one document, as do repeated `whereHas` calls, so the
   same related row must match all of them. `whereHasNot` conditions never merge.
 - Free-text search is the `search` parameter (`search(term)`), never a filter operator.
@@ -108,6 +111,7 @@ const query = ApiQuery.create()
   resource's default fields.
 - `withTrashed()` / `onlyTrashed()` set `trashed=with` / `trashed=only`.
 - Changing the order drops any cursor token but keeps cursor pagination; random order under cursor pagination throws.
+- A `$`-prefixed field or relation name throws a `QueryError`.
 - `ResourceClient.list` returns the mapped `items`, `meta` (`{ mode: 'length-aware', total, count, hasMore }`,
   `{ mode: 'cursor', hasMore }`, or `null`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
 
