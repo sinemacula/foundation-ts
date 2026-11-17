@@ -48,7 +48,7 @@ export type ColorSchemeListener = (resolved: ResolvedColorScheme, preference: Co
  * Construction options for {@link ColorSchemeService}.
  */
 export interface ColorSchemeServiceOptions {
-    /** Backing store for the persisted preference. */
+    /** Preference store; a failing read uses the default and reaches `onError`, a failing write throws. */
     readonly storage: KeyValueStorage;
 
     /** The OS scheme source. */
@@ -62,10 +62,18 @@ export interface ColorSchemeServiceOptions {
 
     /** The preference used when nothing is stored. Defaults to `system`. */
     readonly defaultPreference?: ColorSchemePreference;
+
+    /** Receives a synchronous listener throw or failed storage read, never a rejection; a throwing sink is ignored. */
+    readonly onError?: (error: unknown) => void;
 }
 
 /**
  * Detects, persists and applies the active colour scheme.
+ *
+ * The service writes raw `light`, `dark` or `system` through the storage port
+ * and never removes the key. Durable persistence depends on the adapter.
+ * Missing or invalid stored values use the configured default without repairing
+ * storage.
  */
 export class ColorSchemeService {
     /** Backing store for the persisted preference. */
@@ -86,17 +94,17 @@ export class ColorSchemeService {
     /** The registered resolved-scheme listeners. */
     readonly #listeners = new Set<ColorSchemeListener>();
 
+    /** Receives a contained listener or storage-read failure. */
+    readonly #onError: (error: unknown) => void;
+
     /** The current raw preference. */
     #preference: ColorSchemePreference;
 
     /** The current resolved scheme. */
     #resolved: ResolvedColorScheme;
 
-    /** The OS-source unsubscribe, when tracking. */
+    /** The OS-source unsubscribe, while started. */
     #unsubscribe: (() => void) | null = null;
-
-    /** Whether {@link start} has run. */
-    #started = false;
 
     constructor(options: ColorSchemeServiceOptions) {
         this.#storage = options.storage;
@@ -104,6 +112,7 @@ export class ColorSchemeService {
         this.#applier = options.applier;
         this.#storageKey = options.storageKey ?? COLOR_SCHEME_STORAGE_KEY;
         this.#defaultPreference = options.defaultPreference ?? DEFAULT_PREFERENCE;
+        this.#onError = options.onError ?? (() => undefined);
         this.#preference = this.#readPreference();
         this.#resolved = this.#derive();
     }
@@ -123,33 +132,35 @@ export class ColorSchemeService {
     }
 
     /**
-     * Apply the resolved scheme and begin tracking OS changes.
+     * Apply the resolved scheme and begin tracking OS changes, notifying
+     * listeners when the OS changed the scheme since it was last resolved. A
+     * no-op while started; calling it after {@link dispose} starts again.
      */
     start(): void {
-        if (this.#started) {
+        if (this.#unsubscribe !== null) {
             return;
         }
 
-        this.#started = true;
+        const previous = this.#resolved;
+
         this.#resolved = this.#derive();
         this.#applier.apply(this.#resolved, this.#preference);
         this.#unsubscribe = this.#source.subscribe(() => {
             this.#handleOsChange();
         });
+
+        if (this.#resolved !== previous) {
+            this.#notify();
+        }
     }
 
     /**
-     * Set the user's preference, persisting it, or clearing it for `system`.
+     * Persist the user's preference, then apply it and notify listeners. A
+     * failing write throws before any state changes.
      */
     setPreference(pref: ColorSchemePreference): void {
+        this.#storage.set(this.#storageKey, pref);
         this.#preference = pref;
-
-        if (pref === 'system') {
-            this.#storage.remove(this.#storageKey);
-        } else {
-            this.#storage.set(this.#storageKey, pref);
-        }
-
         this.#resolved = this.#derive();
         this.#applier.apply(this.#resolved, this.#preference);
         this.#notify();
@@ -169,7 +180,7 @@ export class ColorSchemeService {
     }
 
     /**
-     * Stop tracking OS changes.
+     * Stop tracking OS changes until the next {@link start}; idempotent.
      */
     dispose(): void {
         this.#unsubscribe?.();
@@ -177,16 +188,31 @@ export class ColorSchemeService {
     }
 
     /**
-     * Read the stored preference, or the default when absent or invalid.
+     * Read the stored preference, or the default when absent, invalid or
+     * unreadable.
      */
     #readPreference(): ColorSchemePreference {
-        const stored = this.#storage.get(this.#storageKey);
+        const stored = this.#readStored();
 
         if (stored === 'light' || stored === 'dark' || stored === 'system') {
             return stored;
         }
 
         return this.#defaultPreference;
+    }
+
+    /**
+     * Read the raw stored value, reporting a failing read and treating it as
+     * absent.
+     */
+    #readStored(): string | null {
+        try {
+            return this.#storage.get(this.#storageKey);
+        } catch (error) {
+            this.#report(error);
+
+            return null;
+        }
     }
 
     /**
@@ -201,11 +227,28 @@ export class ColorSchemeService {
     }
 
     /**
-     * Notify every registered listener of the current scheme.
+     * Notify every registered listener of the current scheme, passing a
+     * throwing listener's error to the `onError` sink.
      */
     #notify(): void {
         for (const listener of this.#listeners) {
-            listener(this.#resolved, this.#preference);
+            try {
+                listener(this.#resolved, this.#preference);
+            } catch (error) {
+                this.#report(error);
+            }
+        }
+    }
+
+    /**
+     * Pass a contained error to the `onError` sink, ignoring a throwing sink so
+     * one failure never starves the remaining listeners.
+     */
+    #report(error: unknown): void {
+        try {
+            this.#onError(error);
+        } catch {
+            // The sink is the last resort; nothing is left to report to.
         }
     }
 
