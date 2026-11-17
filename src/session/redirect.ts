@@ -12,7 +12,6 @@ export const REDIRECT_QUERY_KEY = 'redirect';
 
 const QUERY_OR_HASH = /[?#].*/su;
 const ENCODED_DOT = /%2e/giu;
-const TRAILING_SLASHES = /\/+$/u;
 
 /**
  * Validate an untrusted value as a safe post-login redirect target.
@@ -68,7 +67,13 @@ function hasDotSegment(path: string): boolean {
  * Check whether the path is the login path or lies under it.
  */
 function isUnderLoginPath(path: string, loginPath: string): boolean {
-    const login = loginPath.replace(TRAILING_SLASHES, '').toLowerCase();
+    let end = loginPath.length;
+
+    while (loginPath.charAt(end - 1) === '/') {
+        end -= 1;
+    }
+
+    const login = loginPath.slice(0, end).toLowerCase();
     const candidate = path.toLowerCase();
 
     return candidate === login || candidate.startsWith(`${login}/`);

@@ -70,6 +70,13 @@ describe('sanitiseRedirectTarget', () => {
         expect(sanitiseRedirectTarget(target, loginPath)).toBeNull();
     });
 
+    it('handles a login path with a long run of slashes without backtracking over it', () => {
+        const loginPath = `/login${'/'.repeat(100_000)}x`;
+
+        expect(sanitiseRedirectTarget('/dashboard', loginPath)).toBe('/dashboard');
+        expect(sanitiseRedirectTarget('/login/x', `/login${'/'.repeat(100_000)}`)).toBeNull();
+    });
+
     it.each(['', '/', '//'])('rejects every target under the login path %j', loginPath => {
         expect(sanitiseRedirectTarget('/dashboard', loginPath)).toBeNull();
         expect(sanitiseRedirectTarget('/', loginPath)).toBeNull();
