@@ -1,24 +1,27 @@
 /**
- * Bundle every public subpath of the packed package with Metro for iOS and
- * Android, compile it to Hermes bytecode and load it, then require each subpath
- * under React Native's Jest preset.
+ * Type-check every public subpath of the packed package as a React Native
+ * project, bundle them with Metro for iOS and Android, compile each bundle to
+ * Hermes bytecode and load it, then require each subpath under React Native's
+ * Jest preset. Each run also executes the behaviour scenario, and its report
+ * must match the one plain Node produces.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { createContext, runInContext } from 'node:vm';
 
+import { installedManifest, PACKAGE, packInto, publicSubpaths, SmokeError, typecheckConsumer } from '../support.mjs';
+
 const FIXTURE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(FIXTURE, '..', '..');
 const GENERATED = join(FIXTURE, 'generated');
-const PACKAGE = '@sinemacula/foundation';
 const PLATFORMS = ['ios', 'android'];
 
 const HERMESC = {
@@ -44,45 +47,39 @@ const REACT_NATIVE_GLOBALS = [
     'setTimeout',
 ];
 
-/** A smoke-check failure. */
-class SmokeError extends Error {
-    constructor(message) {
-        super(message);
-        this.name = 'SmokeError';
-    }
-}
+// The only diagnostics tolerated sit inside react-native's own generated types.
+const REACT_NATIVE_TYPES = {
+    options: {
+        strict: true,
+        exactOptionalPropertyTypes: true,
+        skipLibCheck: false,
+        target: 'ES2023',
+        module: 'preserve',
+        moduleResolution: 'bundler',
+        customConditions: ['react-native'],
+        lib: ['ES2023'],
+        types: ['react-native'],
+    },
+    forbid: ['/lib.dom.d.ts', '/@types/node/'],
+    tolerate: ['react-native'],
+};
 
 const fixtureRequire = createRequire(join(FIXTURE, 'package.json'));
 const reactNativeRequire = createRequire(fixtureRequire.resolve('react-native'));
 
 /** Pack the package into `scratch` and install the tarball into the fixture. */
 function installPackedPackage(scratch) {
-    execFileSync('npm', ['pack', '--silent', '--pack-destination', scratch], { cwd: ROOT, stdio: 'inherit' });
-
-    const tarball = readdirSync(scratch).find(file => file.endsWith('.tgz'));
-
-    execFileSync('npm', ['install', '--no-save', '--no-audit', '--no-fund', join(scratch, tarball)], {
+    execFileSync('npm', ['install', '--no-save', '--no-audit', '--no-fund', packInto(scratch)], {
         cwd: FIXTURE,
         stdio: 'inherit',
     });
 }
 
 /**
- * The installed package's public subpaths, minus test-support, which needs a
- * test runner.
+ * Write the Metro entry, which loads every subpath and starts the scenario, and
+ * the Jest tests that require each subpath and rerun the scenario.
  */
-function publicSubpaths() {
-    const manifest = JSON.parse(readFileSync(join(FIXTURE, 'node_modules', PACKAGE, 'package.json'), 'utf8'));
-    const subpaths = Object.keys(manifest.exports).map(key => `${PACKAGE}/${key.slice(2)}`);
-    const skipped = subpaths.filter(subpath => subpath.includes('/test-support/'));
-
-    console.log(`Skipping test-support subpaths: ${skipped.join(', ')}`);
-
-    return subpaths.filter(subpath => !skipped.includes(subpath));
-}
-
-/** Write the Metro entry and the Jest test that load every subpath. */
-function writeEntries(subpaths) {
+function writeEntries(subpaths, report) {
     rmSync(GENERATED, { recursive: true, force: true });
     mkdirSync(GENERATED);
 
@@ -90,11 +87,20 @@ function writeEntries(subpaths) {
     const imports = subpaths.map((subpath, index) => `import * as ${names[index]} from '${subpath}';`);
     const tally = `globalThis.loadedSubpaths = [${names.join(', ')}].filter(module => typeof module === 'object').length;`;
 
-    writeFileSync(join(GENERATED, 'entry.js'), `${[...imports, tally].join('\n')}\n`);
+    writeFileSync(
+        join(GENERATED, 'entry.js'),
+        `${[...imports, "import { runScenario } from '../scenario.js';", tally, 'globalThis.scenario = runScenario();'].join('\n')}\n`,
+    );
     writeFileSync(
         join(GENERATED, 'load.test.js'),
         `test.each(${JSON.stringify(subpaths)})('loads %s', subpath => {\n` +
             `    expect(typeof require(subpath)).toBe('object');\n});\n`,
+    );
+    writeFileSync(
+        join(GENERATED, 'behaviour.test.js'),
+        "import { runScenario } from '../scenario.js';\n\n" +
+            "test('runs the behaviour scenario as plain Node does', async () => {\n" +
+            `    expect(JSON.parse(JSON.stringify(await runScenario()))).toEqual(${JSON.stringify(report)});\n});\n`,
     );
 }
 
@@ -118,17 +124,18 @@ function compile(bundlePath) {
 
 /**
  * Evaluate a bundle in Node against React Native's globals, since no Hermes VM
- * is published, and return how many subpaths loaded.
+ * is published, and return how many subpaths loaded and the scenario's report,
+ * serialised so it carries no prototype from the bundle's realm.
  */
-function evaluate(bundlePath) {
+async function evaluate(bundlePath) {
     const context = createContext(Object.fromEntries(REACT_NATIVE_GLOBALS.map(name => [name, globalThis[name]])));
 
     runInContext(readFileSync(bundlePath, 'utf8'), context, { filename: bundlePath });
 
-    return context.loadedSubpaths;
+    return { loaded: context.loadedSubpaths, report: JSON.parse(JSON.stringify(await context.scenario)) };
 }
 
-/** Require every subpath under React Native's Jest preset. */
+/** Require every subpath and run the scenario under React Native's Jest preset. */
 async function runJest() {
     const { runCLI } = fixtureRequire('jest');
     const config = {
@@ -146,8 +153,20 @@ async function runJest() {
     const { results } = await runCLI({ config: JSON.stringify(config), runInBand: true }, [FIXTURE]);
 
     if (!results.success) {
-        throw new SmokeError('A subpath failed to load under the React Native Jest preset.');
+        throw new SmokeError('A subpath failed to load or the scenario diverged under the React Native Jest preset.');
     }
+}
+
+/** Type-check a consumer importing every subpath as a React Native project. */
+function typecheck(subpaths) {
+    mkdirSync(GENERATED, { recursive: true });
+
+    const { files, tolerated } = typecheckConsumer({ dir: GENERATED, subpaths, ...REACT_NATIVE_TYPES });
+
+    console.log(
+        `react-native: type-checked ${subpaths.length} subpaths across ${files} files, ` +
+            `tolerating ${tolerated} diagnostics inside react-native's own types.`,
+    );
 }
 
 const scratch = mkdtempSync(join(tmpdir(), 'foundation-react-native-'));
@@ -155,9 +174,13 @@ const scratch = mkdtempSync(join(tmpdir(), 'foundation-react-native-'));
 try {
     installPackedPackage(scratch);
 
-    const subpaths = publicSubpaths();
+    const subpaths = publicSubpaths(installedManifest(FIXTURE), { testSupport: false });
+    const { runScenario } = await import('./scenario.js');
+    const report = await runScenario();
 
-    writeEntries(subpaths);
+    console.log('node: ran the behaviour scenario.');
+    typecheck(subpaths);
+    writeEntries(subpaths, report);
 
     for (const platform of PLATFORMS) {
         const out = join(scratch, `${platform}.js`);
@@ -165,13 +188,21 @@ try {
         await bundle(platform, out);
         compile(out);
 
-        const loaded = evaluate(out);
+        const evaluated = await evaluate(out);
 
-        if (loaded !== subpaths.length) {
-            throw new SmokeError(`${platform}: loaded ${loaded} of ${subpaths.length} subpaths.`);
+        if (evaluated.loaded !== subpaths.length) {
+            throw new SmokeError(`${platform}: loaded ${evaluated.loaded} of ${subpaths.length} subpaths.`);
         }
 
-        console.log(`${platform}: bundled, compiled to Hermes bytecode and loaded ${loaded} subpaths.`);
+        if (!isDeepStrictEqual(evaluated.report, report)) {
+            throw new SmokeError(
+                `${platform}: the scenario reported ${JSON.stringify(evaluated.report)}, plain Node ${JSON.stringify(report)}.`,
+            );
+        }
+
+        console.log(
+            `${platform}: bundled, compiled to Hermes bytecode, loaded ${subpaths.length} subpaths and ran the scenario.`,
+        );
     }
 
     await runJest();
