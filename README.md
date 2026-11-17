@@ -27,7 +27,7 @@ platform-specific arrives through a port.
 |----------------------|--------------------------------------------------------------------------------------------------------------------|---------------------------|
 | `src/analytics/`     | Records product events through a swappable tracker (console + no-op adapters), plus route page tracking            | `AnalyticsTracker`        |
 | `src/app/`           | The boot core: `bootFoundationCore` runs the agnostic phases, plus the service registry and base wiring            | `bootFoundationCore`      |
-| `src/authorization/` | Evaluates flat permission grants with wildcard-prefix matching                                                     | `PermissionSet` (no port) |
+| `src/authorization/` | Evaluates flat permission grants with the server's `*` glob grammar                                                | `PermissionSet` (no port) |
 | `src/config/`        | Reads typed configuration from environment sources, fetches the runtime document and freezes the repository        | `EnvironmentSource`       |
 | `src/connectivity/`  | The connectivity-observation contract each platform adapts                                                         | `ConnectivityMonitor`     |
 | `src/feature-flags/` | Resolves feature flags through a swappable provider (static adapter included)                                      | `FeatureFlags`            |

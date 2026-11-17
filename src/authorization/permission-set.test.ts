@@ -10,105 +10,70 @@ import { describe, expect, it } from 'vitest';
 import { PermissionSet } from './permission-set';
 
 describe('PermissionSet', () => {
-    it('allows a permission that exactly matches a granted entry', () => {
-        const permissions = new PermissionSet(['users.view']);
-
-        expect(permissions.allows('users.view')).toBe(true);
+    it.each([
+        ['posts:view', 'posts:view', true],
+        ['posts:view', 'posts:edit', false],
+        ['posts:view', 'posts:viewer', false],
+        ['posts:view', 'Posts:View', false],
+        ['posts:view', '', false],
+        ['*', 'anything', true],
+        ['*', '', true],
+        ['*:*', 'posts:create', true],
+        ['*:*', 'posts', false],
+        ['*:view', 'posts:view', true],
+        ['*:view', 'posts:edit', false],
+        ['*:view', 'posts:comments:view', true],
+        ['*:view', 'posts:view:all', false],
+        ['posts:*:own', 'posts:edit:own', true],
+        ['posts:*:own', 'posts:edit:all', false],
+        ['posts:*:own', 'posts::own', true],
+        ['posts:*', 'posts:create', true],
+        ['posts:*', 'posts:', true],
+        ['posts:*', 'posts', false],
+        ['posts:*', 'postsx:create', false],
+        ['posts:*', 'posts:edit:own', true],
+        ['posts:create', 'posts:*', false],
+        ['Posts:*', 'posts:view', false],
+        ['users*', 'users', true],
+        ['users*', 'usersx', true],
+        ['users.*', 'users.view', true],
+        ['users.*', 'users.edit.self', true],
+        ['users.*', 'usersx.view', false],
+        ['a*b*c', 'aXbYc', true],
+        ['a*b*c', 'abc', true],
+        ['a*b*c', 'aXc', false],
+        ['a*b*c', 'acb', false],
+        ['a**b', 'ab', true],
+        ['*a', 'ba', true],
+        ['a*ab', 'aab', true],
+        ['a*ab', 'ab', false],
+        ['*ab*bc', 'abc', false],
+        ['*a*a*', 'aa', true],
+        ['*a*a*', 'a', false],
+        ['ab*b*', 'ab', false],
+    ])('grant %j matches %j: %s', (grant, permission, expected) => {
+        expect(new PermissionSet([grant]).allows(permission)).toBe(expected);
     });
 
-    it('denies a permission that is not granted', () => {
-        const permissions = new PermissionSet(['users.view']);
-
-        expect(permissions.allows('users.edit')).toBe(false);
-    });
-
-    it('never treats a non-wildcard dot entry as a prefix', () => {
-        const permissions = new PermissionSet(['reports.view']);
-
-        expect(permissions.allows('reports.viewer')).toBe(false);
-    });
-
-    it('never treats a non-wildcard colon entry as a prefix', () => {
-        const permissions = new PermissionSet(['act:read']);
-
-        expect(permissions.allows('act:reader')).toBe(false);
-    });
-
-    it('does not misread a permission starting with the word null', () => {
-        const permissions = new PermissionSet(['reports.view']);
-
-        expect(permissions.allows('nullify.records')).toBe(false);
-    });
-
-    it('is case-sensitive', () => {
-        const permissions = new PermissionSet(['users.view']);
-
-        expect(permissions.allows('Users.View')).toBe(false);
+    it.each([
+        ['posts:?', 'posts:a'],
+        ['posts:[ab]', 'posts:a'],
+    ])('treats %j, which the server cannot store, as literal against %j', (grant, permission) => {
+        expect(new PermissionSet([grant]).allows(permission)).toBe(false);
+        expect(new PermissionSet([grant]).allows(grant)).toBe(true);
     });
 
     it('allows nothing when the granted set is empty', () => {
-        const permissions = new PermissionSet([]);
-
-        expect(permissions.allows('users.view')).toBe(false);
+        expect(new PermissionSet([]).allows('posts:view')).toBe(false);
     });
 
-    it('denies an empty permission unless granted', () => {
-        const permissions = new PermissionSet(['users.view']);
+    it.each([
+        ['posts:view', true],
+        ['users:edit', true],
+        ['billing:view', false],
+    ])('allows %s when any of several grants matches: %s', (permission, expected) => {
+        const permissions = new PermissionSet(['billing:edit', 'posts:view', 'users:*']);
 
-        expect(permissions.allows('')).toBe(false);
-    });
-
-    describe('dot-wildcard grants', () => {
-        it('allows a direct child of the wildcard prefix', () => {
-            const permissions = new PermissionSet(['users.*']);
-
-            expect(permissions.allows('users.view')).toBe(true);
-        });
-
-        it('allows a nested descendant of the wildcard prefix', () => {
-            const permissions = new PermissionSet(['users.*']);
-
-            expect(permissions.allows('users.edit.self')).toBe(true);
-        });
-
-        it('denies a permission sharing only the text before the boundary', () => {
-            const permissions = new PermissionSet(['users.*']);
-
-            expect(permissions.allows('usersx.view')).toBe(false);
-        });
-    });
-
-    describe('colon-wildcard grants', () => {
-        it('allows a permission under the colon-delimited prefix', () => {
-            const permissions = new PermissionSet(['users:*']);
-
-            expect(permissions.allows('users:view')).toBe(true);
-        });
-
-        it('denies a permission sharing only the text before the boundary', () => {
-            const permissions = new PermissionSet(['users:*']);
-
-            expect(permissions.allows('usersx:view')).toBe(false);
-        });
-    });
-
-    describe('global wildcard grant', () => {
-        it('allows any permission', () => {
-            const permissions = new PermissionSet(['*']);
-
-            expect(permissions.allows('anything.at.all')).toBe(true);
-        });
-
-        it('allows an empty permission string', () => {
-            const permissions = new PermissionSet(['*']);
-
-            expect(permissions.allows('')).toBe(true);
-        });
-    });
-
-    it('allows a permission covered by one of several granted entries', () => {
-        const permissions = new PermissionSet(['billing.view', 'users.*']);
-
-        expect(permissions.allows('users.edit')).toBe(true);
+        expect(permissions.allows(permission)).toBe(expected);
     });
 });
