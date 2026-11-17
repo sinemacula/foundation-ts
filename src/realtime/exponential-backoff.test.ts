@@ -7,10 +7,8 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { MAX_TIMER_DELAY } from '../support/timer';
 import { type BackoffJitter, ExponentialBackoff, type ExponentialBackoffOptions } from './exponential-backoff';
-
-/** The largest delay timers honour. */
-const MAX_TIMER_DELAY = 2 ** 31 - 1;
 
 /**
  * Every option combination of the sweep grid.

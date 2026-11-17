@@ -200,18 +200,19 @@ export declare function resetFoundationServices(): void;
 Exported as `@sinemacula/foundation/app/wire-http-client`.
 
 ```ts
+import type { DeepReadonly } from "../config/config-repository.js";
 import type { HttpClient, RequestInterceptor, ResponseErrorHandler, UnauthorizedHandler } from "../http/http-client.js";
 import type { ModuleHttpContributions } from "../http/module-http-contributions.js";
 import type { FoundationConfig } from "./foundation-config.js";
 export interface WireHttpClientTools<T extends FoundationConfig> {
-    readonly config: Readonly<T>;
+    readonly config: DeepReadonly<T>;
     readonly fetchFn: typeof fetch;
     readonly interceptors: readonly RequestInterceptor[];
     readonly onUnauthorized: UnauthorizedHandler | null;
     readonly onResponseError: ResponseErrorHandler;
 }
 export interface WireHttpClientOptions<T extends FoundationConfig> {
-    readonly config: Readonly<T>;
+    readonly config: DeepReadonly<T>;
     readonly fetchFn: typeof fetch;
     readonly interceptors?: readonly RequestInterceptor[];
     readonly contributions: ModuleHttpContributions;
@@ -991,15 +992,8 @@ export declare function runReconnect(steps: ReconnectSteps): Promise<void>;
 Exported as `@sinemacula/foundation/realtime/subscribers`.
 
 ```ts
-export type SubscriberDelivery<T> = (value: T, isLive?: () => boolean) => void;
-export declare class SubscriberList<T> {
-    #private;
-    constructor(report: (error: unknown) => void);
-    get size(): number;
-    add(handler: (value: T) => void): () => void;
-    snapshot(): SubscriberDelivery<T>;
-    emit(value: T): void;
-}
+import { type SubscriberDelivery, SubscriberList } from "../support/subscriber-list.js";
+export { type SubscriberDelivery, SubscriberList };
 export declare class EventSubscribers<T> {
     #private;
     constructor(report: (error: unknown) => void);
@@ -1176,7 +1170,7 @@ export interface SessionUserMapping<U extends SessionUser> {
     readonly mapUser: (payload: unknown) => U;
 }
 export declare function createDefaultSessionApi<C = PasswordCredentials>(http: HttpClient, options?: DefaultSessionApiOptions<C>): SessionApi<SessionUser, C>;
-export declare function createDefaultSessionApi<C, U extends SessionUser>(http: HttpClient, options: DefaultSessionApiOptions<C> & SessionUserMapping<U>): SessionApi<U, C>;
+export declare function createDefaultSessionApi<C = PasswordCredentials, U extends SessionUser = SessionUser>(http: HttpClient, options: DefaultSessionApiOptions<C> & SessionUserMapping<U>): SessionApi<U, C>;
 ```
 
 ## dist/session/in-process-session-lock.d.ts
@@ -1197,15 +1191,44 @@ Exported as `@sinemacula/foundation/session/key-value-session-persistence`.
 
 ```ts
 import type { KeyValueStorage } from "../storage/key-value-storage.js";
+import type { KeyValueSessionRecordStoreOptions } from "./key-value-session-record-store.js";
+import { RecordSessionPersistence } from "./record-session-persistence.js";
+export type KeyValueSessionPersistenceOptions = KeyValueSessionRecordStoreOptions;
+export declare class KeyValueSessionPersistence extends RecordSessionPersistence {
+    constructor(storage: KeyValueStorage, options?: KeyValueSessionPersistenceOptions);
+}
+```
+
+## dist/session/key-value-session-record-store.d.ts
+
+Exported as `@sinemacula/foundation/session/key-value-session-record-store`.
+
+```ts
+import type { KeyValueStorage } from "../storage/key-value-storage.js";
 import type { SessionLock } from "./session-lock.js";
-import type { PersistedSession, SessionClearResult, SessionPersistence, SessionSaveResult, SessionSnapshot, SessionVersion } from "./session-persistence.js";
-export interface KeyValueSessionPersistenceOptions {
+import type { SessionRecordStore } from "./session-record-store.js";
+export interface KeyValueSessionRecordStoreOptions {
     readonly key?: string;
     readonly lock?: SessionLock;
 }
-export declare class KeyValueSessionPersistence implements SessionPersistence {
+export declare class KeyValueSessionRecordStore implements SessionRecordStore {
     #private;
-    constructor(storage: KeyValueStorage, options?: KeyValueSessionPersistenceOptions);
+    constructor(storage: KeyValueStorage, options?: KeyValueSessionRecordStoreOptions);
+    read(): Promise<string | null>;
+    swap(decide: (current: string | null) => string | null): Promise<void>;
+}
+```
+
+## dist/session/record-session-persistence.d.ts
+
+Exported as `@sinemacula/foundation/session/record-session-persistence`.
+
+```ts
+import type { PersistedSession, SessionClearResult, SessionPersistence, SessionSaveResult, SessionSnapshot, SessionVersion } from "./session-persistence.js";
+import type { SessionRecordStore } from "./session-record-store.js";
+export declare class RecordSessionPersistence implements SessionPersistence {
+    #private;
+    constructor(store: SessionRecordStore);
     load(): Promise<SessionSnapshot>;
     saveIf(expected: SessionVersion, session: PersistedSession): Promise<SessionSaveResult>;
     clearIf(expected: SessionVersion): Promise<SessionClearResult>;
@@ -1380,6 +1403,17 @@ export interface SessionPersistence {
 }
 ```
 
+## dist/session/session-record-store.d.ts
+
+Exported as `@sinemacula/foundation/session/session-record-store`.
+
+```ts
+export interface SessionRecordStore {
+    read(): Promise<string | null>;
+    swap(decide: (current: string | null) => string | null): Promise<void>;
+}
+```
+
 ## dist/session/session-routes.d.ts
 
 Exported as `@sinemacula/foundation/session/session-routes`.
@@ -1515,6 +1549,20 @@ export interface SessionPersistenceContractHarness {
 export declare function describeSessionPersistenceContract(harness: SessionPersistenceContractHarness): void;
 ```
 
+## dist/session/test-support/session-record-store-contract.d.ts
+
+Exported as `@sinemacula/foundation/session/test-support/session-record-store-contract`.
+
+```ts
+import type { SessionRecordStore } from "../session-record-store.js";
+export interface SessionRecordStoreContractHarness {
+    create(): () => SessionRecordStore;
+    failing(record: string): () => SessionRecordStore;
+    broken(): SessionRecordStore;
+}
+export declare function describeSessionRecordStoreContract(harness: SessionRecordStoreContractHarness): void;
+```
+
 ## dist/storage/key-value-storage.d.ts
 
 Exported as `@sinemacula/foundation/storage/key-value-storage`.
@@ -1599,6 +1647,22 @@ export interface ServiceHolder<T> {
     isInstalled(): boolean;
 }
 export declare function createServiceHolder<T>(name: string): ServiceHolder<T>;
+```
+
+## dist/support/subscriber-list.d.ts
+
+Exported as `@sinemacula/foundation/support/subscriber-list`.
+
+```ts
+export type SubscriberDelivery<T> = (value: T, isLive?: () => boolean) => void;
+export declare class SubscriberList<T> {
+    #private;
+    constructor(report: (error: unknown) => void);
+    get size(): number;
+    add(handler: (value: T) => void): () => void;
+    snapshot(): SubscriberDelivery<T>;
+    emit(value: T): void;
+}
 ```
 
 ## dist/support/support-error.d.ts

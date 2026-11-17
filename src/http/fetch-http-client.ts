@@ -6,7 +6,8 @@
  */
 
 import { ExponentialBackoff } from '../realtime/exponential-backoff';
-import { stripQueryAndFragment } from '../support/url';
+import { clampTimerDelay, MAX_TIMER_DELAY } from '../support/timer';
+import { encodeQuery, stripQueryAndFragment } from '../support/url';
 import { onAbort, openAbortScope, untilAborted } from './abort-scope';
 import type { AbortScope } from './abort-scope';
 import type {
@@ -38,7 +39,7 @@ export interface RetryBackoff {
      * Compute the delay before the retry that follows a failed attempt.
      *
      * @param attempt - zero-based index of the failed attempt
-     * @returns the delay in milliseconds
+     * @returns the delay in milliseconds; one above 2147483647 waits that long
      */
     delayFor(attempt: number): number;
 }
@@ -54,7 +55,7 @@ export interface FetchHttpClientRetryOptions {
     /** Number of retries attempted after the first try. Defaults to 2. */
     readonly attempts?: number;
 
-    /** Delay strategy between attempts. Defaults to a new {@link ExponentialBackoff}. */
+    /** Delay strategy between attempts. Defaults to `new ExponentialBackoff({ jitter: 'equal' })`. */
     readonly backoff?: RetryBackoff;
 }
 
@@ -87,9 +88,6 @@ export interface FetchHttpClientOptions {
 
 /** How a successful response body is read: parsed JSON/text, or a raw Blob. */
 type BodyParseMode = 'json' | 'blob';
-
-/** The longest delay a timer accepts; a longer one fires at once. */
-const MAX_TIMER_DELAY = 2_147_483_647;
 
 /** HTTP statuses treated as transient, and therefore retryable, failures. */
 const TRANSIENT_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
@@ -192,7 +190,7 @@ export class FetchHttpClient implements HttpClient {
         this.#onUnauthorized = options.onUnauthorized ?? null;
         this.#onResponseError = options.onResponseError ?? null;
         this.#retryAttempts = options.retry?.attempts ?? (options.retry === undefined ? 0 : 2);
-        this.#retryBackoff = options.retry?.backoff ?? new ExponentialBackoff();
+        this.#retryBackoff = options.retry?.backoff ?? new ExponentialBackoff({ jitter: 'equal' });
     }
 
     /**
@@ -318,7 +316,7 @@ export class FetchHttpClient implements HttpClient {
      */
     async #awaitBackoff(attempt: number, sendRequest: SendRequest, request: HttpRequest | null): Promise<void> {
         const { method, path, options } = sendRequest;
-        const delay = this.#retryBackoff.delayFor(attempt);
+        const delay = clampTimerDelay(this.#retryBackoff.delayFor(attempt));
         const target = describeRequest(request ?? { method, url: this.#buildUrl(path, options?.query) });
 
         await new Promise<void>((resolve, reject) => {
@@ -564,16 +562,11 @@ export class FetchHttpClient implements HttpClient {
         const hashAt = path.indexOf('#');
         const resource = (hashAt === -1 ? path : path.slice(0, hashAt)).replace(/^\/+/u, '');
         const fragment = hashAt === -1 ? '' : path.slice(hashAt);
-        const parameters = new URLSearchParams();
-
-        for (const [key, value] of Object.entries(query ?? {})) {
-            if (value !== undefined) {
-                // Minimal URLSearchParams implementations may ship append only.
-                parameters.append(toWellFormed(key), toWellFormed(String(value)));
-            }
-        }
-
-        const encoded = parameters.toString();
+        const encoded = encodeQuery(
+            Object.entries(query ?? {}).flatMap(([key, value]) =>
+                value === undefined ? [] : [[key, String(value)] as const],
+            ),
+        );
         const search = encoded === '' ? '' : `${querySeparator(resource)}${encoded}`;
 
         return `${this.#baseUrl}/${resource}${search}${fragment}`;
@@ -641,14 +634,6 @@ function querySeparator(resource: string): string {
     }
 
     return resource.endsWith('?') || resource.endsWith('&') ? '' : '&';
-}
-
-/**
- * Replace lone surrogates with U+FFFD, as Node's encoder does, since a strict
- * encoder throws on them instead.
- */
-function toWellFormed(value: string): string {
-    return value.replace(/[\uD800-\uDFFF]/gu, '\uFFFD');
 }
 
 /**

@@ -239,6 +239,14 @@
             "types": "./dist/session/key-value-session-persistence.d.ts",
             "default": "./dist/session/key-value-session-persistence.js"
         },
+        "./session/key-value-session-record-store": {
+            "types": "./dist/session/key-value-session-record-store.d.ts",
+            "default": "./dist/session/key-value-session-record-store.js"
+        },
+        "./session/record-session-persistence": {
+            "types": "./dist/session/record-session-persistence.d.ts",
+            "default": "./dist/session/record-session-persistence.js"
+        },
         "./session/redirect": {
             "types": "./dist/session/redirect.d.ts",
             "default": "./dist/session/redirect.js"
@@ -266,6 +274,10 @@
         "./session/session-persistence": {
             "types": "./dist/session/session-persistence.d.ts",
             "default": "./dist/session/session-persistence.js"
+        },
+        "./session/session-record-store": {
+            "types": "./dist/session/session-record-store.d.ts",
+            "default": "./dist/session/session-record-store.js"
         },
         "./session/session-routes": {
             "types": "./dist/session/session-routes.d.ts",
@@ -299,6 +311,10 @@
             "types": "./dist/session/test-support/session-persistence-contract.d.ts",
             "default": "./dist/session/test-support/session-persistence-contract.js"
         },
+        "./session/test-support/session-record-store-contract": {
+            "types": "./dist/session/test-support/session-record-store-contract.d.ts",
+            "default": "./dist/session/test-support/session-record-store-contract.js"
+        },
         "./storage/key-value-storage": {
             "types": "./dist/storage/key-value-storage.d.ts",
             "default": "./dist/storage/key-value-storage.js"
@@ -322,6 +338,10 @@
         "./support/service-holder": {
             "types": "./dist/support/service-holder.d.ts",
             "default": "./dist/support/service-holder.js"
+        },
+        "./support/subscriber-list": {
+            "types": "./dist/support/subscriber-list.d.ts",
+            "default": "./dist/support/subscriber-list.js"
         },
         "./support/support-error": {
             "types": "./dist/support/support-error.d.ts",

@@ -549,5 +549,78 @@ describe('ColorSchemeService', () => {
 
             expect(listener).not.toHaveBeenCalled();
         });
+
+        it('calls a listener subscribed twice once per registration, each unsubscribe removing its own', () => {
+            const { service } = makeService();
+            const listener = vi.fn();
+            const unsubscribe = service.subscribe(listener);
+
+            service.subscribe(listener);
+            service.setPreference('dark');
+            unsubscribe();
+            unsubscribe();
+            service.setPreference('light');
+
+            expect(listener.mock.calls).toStrictEqual([
+                ['dark', 'dark'],
+                ['dark', 'dark'],
+                ['light', 'light'],
+            ]);
+        });
+
+        it('calls a listener subscribed during a change only from the next change', () => {
+            const { service } = makeService();
+            const late = vi.fn();
+            let subscribed = false;
+
+            service.subscribe(() => {
+                if (!subscribed) {
+                    subscribed = true;
+                    service.subscribe(late);
+                }
+            });
+            service.setPreference('dark');
+
+            expect(late).not.toHaveBeenCalled();
+
+            service.setPreference('light');
+
+            expect(late).toHaveBeenCalledExactlyOnceWith('light', 'light');
+        });
+
+        it('skips a listener unsubscribed during a change', () => {
+            const { service } = makeService();
+            const removed = vi.fn();
+            const unsubscribes: Array<() => void> = [];
+
+            service.subscribe(() => {
+                unsubscribes[0]?.();
+            });
+            unsubscribes.push(service.subscribe(removed));
+            service.setPreference('dark');
+
+            expect(removed).not.toHaveBeenCalled();
+        });
+
+        it('delivers a change made by a listener after the current one, each with the scheme it was made with', () => {
+            const { service } = makeService();
+            const calls: string[] = [];
+            let changed = false;
+
+            service.subscribe((resolved, preference) => {
+                calls.push(`a:${resolved}:${preference}`);
+
+                if (!changed) {
+                    changed = true;
+                    service.setPreference('system');
+                }
+            });
+            service.subscribe((resolved, preference) => {
+                calls.push(`b:${resolved}:${preference}`);
+            });
+            service.setPreference('dark');
+
+            expect(calls).toStrictEqual(['a:dark:dark', 'b:dark:dark', 'a:light:system', 'b:light:system']);
+        });
     });
 });

@@ -6,13 +6,11 @@
  */
 
 import { isRecord } from '../support/is-record';
+import { MAX_TIMER_DELAY } from '../support/timer';
 import { RuntimeEnvironmentError } from './runtime-environment-error';
 
 /** The default allowance for the request and its body, in milliseconds. */
 const DEFAULT_TIMEOUT = 5000;
-
-/** The longest delay a timer honours before firing immediately. */
-const MAX_TIMEOUT = 2_147_483_647;
 
 /**
  * Where the runtime environment document lives and how long to wait for it.
@@ -44,8 +42,8 @@ export async function fetchRuntimeEnvironment(
 ): Promise<Record<string, string>> {
     const timeout = source.timeout ?? DEFAULT_TIMEOUT;
 
-    if (!(timeout > 0 && timeout <= MAX_TIMEOUT)) {
-        throw new RangeError(`The runtime environment timeout must be between 1 and ${MAX_TIMEOUT} ms.`);
+    if (!(timeout > 0 && timeout <= MAX_TIMER_DELAY)) {
+        throw new RangeError(`The runtime environment timeout must be between 1 and ${MAX_TIMER_DELAY} ms.`);
     }
 
     const controller = new AbortController();

@@ -179,20 +179,23 @@ unless the socket is open. Each `on` / `onStateChange` call is its own registrat
 registered when it started, and state changes made from a handler are delivered in order after the current one.
 `onError` receives failures the connection contains (a throwing subscriber, `url()` builder or socket factory); the
 same failure inside `connect()` throws a `RealtimeError` with the original as its `cause`. `realtime/subscribers`
-exports the registries behind these rules for other transport adapters.
+exports the registries behind these rules for other transport adapters, and `support/subscriber-list` the list itself.
 
 ### Contained failures
 
 `StaticFeatureFlags`, `ColorSchemeService` and `installPageTracking` take an optional `onError` sink, as
 `WebSocketConnection` does: a synchronous throw from a change handler, listener, tracker or breadcrumb trail goes to the
-sink and never stops the others or reaches the caller. Page tracking records only completed navigations, by path: query
-strings and hashes never reach the tracker or the trail.
+sink and never stops the others or reaches the caller. Flag-change handlers and scheme listeners follow the realtime
+registration rules: each subscribe is its own registration, a change reaches the handlers registered when it was made,
+and a change made from a handler is delivered after the current one. Page tracking records only completed navigations,
+by path: query strings and hashes never reach the tracker or the trail.
 
 ### Adapter contracts
 
 Each port a platform adapts ships a Vitest contract suite to run against its adapters, under the area's `test-support`:
 `describeFeatureFlagsContract`, `describeRealtimeContract`, `describeSessionPersistenceContract`,
-`describeSessionLockContract`, `describeKeyValueStorageContract` and `describeConnectivityMonitorContract`. An adapter
+`describeSessionRecordStoreContract`, `describeSessionLockContract`, `describeKeyValueStorageContract` and
+`describeConnectivityMonitorContract`. An adapter
 proves its behaviour by running the suite from its own tests:
 
 ```ts
@@ -216,6 +219,14 @@ Every subpath resolves under Metro and Jest through the `default` export conditi
 surface under Metro, Hermes and React Native's Jest preset. The package ships ES modules, so add it to Jest's
 `transformIgnorePatterns` allow-list. `KeyValueStorage` is synchronous, so back it with a synchronous store; an
 asynchronous secure store implements `SessionPersistence` directly.
+
+### Sharing a session across browser tabs
+
+Every context sharing the session must see each write before it next reads, or one tab presents a refresh token another
+has spent. Browser tabs sharing `localStorage` do not: a tab can be granted a lock before another tab's write reaches
+it. Persist the session through `RecordSessionPersistence` over a `SessionRecordStore` that reads and swaps one record
+atomically across tabs, such as one IndexedDB key in a readwrite transaction, and keep a shared `exchangeLock`.
+`KeyValueSessionPersistence` suits a single context, or contexts sharing a store that is visible to each at once.
 
 ## Requirements
 

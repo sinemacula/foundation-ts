@@ -5,6 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
+import type { DeepReadonly } from '../config/config-repository';
 import { FetchHttpClient } from '../http/fetch-http-client';
 import type {
     HttpClient,
@@ -24,7 +25,7 @@ import type { FoundationConfig } from './foundation-config';
  */
 export interface WireHttpClientTools<T extends FoundationConfig> {
     /** The frozen application configuration. */
-    readonly config: Readonly<T>;
+    readonly config: DeepReadonly<T>;
 
     /** The resolved fetch seam. */
     readonly fetchFn: typeof fetch;
@@ -44,7 +45,7 @@ export interface WireHttpClientTools<T extends FoundationConfig> {
  */
 export interface WireHttpClientOptions<T extends FoundationConfig> {
     /** The frozen application configuration. */
-    readonly config: Readonly<T>;
+    readonly config: DeepReadonly<T>;
 
     /** The resolved fetch seam. */
     readonly fetchFn: typeof fetch;

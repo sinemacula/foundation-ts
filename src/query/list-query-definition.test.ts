@@ -28,15 +28,15 @@ function shapeUser(query: ApiQuery): ApiQuery {
 }
 
 describe('defineListQuery', () => {
-    it('returns the definition unchanged', () => {
-        const definition = defineListQuery({
+    it('returns the definition it was given', () => {
+        const input = {
             filters: {
                 status: filter.equals('status'),
             },
             pageSize: 10,
-        });
+        };
 
-        expect(definition.pageSize).toBe(10);
+        expect(defineListQuery(input)).toBe(input);
     });
 
     it('freezes the returned definition', () => {
@@ -70,27 +70,27 @@ describe('defineListQuery', () => {
     });
 
     it('preserves sortable columns', () => {
-        const definition = defineListQuery({ sortable: ['name', 'createdAt'] });
+        const sortable = ['name', 'createdAt'];
+        const definition = defineListQuery({ sortable });
 
-        expect(definition.sortable).toEqual(['name', 'createdAt']);
+        expect(definition.sortable).toBe(sortable);
     });
 
     it('preserves defaultSort', () => {
-        const definition = defineListQuery({ defaultSort: { column: 'name', direction: 'asc' } });
+        const defaultSort = { column: 'name', direction: 'asc' } as const;
+        const definition = defineListQuery({ defaultSort });
 
-        expect(definition.defaultSort).toEqual({ column: 'name', direction: 'asc' });
+        expect(definition.defaultSort).toBe(defaultSort);
     });
 
     it('preserves a filters record with multiple entries', () => {
-        const definition = defineListQuery({
-            filters: {
-                status: filter.equals('status'),
-                roles: filter.anyOf('role'),
-            },
-        });
+        const filters = {
+            status: filter.equals('status'),
+            roles: filter.anyOf('role'),
+        };
+        const definition = defineListQuery({ filters });
 
-        expect(definition.filters?.status).toBeDefined();
-        expect(definition.filters?.roles).toBeDefined();
+        expect(definition.filters).toBe(filters);
     });
 });
 
