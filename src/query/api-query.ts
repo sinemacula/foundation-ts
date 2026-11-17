@@ -101,6 +101,23 @@ const OPERATORS: ReadonlySet<string> = new Set<keyof FilterOperators>([
 ]);
 
 /**
+ * Deep-freeze a filter node, stopping at nodes already frozen so a derived
+ * query only freezes the nodes it adds.
+ */
+function freezeTree(node: unknown): void {
+    // Primitives report frozen, so the walk also stops at every leaf.
+    if (Object.isFrozen(node)) {
+        return;
+    }
+
+    for (const child of Object.values(node as object)) {
+        freezeTree(child);
+    }
+
+    Object.freeze(node);
+}
+
+/**
  * Refuse a `$`-prefixed name, which the grammar reserves for groups and
  * operators.
  *
@@ -110,6 +127,31 @@ function assertName(name: string): void {
     if (name.startsWith('$')) {
         throw new QueryError(`"${name}" is not a field or relation name.`);
     }
+}
+
+/**
+ * Refuse a non-finite number, which JSON would encode as null.
+ *
+ * @param operand - a scalar or a list of scalars
+ * @throws {@link QueryError} when any number is NaN or infinite
+ */
+function assertFinite(field: string, operand: unknown): void {
+    if ([operand].flat().some(value => typeof value === 'number' && !Number.isFinite(value))) {
+        throw new QueryError(`The "${field}" filter needs finite numbers.`);
+    }
+}
+
+/**
+ * Check a page number or size is a positive integer.
+ *
+ * @throws {@link QueryError} when it is not a safe integer of at least 1
+ */
+function positiveInteger(label: 'page' | 'limit', n: number): number {
+    if (!Number.isSafeInteger(n) || n < 1) {
+        throw new QueryError(`The ${label} must be a positive integer.`);
+    }
+
+    return n;
 }
 
 /**
@@ -317,7 +359,8 @@ function settleAnd(merged: Map<string, unknown>, apart: readonly FilterTree[]): 
  * Construct via {@link ApiQuery.create}; every method returns a new instance,
  * so a base query is safe to share between derived queries. Filter calls AND
  * together: none replaces or widens a condition an earlier call added. A
- * {@link QueryError} is thrown for a field or relation name starting with `$`.
+ * {@link QueryError} is thrown for a field or relation name starting with `$`
+ * and for a non-finite number.
  *
  * The toolkit gates every filter operator by the column's declared capability
  * (`exact`, `enum`, `range`, `document`, `opaque`): `$neq` only on an enum, the
@@ -330,6 +373,7 @@ export class ApiQuery {
     readonly #state: QueryState;
 
     private constructor(state: QueryState) {
+        freezeTree(state.filters);
         this.#state = state;
     }
 
@@ -355,7 +399,7 @@ export class ApiQuery {
 
     where(field: string, operatorOrValue: ScalarOperator | FilterScalar, value?: FilterScalar): ApiQuery {
         if (value === undefined) {
-            return this.#withCondition(field, operatorOrValue);
+            return this.#withCondition(field, operatorOrValue, operatorOrValue);
         }
 
         return this.#withOperator(field, operatorOrValue as ScalarOperator, value);
@@ -526,17 +570,21 @@ export class ApiQuery {
 
     /**
      * Set the 1-based page number.
+     *
+     * @throws {@link QueryError} when `n` is not a positive integer
      */
     page(n: number): ApiQuery {
-        return new ApiQuery({ ...this.#state, pageNumber: n });
+        return new ApiQuery({ ...this.#state, pageNumber: positiveInteger('page', n) });
     }
 
     /**
-     * Set the page size (>= 1). The toolkit refuses a size over its ceiling
-     * (100 by default) rather than clamping it.
+     * Set the page size. The toolkit refuses a size over its ceiling (100 by
+     * default) rather than clamping it.
+     *
+     * @throws {@link QueryError} when `n` is not a positive integer
      */
     limit(n: number): ApiQuery {
-        return new ApiQuery({ ...this.#state, limitNumber: n });
+        return new ApiQuery({ ...this.#state, limitNumber: positiveInteger('limit', n) });
     }
 
     /**
@@ -563,7 +611,7 @@ export class ApiQuery {
      * Request a per-resource field list (`fields[user]=name,email`).
      */
     fieldsFor(resource: string, names: readonly string[]): ApiQuery {
-        const fieldsMap = { ...this.#state.fieldsMap, [resource]: names };
+        const fieldsMap = { ...this.#state.fieldsMap, [resource]: [...names] };
 
         return new ApiQuery({ ...this.#state, fieldsMap });
     }
@@ -581,7 +629,7 @@ export class ApiQuery {
      * or the resource's default fields.
      */
     aggregatesFor(resource: string, keys: readonly string[]): ApiQuery {
-        const aggregatesMap = { ...this.#state.aggregatesMap, [resource]: keys };
+        const aggregatesMap = { ...this.#state.aggregatesMap, [resource]: [...keys] };
 
         return new ApiQuery({ ...this.#state, aggregatesMap });
     }
@@ -601,7 +649,8 @@ export class ApiQuery {
     }
 
     /**
-     * Return the assembled filter tree, empty when no filters are set.
+     * Return the assembled filter tree, deep-frozen, empty when no filters are
+     * set.
      */
     filterTree(): Readonly<FilterTree> {
         return this.#state.filters;
@@ -736,17 +785,27 @@ export class ApiQuery {
     }
 
     /**
-     * Return a query with one operator merged into `field`'s conditions.
+     * Return a query with one operator merged into `field`'s conditions,
+     * copying a list operand so the caller keeps its array.
      */
-    #withOperator(field: string, operator: keyof FilterOperators, value: unknown): ApiQuery {
-        return this.#withCondition(field, { [operator]: value });
+    #withOperator(
+        field: string,
+        operator: keyof FilterOperators,
+        operand: FilterScalar | readonly FilterScalar[] | true,
+    ): ApiQuery {
+        const value = Array.isArray(operand) ? [...operand] : operand;
+
+        return this.#withCondition(field, { [operator]: value }, value);
     }
 
     /**
      * Return a query with `condition` merged into `field`.
+     *
+     * @param operand - the scalar or list the condition compares against
      */
-    #withCondition(field: string, condition: unknown): ApiQuery {
+    #withCondition(field: string, condition: unknown, operand: unknown): ApiQuery {
         assertName(field);
+        assertFinite(field, operand);
 
         return this.#withMergedDocument({ [field]: condition });
     }

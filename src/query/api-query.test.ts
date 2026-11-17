@@ -54,6 +54,31 @@ const NAMED_CALLS: ReadonlyArray<readonly [string, (query: ApiQuery, name: strin
     ['whereHasNot', (q, name) => q.whereHasNot(name, r => r.where('a', 1))],
 ];
 
+/**
+ * Build the filter calls that carry `n` as an operand on the field `n`.
+ */
+function nonFiniteCalls(n: number): ReadonlyArray<readonly [string, (query: ApiQuery) => ApiQuery]> {
+    return [
+        ['where', q => q.where('n', n)],
+        ['where with an operator', q => q.where('n', '$gt', n)],
+        ['whereIn', q => q.whereIn('n', [1, n])],
+        ['whereBetween', q => q.whereBetween('n', [1, n])],
+        ['whereContains with a scalar', q => q.whereContains('n', n)],
+        ['whereContains with a list', q => q.whereContains('n', ['a', n])],
+    ];
+}
+
+/**
+ * Collect every object node of a filter tree, the root included.
+ */
+function treeNodes(node: unknown): unknown[] {
+    if (typeof node !== 'object' || node === null) {
+        return [];
+    }
+
+    return [node, ...Object.values(node).flatMap(treeNodes)];
+}
+
 describe('ApiQuery', () => {
     describe('create', () => {
         it('returns an empty query with no parameters', () => {
@@ -311,6 +336,39 @@ describe('ApiQuery', () => {
     });
 
     describe('immutability', () => {
+        it.each([
+            ['whereIn', (values: string[]) => ApiQuery.create().whereIn('k', values)],
+            ['whereBetween', (values: string[]) => ApiQuery.create().whereBetween('k', values as [string, string])],
+            ['whereContains', (values: string[]) => ApiQuery.create().whereContains('k', values)],
+            ['fieldsFor', (values: string[]) => ApiQuery.create().fieldsFor('user', values)],
+            ['aggregatesFor', (values: string[]) => ApiQuery.create().aggregatesFor('user', values)],
+        ])('copies the array %s is given', (_method, build) => {
+            const values = ['a', 'b'];
+            const query = build(values);
+            const before = query.toQueryParameters();
+
+            values.push('c');
+            values[0] = 'z';
+
+            expect(query.toQueryParameters()).toStrictEqual(before);
+            expect(Object.isFrozen(values)).toBe(false);
+        });
+
+        it('exposes a filter tree frozen at every depth', () => {
+            const tree = ApiQuery.create()
+                .whereIn('status', ['a', 'b'])
+                .whereHas('posts', p => p.whereBetween('views', [1, 9]))
+                .orWhere([q => q.where('a', 1), q => q.whereRelation('author', a => a.whereNull('bio'))])
+                .filterTree();
+            const nodes = treeNodes(tree);
+
+            expect(nodes).toHaveLength(12);
+            expect(nodes.every(node => Object.isFrozen(node))).toBe(true);
+            expect(() => {
+                (tree as Record<string, unknown>)['status'] = 'x';
+            }).toThrow(TypeError);
+        });
+
         it('does not mutate the parent instance when deriving a new query', () => {
             const base = ApiQuery.create().where('name', 'Alice');
             const derived = base.where('age', '$ge', 18);
@@ -354,6 +412,22 @@ describe('ApiQuery', () => {
                 .whereRelation('author', a => a.whereRelation(name, r => r.where('id', 1)));
 
             expect(filtersParam(query)).toBe(`{"active":true,"${name}":1,"author":{"${name}":{"id":1}}}`);
+        });
+    });
+
+    describe('finite numbers', () => {
+        it.each(
+            [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY].flatMap(n =>
+                nonFiniteCalls(n).map(([method, call]) => [method, n, call] as const),
+            ),
+        )('%s refuses %s', (_method, _n, call) => {
+            expect(() => call(ApiQuery.create())).toThrow(new QueryError('The "n" filter needs finite numbers.'));
+        });
+
+        it('accepts finite numbers beside strings and booleans', () => {
+            const query = ApiQuery.create().whereIn('n', [0, -1.5, 'a', true]);
+
+            expect(filtersParam(query)).toBe('{"n":{"$in":[0,-1.5,"a",true]}}');
         });
     });
 
@@ -998,18 +1072,23 @@ describe('ApiQuery', () => {
     });
 
     describe('page', () => {
-        it('emits the page number', () => {
-            const params = ApiQuery.create().page(3).toQueryParameters();
-
-            expect(params['page']).toBe(3);
+        it.each([1, 3])('emits page %s', n => {
+            expect(ApiQuery.create().page(n).toQueryParameters()).toStrictEqual({ page: n });
         });
     });
 
     describe('limit', () => {
-        it('emits the limit', () => {
-            const params = ApiQuery.create().limit(25).toQueryParameters();
+        it.each([1, 25])('emits limit %s', n => {
+            expect(ApiQuery.create().limit(n).toQueryParameters()).toStrictEqual({ limit: n });
+        });
+    });
 
-            expect(params['limit']).toBe(25);
+    describe.each([
+        ['page', (q: ApiQuery, n: number) => q.page(n)],
+        ['limit', (q: ApiQuery, n: number) => q.limit(n)],
+    ] as const)('%s bounds', (label, set) => {
+        it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2 ** 53])('refuses %s', n => {
+            expect(() => set(ApiQuery.create(), n)).toThrow(new QueryError(`The ${label} must be a positive integer.`));
         });
     });
 

@@ -111,7 +111,8 @@ const query = ApiQuery.create()
   resource's default fields.
 - `withTrashed()` / `onlyTrashed()` set `trashed=with` / `trashed=only`.
 - Changing the order drops any cursor token but keeps cursor pagination; random order under cursor pagination throws.
-- A `$`-prefixed field or relation name throws a `QueryError`.
+- `$`-prefixed field or relation names, non-finite numbers, and a page or limit that is not a positive integer throw
+  a `QueryError`.
 - `ResourceClient.list` returns the mapped `items`, `meta` (`{ mode: 'length-aware', total, count, hasMore }`,
   `{ mode: 'cursor', hasMore }`, or `null`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
 

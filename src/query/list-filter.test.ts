@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { ApiQuery } from './api-query';
 import { filter } from './list-filter';
+import { QueryError } from './query-error';
 
 /**
  * Parse the `filters` parameter of a query back to an object.
@@ -105,6 +106,12 @@ describe('filter', () => {
             const q = filter.atLeast('order.total').apply(ApiQuery.create(), 50);
 
             expect(parsedFilters(q)).toEqual({ order: wire([['total', wire([['$ge', 50]])]]) });
+        });
+
+        it('refuses an infinite bound', () => {
+            expect(() => filter.atLeast('order.total').apply(ApiQuery.create(), Number.POSITIVE_INFINITY)).toThrow(
+                new QueryError('The "total" filter needs finite numbers.'),
+            );
         });
     });
 
