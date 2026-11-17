@@ -5,11 +5,20 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { ApiQuery } from './api-query';
+import type { FilterScalar } from './filter-expression';
+import type { ListFilter } from './list-filter';
 import { filter } from './list-filter';
+import type { FilterValueOf } from './list-query-definition';
 import { defineListQuery } from './list-query-definition';
+
+/** The value a custom date-range filter takes. */
+interface DateRange {
+    /** The inclusive lower bound. */
+    readonly from: string;
+}
 
 /**
  * Narrow a query to the user fields a list needs.
@@ -82,5 +91,36 @@ describe('defineListQuery', () => {
 
         expect(definition.filters?.status).toBeDefined();
         expect(definition.filters?.roles).toBeDefined();
+    });
+});
+
+describe('FilterValueOf', () => {
+    it('reads the value type each factory accepts', () => {
+        const custom = filter.custom<DateRange>(query => query);
+
+        expectTypeOf<FilterValueOf<ReturnType<typeof filter.equals>>>().toEqualTypeOf<FilterScalar>();
+        expectTypeOf<FilterValueOf<ReturnType<typeof filter.anyOf>>>().toEqualTypeOf<readonly FilterScalar[]>();
+        expectTypeOf<FilterValueOf<ReturnType<typeof filter.between>>>().toEqualTypeOf<
+            readonly [FilterScalar, FilterScalar]
+        >();
+        expectTypeOf<FilterValueOf<ReturnType<typeof filter.boolean>>>().toEqualTypeOf<boolean>();
+        expectTypeOf<FilterValueOf<ReturnType<typeof filter.present>>>().toEqualTypeOf<boolean>();
+        expectTypeOf<FilterValueOf<typeof custom>>().toEqualTypeOf<DateRange>();
+    });
+
+    it('is never for a value that is not a filter', () => {
+        expectTypeOf<FilterValueOf<string>>().toBeNever();
+    });
+
+    it('keeps the filters record type through defineListQuery', () => {
+        const definition = defineListQuery({
+            filters: { status: filter.equals('status'), roles: filter.anyOf('role') },
+        });
+
+        type Filters = NonNullable<typeof definition.filters>;
+
+        expectTypeOf<keyof Filters>().toEqualTypeOf<'status' | 'roles'>();
+        expectTypeOf<Filters['status']>().toEqualTypeOf<ListFilter<FilterScalar>>();
+        expectTypeOf<Filters['roles']>().toEqualTypeOf<ListFilter<readonly FilterScalar[]>>();
     });
 });

@@ -5,9 +5,9 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
-import type { RawRecord } from './envelope';
+import type { ListResult, RawRecord } from './envelope';
 import { unwrapItem, unwrapList } from './envelope';
 import { QueryError } from './query-error';
 
@@ -256,5 +256,12 @@ describe('unwrapList', () => {
                 expect.objectContaining({ name: 'QueryError', message: MALFORMED, cause: expect.any(URIError) }),
             );
         });
+    });
+});
+
+describe('mapper inference', () => {
+    it('types the unwrapped values from the mapper', () => {
+        expectTypeOf(() => unwrapItem({}, mapWidget)).returns.toEqualTypeOf<Widget>();
+        expectTypeOf(() => unwrapList({}, mapWidget)).returns.toEqualTypeOf<ListResult<Widget>>();
     });
 });
