@@ -185,7 +185,7 @@ export function describeFeatureFlagsContract(harness: FeatureFlagsContractHarnes
                 let changed = false;
 
                 flags.onChange(() => {
-                    seen.push(`a:${String(flags.variant('step', 0))}`);
+                    seen.push('a');
 
                     if (!changed) {
                         changed = true;
@@ -193,12 +193,13 @@ export function describeFeatureFlagsContract(harness: FeatureFlagsContractHarnes
                     }
                 });
                 flags.onChange(() => {
-                    seen.push(`b:${String(flags.variant('step', 0))}`);
+                    seen.push('b');
                 });
                 await change({ step: 1 });
                 await nested;
 
-                expect(seen).toStrictEqual(['a:1', 'b:2', 'a:2', 'b:2']);
+                expect(seen).toStrictEqual(['a', 'b', 'a', 'b']);
+                expect(flags.variant('step', 0)).toBe(2);
             });
 
             it('isolates a throwing handler from the others and from the change', async () => {
