@@ -5,7 +5,9 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { bench, describe } from 'vitest';
+import { describe } from 'vitest';
+
+import { measure } from './support/measure';
 
 import type { RawRecord } from '../src/query/envelope';
 import { unwrapList } from '../src/query/envelope';
@@ -34,14 +36,14 @@ describe('unwrapList', () => {
     for (const count of [25, 1000, 10_000]) {
         const payload = page(count);
 
-        bench(`unwraps ${String(count)} rows`, () => {
+        measure(`unwraps ${String(count)} rows`, () => {
             unwrapList(payload, identity);
         });
     }
 
     const cursorPage = page(25, LONG_LINK);
 
-    bench('reads the cursor from an 8 KB next link', () => {
+    measure('reads the cursor from an 8 KB next link', () => {
         unwrapList(cursorPage, identity);
     });
 });
