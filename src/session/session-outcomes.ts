@@ -100,8 +100,8 @@ export type LoginOutcome =
 /**
  * What a refresh through the session core did.
  *
- * - `refreshed`: the state holds a usable session, newly issued and persisted
- *   or adopted from another context
+ * - `refreshed`: the state still holds the session the refresh started on,
+ *   rotated and persisted, or rotated by another context and adopted
  * - `rejected`: the session was cleared
  * - `retryable`: the tokens are kept
  * - `failed`: the tokens are kept when the refresh failed or a rotated pair
@@ -109,12 +109,13 @@ export type LoginOutcome =
  *   discarded when a refused session could not be cleared from persistence
  * - `interactionRequired`: the session was cleared and the pending session is
  *   handed back
- * - `superseded`: the session the refresh started with was replaced or signed
- *   out meanwhile, and the result discarded
+ * - `superseded`: the state held no session, or the one the refresh started on
+ *   was replaced or signed out meanwhile, by this context or by adopting
+ *   another context's session, and the result discarded
  */
 export type RefreshOutcome =
     | {
-          /** The state holds a usable session. */
+          /** The state still holds the session the refresh started on. */
           readonly kind: 'refreshed';
       }
     | {
@@ -132,7 +133,7 @@ export type RefreshOutcome =
           readonly error: unknown;
       }
     | {
-          /** Another session transition overtook the refresh. */
+          /** The refresh did not apply to the session the state holds. */
           readonly kind: 'superseded';
       };
 

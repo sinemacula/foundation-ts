@@ -53,8 +53,8 @@ export interface DefaultSessionApiOptions<C = PasswordCredentials> {
     /** Overrides for the endpoint paths. */
     readonly paths?: SessionPaths;
 
-    /** Build the sign-in body. Default: the credentials plus `platform` set to the device OS. */
-    readonly loginBody?: (credentials: C, device: SessionDevice) => unknown;
+    /** Build the sign-in body, which owns presenting the held refresh token. Default: the credentials, `platform` set to the device OS, and in body transport the held `refresh_token`. */
+    readonly loginBody?: (credentials: C, device: SessionDevice, refreshToken: string | null) => unknown;
 
     /** The clock, in epoch milliseconds, the access token expiry is computed against. Default `Date.now`. */
     readonly now?: () => number;
@@ -94,7 +94,9 @@ const CROSS_SITE_HEADERS: Readonly<Record<string, string>> = { 'X-Requested-With
  * and sign-out failures are not reported to the global error handler, since
  * they surface through the session flow. A refresh never throws: every failure
  * is classified into its result, and in body transport a refresh without a
- * refresh token is rejected without a request.
+ * refresh token is rejected without a request. A sign-out carries the bearer
+ * token of the session it signs out, which a bearer interceptor leaves in
+ * place.
  */
 export function createDefaultSessionApi<C = PasswordCredentials>(
     http: HttpClient,
@@ -116,7 +118,6 @@ export function createDefaultSessionApi<C, U extends SessionUser>(
 ): SessionApi<U | SessionUser, C> {
     const transport = options.transport ?? 'body';
     const paths: Required<SessionPaths> = { ...DEFAULT_PATHS, ...options.paths };
-    const loginBody = options.loginBody ?? defaultLoginBody;
     const mapUser = options.mapUser ?? mapDefaultUser;
     const mapSession = createSessionMapper(transport, options.now ?? Date.now);
     const cookie: HttpRequestOptions =
@@ -131,9 +132,20 @@ export function createDefaultSessionApi<C, U extends SessionUser>(
     const tokenBody = (refreshToken: string | null): Record<string, unknown> | undefined =>
         transport === 'body' && refreshToken !== null ? { [REFRESH_TOKEN_FIELD]: refreshToken } : undefined;
 
+    /**
+     * Build the default sign-in body: the credentials, the device platform and
+     * any refresh token travelling in the body.
+     */
+    const defaultLoginBody = (credentials: C, device: SessionDevice, refreshToken: string | null): unknown => ({
+        ...credentials,
+        platform: device.os,
+        ...tokenBody(refreshToken),
+    });
+    const loginBody = options.loginBody ?? defaultLoginBody;
+
     return {
-        async login(credentials, device): Promise<LoginResult> {
-            const raw = await http.post<unknown>(paths.login, loginBody(credentials, device), signIn);
+        async login(credentials, device, refreshToken): Promise<LoginResult> {
+            const raw = await http.post<unknown>(paths.login, loginBody(credentials, device, refreshToken), signIn);
 
             return mapSession(raw);
         },
@@ -151,8 +163,11 @@ export function createDefaultSessionApi<C, U extends SessionUser>(
                 return { kind: classifyRefreshError(error), error };
             }
         },
-        async logout(refreshToken): Promise<void> {
-            await http.post<unknown>(paths.logout, tokenBody(refreshToken), quiet);
+        async logout(tokens): Promise<void> {
+            await http.post<unknown>(paths.logout, tokenBody(tokens.refreshToken), {
+                ...quiet,
+                headers: { ...quiet.headers, Authorization: `Bearer ${tokens.accessToken}` },
+            });
         },
         async currentUser(): Promise<U | SessionUser> {
             const raw = await http.get<unknown>(paths.user);
@@ -160,13 +175,6 @@ export function createDefaultSessionApi<C, U extends SessionUser>(
             return mapUser(unwrapOptionalEnvelope(raw));
         },
     };
-}
-
-/**
- * Build the default sign-in body: the credentials plus the device platform.
- */
-function defaultLoginBody<C>(credentials: C, device: SessionDevice): unknown {
-    return { ...credentials, platform: device.os };
 }
 
 /**
@@ -218,7 +226,13 @@ function readTokens(data: Record<string, unknown>, transport: RefreshTokenTransp
         throw malformedSession();
     }
 
-    return { accessToken, refreshToken, expiresAtEpochMs: expiresIn === null ? null : now() + expiresIn * 1000 };
+    const expiresAtEpochMs = expiresIn === null ? null : now() + expiresIn * 1000;
+
+    if (expiresAtEpochMs !== null && !Number.isFinite(expiresAtEpochMs)) {
+        throw malformedSession();
+    }
+
+    return { accessToken, refreshToken, expiresAtEpochMs };
 }
 
 /**

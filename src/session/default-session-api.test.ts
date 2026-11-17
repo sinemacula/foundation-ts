@@ -5,11 +5,13 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { createBearerTokenInterceptor } from '../http/bearer-token-interceptor';
+import type { FetchHttpClientOptions } from '../http/fetch-http-client';
 import { FetchHttpClient } from '../http/fetch-http-client';
 import type { HttpClient, HttpRequestOptions } from '../http/http-client';
-import { HttpError, NetworkError } from '../http/http-error';
+import { HttpError, NetworkError, TimeoutError } from '../http/http-error';
 import type { DefaultSessionApiOptions } from './default-session-api';
 import { createDefaultSessionApi } from './default-session-api';
 import type { SessionApi } from './session-api';
@@ -153,6 +155,8 @@ const COOKIE = { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials:
 const SIGN_IN = { retryOnUnauthorized: false };
 const QUIET = { retryOnUnauthorized: false, notifyOnError: false };
 const COOKIE_QUIET = { ...COOKIE, ...QUIET };
+const HELD = { accessToken: 'captured', refreshToken: 'held', expiresAtEpochMs: null };
+const BEARER = { Authorization: 'Bearer captured' };
 
 /**
  * Build a documented session response body.
@@ -198,7 +202,7 @@ describe('createDefaultSessionApi', () => {
             const http = new FakeHttpClient();
             http.queueResponse(sessionBody());
 
-            await gateway(http).login(CREDENTIALS, DEVICE);
+            await gateway(http).login(CREDENTIALS, DEVICE, null);
 
             expect(http.calls).toStrictEqual([
                 {
@@ -214,7 +218,7 @@ describe('createDefaultSessionApi', () => {
             const http = new FakeHttpClient();
             http.queueResponse(sessionBody());
 
-            await expect(gateway(http).login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
+            await expect(gateway(http).login(CREDENTIALS, DEVICE, null)).resolves.toStrictEqual({
                 kind: 'authenticated',
                 tokens: { accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: NOW + 900_000 },
             });
@@ -224,7 +228,7 @@ describe('createDefaultSessionApi', () => {
             const http = new FakeHttpClient();
             http.queueResponse({ data: sessionBody() });
 
-            await expect(gateway(http).login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
+            await expect(gateway(http).login(CREDENTIALS, DEVICE, null)).resolves.toStrictEqual({
                 kind: 'authenticated',
                 tokens: { accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: NOW + 900_000 },
             });
@@ -235,7 +239,7 @@ describe('createDefaultSessionApi', () => {
             http.queueResponse(sessionBody());
             const before = Date.now();
 
-            const result = await createDefaultSessionApi(http).login(CREDENTIALS, DEVICE);
+            const result = await createDefaultSessionApi(http).login(CREDENTIALS, DEVICE, null);
             const expiresAt = result.kind === 'authenticated' ? result.tokens.expiresAtEpochMs : null;
 
             expect(expiresAt).toBeGreaterThanOrEqual(before + 900_000);
@@ -246,7 +250,7 @@ describe('createDefaultSessionApi', () => {
             const http = new FakeHttpClient();
             http.queueResponse({ data: wire([['status', 'pending'], ...Object.entries(pendingBody())]) });
 
-            await expect(gateway(http).login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
+            await expect(gateway(http).login(CREDENTIALS, DEVICE, null)).resolves.toStrictEqual({
                 kind: 'interactionRequired',
                 pending: { credential: 'pending', requires: ['mfa', 'principal'] },
             });
@@ -256,7 +260,7 @@ describe('createDefaultSessionApi', () => {
             const http = new FakeHttpClient();
             http.queueResponse(wire([['pending_credential', 'pending']]));
 
-            await expect(gateway(http).login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
+            await expect(gateway(http).login(CREDENTIALS, DEVICE, null)).resolves.toStrictEqual({
                 kind: 'interactionRequired',
                 pending: { credential: 'pending', requires: [] },
             });
@@ -275,7 +279,7 @@ describe('createDefaultSessionApi', () => {
             const http = new FakeHttpClient();
             http.queueResponse(body);
 
-            await expect(gateway(http).login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
+            await expect(gateway(http).login(CREDENTIALS, DEVICE, null)).resolves.toStrictEqual({
                 kind: 'authenticated',
                 tokens: { accessToken: 'access', refreshToken: null, expiresAtEpochMs: null },
             });
@@ -291,13 +295,14 @@ describe('createDefaultSessionApi', () => {
             ['a zero expiry', sessionBody([['expires_in', 0]])],
             ['a negative expiry', sessionBody([['expires_in', -1]])],
             ['a non-string refresh token', sessionBody([['refresh_token', 42]])],
+            ['an expiry too large to compute', sessionBody([['expires_in', 1e306]])],
             ['a non-string pending credential', wire([['pending_credential', 42]])],
         ])('throws a SessionError for %s', async (_label, body) => {
             const http = new FakeHttpClient();
             http.queueResponse(body);
 
             const error: unknown = await gateway(http)
-                .login(CREDENTIALS, DEVICE)
+                .login(CREDENTIALS, DEVICE, null)
                 .catch((caught: unknown) => caught);
 
             expect(error).toBeInstanceOf(SessionError);
@@ -308,7 +313,7 @@ describe('createDefaultSessionApi', () => {
             const http = new FakeHttpClient();
             http.queueResponse(sessionBody([['expires_in', 1]]));
 
-            await expect(gateway(http).login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
+            await expect(gateway(http).login(CREDENTIALS, DEVICE, null)).resolves.toStrictEqual({
                 kind: 'authenticated',
                 tokens: { accessToken: 'access', refreshToken: 'refresh', expiresAtEpochMs: NOW + 1000 },
             });
@@ -319,7 +324,7 @@ describe('createDefaultSessionApi', () => {
             const failure = new HttpError(401, 'Unauthorized');
             http.queueError(failure);
 
-            await expect(gateway(http).login(CREDENTIALS, DEVICE)).rejects.toBe(failure);
+            await expect(gateway(http).login(CREDENTIALS, DEVICE, null)).rejects.toBe(failure);
         });
 
         it('never triggers the unauthorized handler, so a refused sign-in is sent once', async () => {
@@ -329,19 +334,41 @@ describe('createDefaultSessionApi', () => {
             const onUnauthorized = vi.fn(() => Promise.resolve(true));
             const http = new FetchHttpClient({ baseUrl: 'https://api.example.com/', fetchFn, onUnauthorized });
 
-            await expect(gateway(http, { transport: 'cookie' }).login(CREDENTIALS, DEVICE)).rejects.toBeInstanceOf(
-                HttpError,
-            );
+            await expect(
+                gateway(http, { transport: 'cookie' }).login(CREDENTIALS, DEVICE, null),
+            ).rejects.toBeInstanceOf(HttpError);
             expect(onUnauthorized).not.toHaveBeenCalled();
             expect(fetchFn).toHaveBeenCalledTimes(1);
             expect(fetchFn.mock.calls[0]?.[1]?.method).toBe('POST');
+        });
+
+        it('presents a held refresh token in the body', async () => {
+            const http = new FakeHttpClient();
+            http.queueResponse(sessionBody());
+
+            await gateway(http).login(CREDENTIALS, DEVICE, 'held');
+
+            expect(http.calls[0]?.body).toStrictEqual({
+                ...CREDENTIALS,
+                platform: 'macOS',
+                ...wire([['refresh_token', 'held']]),
+            });
+        });
+
+        it('never puts a held refresh token in the body in cookie transport', async () => {
+            const http = new FakeHttpClient();
+            http.queueResponse(sessionBody());
+
+            await gateway(http, { transport: 'cookie' }).login(CREDENTIALS, DEVICE, 'held');
+
+            expect(http.calls[0]?.body).toStrictEqual({ ...CREDENTIALS, platform: 'macOS' });
         });
 
         it('sends cookie credentials and drops a body refresh token in cookie transport', async () => {
             const http = new FakeHttpClient();
             http.queueResponse(sessionBody());
 
-            const result = await gateway(http, { transport: 'cookie' }).login(CREDENTIALS, DEVICE);
+            const result = await gateway(http, { transport: 'cookie' }).login(CREDENTIALS, DEVICE, null);
 
             expect(http.calls[0]?.options).toStrictEqual({ ...COOKIE, ...SIGN_IN });
             expect(result).toStrictEqual({
@@ -439,33 +466,43 @@ describe('createDefaultSessionApi', () => {
     });
 
     describe('logout', () => {
-        it('posts the refresh token to auth/logout, quietly', async () => {
+        it('posts the refresh token to auth/logout with the captured bearer token, quietly', async () => {
             const http = new FakeHttpClient();
 
-            await gateway(http).logout('held');
+            await gateway(http).logout(HELD);
 
             expect(http.calls).toStrictEqual([
-                { method: 'POST', path: 'auth/logout', body: wire([['refresh_token', 'held']]), options: QUIET },
+                {
+                    method: 'POST',
+                    path: 'auth/logout',
+                    body: wire([['refresh_token', 'held']]),
+                    options: { ...QUIET, headers: BEARER },
+                },
             ]);
         });
 
         it('sends no body when no refresh token is held', async () => {
             const http = new FakeHttpClient();
 
-            await gateway(http).logout(null);
+            await gateway(http).logout({ ...HELD, refreshToken: null });
 
             expect(http.calls).toStrictEqual([
-                { method: 'POST', path: 'auth/logout', body: undefined, options: QUIET },
+                { method: 'POST', path: 'auth/logout', body: undefined, options: { ...QUIET, headers: BEARER } },
             ]);
         });
 
-        it('sends credentials, the cross-site header and no body token in cookie transport', async () => {
+        it('sends credentials, the cross-site header, the bearer token and no body token in cookie transport', async () => {
             const http = new FakeHttpClient();
 
-            await gateway(http, { transport: 'cookie' }).logout('stale');
+            await gateway(http, { transport: 'cookie' }).logout(HELD);
 
             expect(http.calls).toStrictEqual([
-                { method: 'POST', path: 'auth/logout', body: undefined, options: COOKIE_QUIET },
+                {
+                    method: 'POST',
+                    path: 'auth/logout',
+                    body: undefined,
+                    options: { ...COOKIE_QUIET, headers: { ...COOKIE.headers, ...BEARER } },
+                },
             ]);
         });
 
@@ -474,7 +511,7 @@ describe('createDefaultSessionApi', () => {
             const failure = new NetworkError('offline');
             http.queueError(failure);
 
-            await expect(gateway(http).logout('held')).rejects.toBe(failure);
+            await expect(gateway(http).logout(HELD)).rejects.toBe(failure);
         });
     });
 
@@ -488,9 +525,9 @@ describe('createDefaultSessionApi', () => {
 
             const api = gateway(http, { paths: { login: 'login', refresh: 'renew', logout: 'leave', user: 'me' } });
 
-            await api.login(CREDENTIALS, DEVICE);
+            await api.login(CREDENTIALS, DEVICE, null);
             await api.refresh('held');
-            await api.logout('held');
+            await api.logout(HELD);
             await api.currentUser();
 
             expect(http.calls.map(call => [call.method, call.path])).toStrictEqual([
@@ -504,20 +541,28 @@ describe('createDefaultSessionApi', () => {
         it('keeps the default for a path left out', async () => {
             const http = new FakeHttpClient();
 
-            await gateway(http, { paths: { login: 'login' } }).logout(null);
+            await gateway(http, { paths: { login: 'login' } }).logout(HELD);
 
             expect(http.calls[0]?.path).toBe('auth/logout');
         });
 
-        it('builds the sign-in body with a custom builder', async () => {
+        it('builds the sign-in body with a custom builder, which owns presenting the refresh token', async () => {
             const http = new FakeHttpClient();
             http.queueResponse(sessionBody());
 
             await createDefaultSessionApi<PhoneCredentials>(http, {
-                loginBody: (credentials, device) => ({ ...credentials, device: device.uuid }),
-            }).login({ phone: '+441234' }, DEVICE);
+                loginBody: (credentials, device, refreshToken) => ({
+                    ...credentials,
+                    device: device.uuid,
+                    refreshToken,
+                }),
+            }).login({ phone: '+441234' }, DEVICE, 'held');
 
-            expect(http.calls[0]?.body).toStrictEqual({ phone: '+441234', device: 'device-uuid' });
+            expect(http.calls[0]?.body).toStrictEqual({
+                phone: '+441234',
+                device: 'device-uuid',
+                refreshToken: 'held',
+            });
         });
     });
 
@@ -645,5 +690,143 @@ describe('createDefaultSessionApi', () => {
 
             expect(api).toBeDefined();
         });
+    });
+});
+
+/** A client over a scripted fetch, with the handlers it may call. */
+interface ScriptedClient {
+    /** The client. */
+    readonly http: FetchHttpClient;
+
+    /** The scripted fetch. */
+    readonly fetchFn: ReturnType<typeof vi.fn<typeof fetch>>;
+
+    /** The unauthorized handler. */
+    readonly onUnauthorized: ReturnType<typeof vi.fn<() => Promise<boolean>>>;
+
+    /** The response-error handler. */
+    readonly onResponseError: ReturnType<typeof vi.fn<() => void>>;
+}
+
+/**
+ * Build a FetchHttpClient over a fetch that answers with the given responses in
+ * turn.
+ */
+function scripted(
+    responses: Array<(init: RequestInit | undefined) => Promise<Response>>,
+    options: Partial<FetchHttpClientOptions> = {},
+): ScriptedClient {
+    const fetchFn = vi.fn<typeof fetch>(
+        (_input, init) => responses.shift()?.(init) ?? Promise.reject(new Error('No scripted response.')),
+    );
+    const onUnauthorized = vi.fn(() => Promise.resolve(true));
+    const onResponseError = vi.fn();
+    const http = new FetchHttpClient({
+        baseUrl: 'https://api.example.com/',
+        fetchFn,
+        onUnauthorized,
+        onResponseError,
+        ...options,
+    });
+
+    return { http, fetchFn, onUnauthorized, onResponseError };
+}
+
+/**
+ * Answer with a response.
+ */
+function answer(status: number, body: string | null, contentType = 'application/json'): () => Promise<Response> {
+    return () => Promise.resolve(new Response(body, { status, headers: { 'content-type': contentType } }));
+}
+
+/**
+ * Read the init a scripted fetch was called with.
+ */
+function initOf(fetchFn: ScriptedClient['fetchFn'], call = 0): RequestInit {
+    return fetchFn.mock.calls[call]?.[1] ?? {};
+}
+
+describe('createDefaultSessionApi over FetchHttpClient', () => {
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it('reports a refused refresh as rejected, sending it once and reporting it nowhere else', async () => {
+        const { http, fetchFn, onUnauthorized, onResponseError } = scripted([answer(401, '{}')]);
+
+        const result = await gateway(http).refresh('held');
+
+        expect(result.kind).toBe('rejected');
+        expect(result).toHaveProperty('error', expect.any(HttpError));
+        expect(result).toHaveProperty('error.status', 401);
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+        expect(onUnauthorized).not.toHaveBeenCalled();
+        expect(onResponseError).not.toHaveBeenCalled();
+    });
+
+    it('reports a refresh that timed out as retryable', async () => {
+        vi.useFakeTimers();
+        const { http } = scripted(
+            [
+                init =>
+                    new Promise<Response>((_resolve, reject) => {
+                        init?.signal?.addEventListener('abort', () => {
+                            reject(init.signal?.reason);
+                        });
+                    }),
+            ],
+            { timeout: 1000 },
+        );
+
+        const pending = gateway(http).refresh('held');
+
+        await vi.advanceTimersByTimeAsync(1000);
+        const result = await pending;
+
+        expect(result.kind).toBe('retryable');
+        expect(result).toHaveProperty('error', expect.any(TimeoutError));
+    });
+
+    it('reports a page answering a refresh in place of the API as failed, without throwing', async () => {
+        const { http } = scripted([answer(200, '<html>Sign in to the network</html>', 'text/html')]);
+
+        const result = await gateway(http).refresh('held');
+
+        expect(result.kind).toBe('failed');
+    });
+
+    it('rejects a refused sign-out without calling the unauthorized handler', async () => {
+        const { http, fetchFn, onUnauthorized, onResponseError } = scripted([answer(401, '{}')]);
+
+        await expect(gateway(http).logout(HELD)).rejects.toBeInstanceOf(HttpError);
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+        expect(onUnauthorized).not.toHaveBeenCalled();
+        expect(onResponseError).not.toHaveBeenCalled();
+    });
+
+    it('signs out with the captured bearer token, not the one an interceptor would add', async () => {
+        const { http, fetchFn } = scripted([answer(204, null)], {
+            requestInterceptors: [createBearerTokenInterceptor({ getAccessToken: () => 'ambient' })],
+        });
+
+        await gateway(http).logout(HELD);
+
+        expect(new Headers(initOf(fetchFn).headers).get('authorization')).toBe('Bearer captured');
+    });
+
+    it('refreshes and signs out in cookie transport with credentials, the cross-site header and no body', async () => {
+        const { http, fetchFn } = scripted([answer(200, JSON.stringify(sessionBody())), answer(204, null)]);
+        const api = gateway(http, { transport: 'cookie' });
+
+        await api.refresh(null);
+        await api.logout(HELD);
+
+        for (const call of [0, 1]) {
+            const init = initOf(fetchFn, call);
+
+            expect(init.credentials).toBe('include');
+            expect(new Headers(init.headers).get('x-requested-with')).toBe('XMLHttpRequest');
+            expect(init.body).toBeUndefined();
+        }
     });
 });
