@@ -73,4 +73,22 @@ describe('ChainEnvironmentSource', () => {
 
         expect(chain.get('DEEP')).toBe('found');
     });
+
+    it('falls through an empty string to a later source that sets the key', () => {
+        const chain = new ChainEnvironmentSource([
+            sourceFrom(wire([['API_URL', '']])),
+            sourceFrom(wire([['API_URL', 'https://build.example.com']])),
+        ]);
+
+        expect(chain.get('API_URL')).toBe('https://build.example.com');
+    });
+
+    it('returns undefined when every source holds an empty string', () => {
+        const chain = new ChainEnvironmentSource([
+            sourceFrom(wire([['API_URL', '']])),
+            sourceFrom(wire([['API_URL', '']])),
+        ]);
+
+        expect(chain.get('API_URL')).toBeUndefined();
+    });
 });
