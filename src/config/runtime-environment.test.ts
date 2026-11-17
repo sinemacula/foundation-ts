@@ -14,10 +14,8 @@ const URL = '/runtime-env.json';
 /**
  * Build a `Record<string, T>` from an array of `[key, value]` pairs.
  *
- * Wraps `Object.fromEntries` so callers can write wire-field names as plain
- * string literals inside array elements rather than as object-literal keys -
- * keeping non-camelCase environment keys out of any position that Biome's
- * naming-convention or literal-keys rules inspect.
+ * Keeps non-camelCase environment keys out of object-literal key positions so
+ * naming-convention lint rules never see them.
  *
  * @param entries - key-value pairs for the record
  * @returns a plain `Record<string, T>`

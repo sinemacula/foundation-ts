@@ -9,6 +9,10 @@ import { describe, expect, it } from 'vitest';
 
 import type { RawRecord } from './envelope';
 import { unwrapItem, unwrapList } from './envelope';
+import { QueryError } from './query-error';
+
+/** The message raised for a malformed envelope. */
+const MALFORMED = 'The response did not match the expected envelope shape.';
 
 /** A minimal domain type used to exercise the mapper contract. */
 interface Widget {
@@ -22,8 +26,7 @@ interface Widget {
 /**
  * Build a `Record<string, unknown>` from an array of `[key, value]` pairs.
  *
- * Keeps snake_case wire-field names out of object-literal key positions so
- * Biome's naming-convention rule never sees them.
+ * Keeps snake_case wire-field names out of object-literal key positions.
  *
  * @param entries - key-value pairs for the record
  * @returns a plain `Record<string, unknown>`
@@ -81,6 +84,29 @@ describe('unwrapItem', () => {
 
         expect(() => unwrapItem(payload, mapWidget)).toThrow('The widget response did not match the expected shape.');
     });
+
+    it('hands the toolkit reserved keys to the mapper', () => {
+        const record = wire([
+            ['_type', 'widget'],
+            ['_truncated', ['parts']],
+            ['aggregates', wire([['parts_count', 30]])],
+        ]);
+
+        const seen = unwrapItem({ data: record }, raw => raw);
+
+        expect(seen._type).toBe('widget');
+        expect(seen._truncated).toEqual(['parts']);
+        expect(seen.aggregates).toEqual(wire([['parts_count', 30]]));
+    });
+
+    it.each([
+        ['_type', 7],
+        ['_truncated', 'parts'],
+        ['_truncated', ['parts', 3]],
+        ['aggregates', ['parts_count']],
+    ])('throws when the reserved key %s is malformed', (key, value) => {
+        expect(() => unwrapItem({ data: wire([[key, value]]) }, raw => raw)).toThrow(new QueryError(MALFORMED));
+    });
 });
 
 describe('unwrapList', () => {
@@ -133,23 +159,21 @@ describe('unwrapList', () => {
     });
 
     describe('pagination meta', () => {
-        it('maps a valid meta block', () => {
-            const payload = {
-                data: [],
-                meta: wire([
-                    ['current_page', 2],
-                    ['last_page', 5],
-                    ['per_page', 25],
-                    ['total', 111],
-                ]),
-            };
+        it('maps a length-aware meta block', () => {
+            const payload = { data: [], meta: { total: 111, count: 25, continue: true } };
 
             expect(unwrapList(payload, mapWidget).meta).toEqual({
-                currentPage: 2,
-                lastPage: 5,
-                perPage: 25,
+                mode: 'length-aware',
                 total: 111,
+                count: 25,
+                hasMore: true,
             });
+        });
+
+        it('maps a cursor meta block', () => {
+            const payload = { data: [], meta: { continue: false } };
+
+            expect(unwrapList(payload, mapWidget).meta).toEqual({ mode: 'cursor', hasMore: false });
         });
 
         it('is null when meta is absent', () => {
@@ -160,59 +184,120 @@ describe('unwrapList', () => {
             expect(unwrapList({ data: [], meta: 'not-a-record' }, mapWidget).meta).toBeNull();
         });
 
-        it('is null when current_page is missing', () => {
-            const payload = {
-                data: [],
-                meta: wire([
-                    ['last_page', 5],
-                    ['per_page', 25],
-                    ['total', 111],
-                ]),
-            };
-
-            expect(unwrapList(payload, mapWidget).meta).toBeNull();
+        it('is null when continue is missing', () => {
+            expect(unwrapList({ data: [], meta: { total: 1, count: 1 } }, mapWidget).meta).toBeNull();
         });
 
-        it('is null when last_page is not a number', () => {
-            const payload = {
-                data: [],
-                meta: wire([
-                    ['current_page', 2],
-                    ['last_page', 'five'],
-                    ['per_page', 25],
-                    ['total', 111],
-                ]),
-            };
-
-            expect(unwrapList(payload, mapWidget).meta).toBeNull();
+        it('is null when continue is not a boolean', () => {
+            expect(unwrapList({ data: [], meta: { continue: 1 } }, mapWidget).meta).toBeNull();
         });
 
-        it('is null when per_page is not a number', () => {
-            const payload = {
-                data: [],
-                meta: wire([
-                    ['current_page', 2],
-                    ['last_page', 5],
-                    ['per_page', 'twenty-five'],
-                    ['total', 111],
-                ]),
-            };
+        it('is null when total is present but count is not', () => {
+            expect(unwrapList({ data: [], meta: { total: 4, continue: true } }, mapWidget).meta).toBeNull();
+        });
 
-            expect(unwrapList(payload, mapWidget).meta).toBeNull();
+        it('is null when count is present but total is not', () => {
+            expect(unwrapList({ data: [], meta: { count: 4, continue: true } }, mapWidget).meta).toBeNull();
         });
 
         it('is null when total is not a number', () => {
+            expect(unwrapList({ data: [], meta: { total: '4', count: 4, continue: true } }, mapWidget).meta).toBeNull();
+        });
+
+        it('is null when count is not a number', () => {
+            expect(
+                unwrapList({ data: [], meta: { total: 4, count: null, continue: true } }, mapWidget).meta,
+            ).toBeNull();
+        });
+    });
+
+    describe('pagination links', () => {
+        it('maps length-aware links and finds no cursor in them', () => {
             const payload = {
                 data: [],
-                meta: wire([
-                    ['current_page', 2],
-                    ['last_page', 5],
-                    ['per_page', 25],
-                    ['total', null],
-                ]),
+                links: {
+                    self: 'https://api.test/users?page=2',
+                    first: 'https://api.test/users?page=1',
+                    prev: 'https://api.test/users?page=1',
+                    next: 'https://api.test/users?page=3',
+                    last: 'https://api.test/users?page=5',
+                },
             };
 
-            expect(unwrapList(payload, mapWidget).meta).toBeNull();
+            const result = unwrapList(payload, mapWidget);
+
+            expect(result.links).toEqual(payload.links);
+            expect(result.nextCursor).toBeNull();
+            expect(result.prevCursor).toBeNull();
+        });
+
+        it('maps cursor links and reads both cursors from them', () => {
+            const payload = {
+                data: [],
+                meta: { continue: true },
+                links: {
+                    self: 'https://api.test/users?pagination=cursor',
+                    prev: 'https://api.test/users?pagination=cursor&cursor=eyJpZCI6MX0',
+                    next: 'https://api.test/users?pagination=cursor&cursor=eyJpZCI6MjV9',
+                },
+            };
+
+            const result = unwrapList(payload, mapWidget);
+
+            expect(result.links).toEqual({ ...payload.links, first: null, last: null });
+            expect(result.nextCursor).toBe('eyJpZCI6MjV9');
+            expect(result.prevCursor).toBe('eyJpZCI6MX0');
+        });
+
+        it('decodes an encoded cursor and ignores a fragment', () => {
+            const payload = { data: [], links: { next: '/users?cursor=a%2Bb+c&limit=5#top' } };
+
+            expect(unwrapList(payload, mapWidget).nextCursor).toBe('a+b c');
+        });
+
+        it.each([
+            ['another parameter ending in cursor', '/users?precursor=abc'],
+            ['an empty cursor', '/users?cursor=&limit=5'],
+            ['a cursor with no value', '/users?limit=5&cursor'],
+            ['a cursor only in the fragment', '/users#cursor=abc'],
+            ['a cursor only after the fragment marker', '/users?limit=5#x&cursor=abc'],
+        ])('finds no cursor in a link with %s', (_label, next) => {
+            expect(unwrapList({ data: [], links: { next } }, mapWidget).nextCursor).toBeNull();
+        });
+
+        it('reads a cursor that is not the first parameter', () => {
+            const payload = { data: [], links: { prev: 'users?limit=5&cursor=abc&order=id' } };
+
+            expect(unwrapList(payload, mapWidget).prevCursor).toBe('abc');
+        });
+
+        it('reads an absent, null, empty or non-string link as null', () => {
+            const payload = { data: [], links: { self: '', prev: null, next: 5 } };
+
+            expect(unwrapList(payload, mapWidget).links).toEqual({
+                self: null,
+                first: null,
+                prev: null,
+                next: null,
+                last: null,
+            });
+        });
+
+        it('is null when links are absent or not a record', () => {
+            expect(unwrapList({ data: [] }, mapWidget)).toMatchObject({
+                links: null,
+                nextCursor: null,
+                prevCursor: null,
+            });
+            expect(unwrapList({ data: [], links: ['x'] }, mapWidget).links).toBeNull();
+        });
+
+        it('throws a query error for a malformed escape in a cursor', () => {
+            const payload = { data: [], links: { next: '/users?cursor=%E0%A4%A' } };
+
+            expect(() => unwrapList(payload, mapWidget)).toThrow(
+                expect.objectContaining({ name: 'QueryError', message: MALFORMED, cause: expect.any(URIError) }),
+            );
         });
     });
 });

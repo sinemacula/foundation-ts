@@ -11,6 +11,7 @@
  */
 
 import type { ApiQuery } from './api-query';
+import type { SortDirection } from './filter-expression';
 import type { ListFilter } from './list-filter';
 
 /**
@@ -31,7 +32,7 @@ export interface SortDefault {
     readonly column: string;
 
     /** The sort direction. */
-    readonly direction: 'asc' | 'desc';
+    readonly direction: SortDirection;
 }
 
 /**
@@ -48,13 +49,13 @@ export interface ListQueryDefinition<Filters extends Record<string, ListFilter<n
     /** Named filters the screen may set, keyed by the screen's vocabulary. */
     readonly filters?: Filters;
 
-    /** Free-text search mapping. When set, calling `search(term)` on the resulting list query applies this filter with the term as its value. */
+    /** Free-text search mapping, usually `filter.search()`; `search(term)` applies it with the term as its value. */
     readonly search?: ListFilter<string>;
 
-    /** The columns the screen may sort by. When set, `sortBy` rejects any column not in this list by throwing a descriptive `Error`. When `undefined`, all columns are accepted. */
+    /** The columns the screen may sort by; `sortBy` throws on any other. Omit to accept every column. */
     readonly sortable?: readonly string[];
 
-    /** The sort applied when no explicit sort has been chosen. Omit to emit no `order` parameter when the screen has not called `sortBy`. */
+    /** The sort applied until the screen calls `sortBy`; omit to emit no `order` parameter. */
     readonly defaultSort?: SortDefault;
 
     /** Number of items per page emitted as the `limit` parameter; defaults to 25. */

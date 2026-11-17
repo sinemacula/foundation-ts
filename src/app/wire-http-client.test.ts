@@ -5,7 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FetchHttpClient } from '../http/fetch-http-client';
 import type { HttpClient, HttpRequest, RequestInterceptor, UnauthorizedHandler } from '../http/http-client';
@@ -334,10 +334,10 @@ describe('wireHttpClient', () => {
                 contributions: createContributions(),
             });
 
-            const thrown = await client.get('secure').catch((error: unknown) => error);
+            const pending = client.get('secure');
 
-            expect(thrown).toBeInstanceOf(HttpError);
-            expect((thrown as HttpError).status).toBe(401);
+            await expect(pending).rejects.toBeInstanceOf(HttpError);
+            await expect(pending).rejects.toHaveProperty('status', 401);
             expect(stub.urls).toHaveLength(1);
         });
 
@@ -384,16 +384,9 @@ describe('wireHttpClient', () => {
 
         it('threads the merged construction inputs to the factory', () => {
             const config = createConfig();
-
-            /** Pass the request through unchanged as the preset. */
-            const presetInterceptor: RequestInterceptor = request => request;
-
-            /** Pass the request through unchanged as the module's. */
-            const moduleInterceptor: RequestInterceptor = request => request;
-
-            /** Report every 401 as recovered. */
-            const onUnauthorized: UnauthorizedHandler = () => Promise.resolve(true);
-
+            const presetInterceptor = vi.fn<RequestInterceptor>();
+            const moduleInterceptor = vi.fn<RequestInterceptor>();
+            const onUnauthorized = vi.fn<UnauthorizedHandler>();
             const tools = captureTools({
                 config,
                 fetchFn: failingFetch,
@@ -527,6 +520,78 @@ describe('wireHttpClient', () => {
             expect(log).toEqual(['module']);
             expect(reporter.captured).toHaveLength(0);
         });
+
+        it('runs every handler and captures each failure when handlers throw', () => {
+            const reporter = createRecordingReporter();
+
+            installReporting(reporter);
+
+            const log: string[] = [];
+            const presetFailure = new Error('override exploded');
+            const moduleFailure = new Error('module exploded');
+            const tools = captureTools({
+                onResponseError: () => {
+                    log.push('override');
+
+                    throw presetFailure;
+                },
+                contributions: createContributions({
+                    responseErrorHandlers: [
+                        () => {
+                            log.push('module-a');
+
+                            throw moduleFailure;
+                        },
+                        () => {
+                            log.push('module-b');
+                        },
+                    ],
+                }),
+            });
+
+            tools.onResponseError(new Error('boom'), createRequest({ url: 'https://api.example.com/items#top' }));
+
+            expect(log).toEqual(['override', 'module-a', 'module-b']);
+            expect(reporter.captured).toEqual([
+                {
+                    error: presetFailure,
+                    context: {
+                        source: 'http-response-error-handler',
+                        method: 'GET',
+                        url: 'https://api.example.com/items',
+                    },
+                },
+                {
+                    error: moduleFailure,
+                    context: {
+                        source: 'http-response-error-handler',
+                        method: 'GET',
+                        url: 'https://api.example.com/items',
+                    },
+                },
+            ]);
+        });
+
+        it('drops a handler failure without throwing when the reporter is unavailable', () => {
+            const log: string[] = [];
+            const tools = captureTools({
+                onResponseError: () => {
+                    throw new Error('override exploded');
+                },
+                contributions: createContributions({
+                    responseErrorHandlers: [
+                        () => {
+                            log.push('module');
+                        },
+                    ],
+                }),
+            });
+
+            expect(() => {
+                tools.onResponseError(new Error('boom'), createRequest());
+            }).not.toThrow();
+            expect(log).toEqual(['module']);
+        });
     });
 
     describe('default response-error handler', () => {
@@ -649,12 +714,57 @@ describe('wireHttpClient', () => {
             expect(reporter.captured).toHaveLength(1);
         });
 
+        it('strips the query string and fragment from the reported URL', () => {
+            const reporter = createRecordingReporter();
+
+            installReporting(reporter);
+
+            const error = new HttpError(500, 'Server error.');
+            const tools = captureTools();
+
+            tools.onResponseError(error, createRequest({ url: 'https://api.example.com/reset?token=secret#done' }));
+
+            expect(reporter.captured).toEqual([
+                { error, context: { source: 'http', method: 'GET', url: 'https://api.example.com/reset' } },
+            ]);
+        });
+
+        it('still captures the failure when the toast service throws, and captures the toast failure too', () => {
+            const reporter = createRecordingReporter();
+            const toastFailure = new Error('toaster exploded');
+
+            installReporting(reporter);
+            installToasts({
+                error: () => {
+                    throw toastFailure;
+                },
+                information: () => 'id',
+            });
+
+            const error = new HttpError(500, 'Server error.');
+            const tools = captureTools({ unexpectedErrorToastKey: 'app.errors.unexpected' });
+
+            tools.onResponseError(error, createRequest({ url: 'https://api.example.com/items?page=2' }));
+
+            expect(reporter.captured).toEqual([
+                {
+                    error: toastFailure,
+                    context: {
+                        source: 'http-response-error-handler',
+                        method: 'GET',
+                        url: 'https://api.example.com/items',
+                    },
+                },
+                { error, context: { source: 'http', method: 'GET', url: 'https://api.example.com/items' } },
+            ]);
+        });
+
         it('reads the toast and reporting services lazily on each invocation', () => {
             const tools = captureTools({ unexpectedErrorToastKey: 'app.errors.unexpected' });
 
-            expect(() => tools.onResponseError(new HttpError(500, 'Server error.'), createRequest())).toThrow(
-                'toast service accessed before initialisation',
-            );
+            expect(() => {
+                tools.onResponseError(new HttpError(500, 'Server error.'), createRequest());
+            }).not.toThrow();
 
             const toaster = createRecordingToaster();
             const reporter = createRecordingReporter();

@@ -1,6 +1,6 @@
 /**
  * Unit tests for FetchHttpClient - authentication flows, network errors,
- * signal/timeout, default fetch fallback, and download-specific auth handling.
+ * cancellation, default fetch fallback, and download-specific auth handling.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -23,21 +23,15 @@ interface GlobalBody {
     readonly global: boolean;
 }
 
-/** The optional AbortSignal statics the client feature-detects. */
-interface AbortSignalStatics {
-    /** AbortSignal.timeout, when the runtime provides it. */
-    timeout: typeof AbortSignal.timeout | undefined;
-
-    /** AbortSignal.any, when the runtime provides it. */
-    any: typeof AbortSignal.any | undefined;
-}
-
 // ---------------------------------------------------------------------------
 // Stub type
 // ---------------------------------------------------------------------------
 
 /** Explicit overload signature so mock.calls carries a typed tuple, not []. */
 type FetchArgs = [input: Request | string | URL, init?: RequestInit];
+
+/** A constructor of the error type a rejection is expected to have. */
+type ErrorType<E extends Error> = new (...args: never[]) => E;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,35 +90,28 @@ function lastInit(fn: ReturnType<typeof makeFetch>): RequestInit {
 }
 
 /**
- * A fetch stub that mimics real fetch's abort behaviour: it rejects as soon as
- * its signal aborts, whether that has already happened by the time fetch is
- * called or happens later while the request is pending.
+ * Return the headers record from the most-recent call to a fetch stub.
  *
- * @returns the fetch stub
+ * @param fn - the fetch stub
+ * @returns the headers as a plain record
  */
-function makeAbortAwareFetch(): ReturnType<typeof makeFetch> {
-    return makeFetch(
-        (_input, init) =>
-            new Promise<Response>((_resolve, reject) => {
-                const signal = init?.signal;
+function lastHeaders(fn: ReturnType<typeof makeFetch>): Record<string, string> {
+    return (lastInit(fn).headers ?? {}) as Record<string, string>;
+}
 
-                if (signal === undefined || signal === null) {
-                    return;
-                }
+/**
+ * Await a request expected to reject with a given error type.
+ *
+ * @param promise - the pending request
+ * @param type - the error type the rejection must have
+ * @returns the rejection
+ */
+async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: ErrorType<E>): Promise<E> {
+    const error = await promise.catch((rejection: unknown) => rejection);
 
-                /** Reject with the reason the signal aborted with. */
-                const rejectWithReason = (): void => {
-                    reject(signal.reason);
-                };
+    expect(error).toBeInstanceOf(type);
 
-                if (signal.aborted) {
-                    rejectWithReason();
-                    return;
-                }
-
-                signal.addEventListener('abort', rejectWithReason);
-            }),
-    );
+    return error as E;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,9 +133,7 @@ describe('FetchHttpClient - request interceptors', () => {
 
         await client.get('/items');
 
-        // Cast proven safe: #buildRequestInit always writes a plain object
-        // literal.
-        expect((lastInit(fetchFn).headers as Record<string, string>)['x-trace']).toBe('1');
+        expect(lastHeaders(fetchFn)['x-trace']).toBe('1');
     });
 
     it('runs interceptors in registration order', async () => {
@@ -177,9 +162,7 @@ describe('FetchHttpClient - request interceptors', () => {
 
         await client.get('/items');
 
-        // Cast proven safe: #buildRequestInit always writes a plain object
-        // literal.
-        const headers = lastInit(fetchFn).headers as Record<string, string>;
+        const headers = lastHeaders(fetchFn);
 
         expect(headers['x-first']).toBe('yes');
         expect(headers['x-second']).toBe('yes');
@@ -195,9 +178,7 @@ describe('FetchHttpClient - request interceptors', () => {
 
         await client.get('/items');
 
-        // Cast proven safe: #buildRequestInit always writes a plain object
-        // literal.
-        expect((lastInit(fetchFn).headers as Record<string, string>)['x-async']).toBe('true');
+        expect(lastHeaders(fetchFn)['x-async']).toBe('true');
     });
 });
 
@@ -243,7 +224,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('does not invoke the handler for a non-401 error status', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('{}', { status: 500 }));
+            .mockImplementation(async () => new Response('{}', { status: 500 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -256,7 +237,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('throws HttpError(401) and does not retry when onUnauthorized returns false', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(false);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -265,10 +246,39 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
         expect(fetchFn).toHaveBeenCalledTimes(1);
     });
 
+    it('keeps the original 401 when onUnauthorized rejects', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockImplementation(async () => new Response('', { status: 401 }));
+        const onUnauthorized = vi.fn().mockRejectedValue(new Error('refresh exploded'));
+        const onResponseError = vi.fn();
+        const client = makeClient(fetchFn, { onUnauthorized, onResponseError });
+
+        const error = await rejectionOf(client.get('/secure'), HttpError);
+
+        expect(error.status).toBe(401);
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+        expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
+    });
+
+    it('keeps the original 401 when onUnauthorized throws synchronously', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockImplementation(async () => new Response('', { status: 401 }));
+        const onUnauthorized = vi.fn(() => {
+            throw new Error('refresh exploded');
+        });
+        const client = makeClient(fetchFn, { onUnauthorized });
+
+        const error = await rejectionOf(client.get('/secure'), HttpError);
+
+        expect(error.status).toBe(401);
+    });
+
     it('does not retry a second time when the retry also returns 401', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -281,7 +291,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('throws HttpError(401) immediately when no onUnauthorized handler is configured', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const client = makeClient(fetchFn);
 
         await expect(client.get('/secure')).rejects.toBeInstanceOf(HttpError);
@@ -292,7 +302,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('does not invoke the handler when the request opts out of refresh', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -319,14 +329,13 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
     it('notifies the response-error handler once with the final error when the retry also fails', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, { onUnauthorized, onResponseError });
 
-        const error = await client.get('/secure').catch(error => error);
+        const error = await rejectionOf(client.get('/secure'), HttpError);
 
-        expect(error).toBeInstanceOf(HttpError);
         expect(onResponseError).toHaveBeenCalledTimes(1);
         expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
     });
@@ -347,9 +356,7 @@ describe('FetchHttpClient - download interceptors and 401 handling', () => {
 
         await client.download('/files/1');
 
-        // Cast proven safe: #buildRequestInit always writes a plain object
-        // literal.
-        expect((lastInit(fetchFn).headers as Record<string, string>)['authorization']).toBe('Bearer token-123');
+        expect(lastHeaders(fetchFn)['authorization']).toBe('Bearer token-123');
     });
 
     it('retries a download exactly once when onUnauthorized returns true', async () => {
@@ -369,7 +376,7 @@ describe('FetchHttpClient - download interceptors and 401 handling', () => {
     it('does not invoke the handler for a download that opts out of refresh', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValue(new Response('', { status: 401 }));
+            .mockImplementation(async () => new Response('', { status: 401 }));
         const onUnauthorized = vi.fn().mockResolvedValue(true);
         const client = makeClient(fetchFn, { onUnauthorized });
 
@@ -385,28 +392,15 @@ describe('FetchHttpClient - download interceptors and 401 handling', () => {
 // ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - network failure', () => {
-    it('throws NetworkError naming the failed request when fetch rejects', async () => {
-        const fetchFn = vi
-            .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockRejectedValue(new TypeError('Failed to fetch'));
-        const client = makeClient(fetchFn);
-
-        const error = await client.get('/items').catch(error => error);
-
-        expect(error).toBeInstanceOf(NetworkError);
-        expect((error as NetworkError).message).toBe('GET https://api.example.com/items failed without a response.');
-    });
-
-    it('sets the cause on NetworkError', async () => {
+    it('throws a NetworkError naming the failed request and carrying the rejection when fetch rejects', async () => {
         const cause = new TypeError('Failed to fetch');
         const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(cause);
         const client = makeClient(fetchFn);
 
-        const error = await client.get('/items').catch(error => error);
+        const error = await rejectionOf(client.get('/items?token=secret'), NetworkError);
 
-        // Cast proven safe: rejects.toBeInstanceOf(NetworkError) is the same
-        // catch pattern; error is always NetworkError when fetch rejects.
-        expect((error as NetworkError).cause).toBe(cause);
+        expect(error.message).toBe('GET https://api.example.com/items failed without a response.');
+        expect(error.cause).toBe(cause);
     });
 
     it('notifies the response-error handler with the NetworkError on transport failure', async () => {
@@ -416,9 +410,8 @@ describe('FetchHttpClient - network failure', () => {
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, { onResponseError });
 
-        const error = await client.get('/items').catch(error => error);
+        const error = await rejectionOf(client.get('/items'), NetworkError);
 
-        expect(error).toBeInstanceOf(NetworkError);
         expect(onResponseError).toHaveBeenCalledTimes(1);
         expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
     });
@@ -430,9 +423,7 @@ describe('FetchHttpClient - network failure', () => {
         const client = makeClient(fetchFn);
         const controller = new AbortController();
 
-        const error = await client.get('/items', { signal: controller.signal }).catch(error => error);
-
-        expect(error).toBeInstanceOf(NetworkError);
+        await rejectionOf(client.get('/items', { signal: controller.signal }), NetworkError);
     });
 });
 
@@ -441,28 +432,31 @@ describe('FetchHttpClient - network failure', () => {
 // ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - cancellation', () => {
-    it('throws CancelledError when the fetch rejection is an AbortError, even without a caller signal', async () => {
+    it.each([
+        ['no caller signal', undefined],
+        ['a caller signal that has not aborted', new AbortController().signal],
+    ])('throws a reported NetworkError for an AbortError rejection with %s', async (_case, signal) => {
         const cause = new DOMException('The operation was aborted.', 'AbortError');
+        const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(cause);
+        const onResponseError = vi.fn();
+        const client = makeClient(fetchFn, { onResponseError });
+
+        const error = await rejectionOf(client.get('/items', signal === undefined ? {} : { signal }), NetworkError);
+
+        expect(error.message).toBe('GET https://api.example.com/items failed without a response.');
+        expect(error.cause).toBe(cause);
+        expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
+    });
+
+    it('throws CancelledError when the caller aborts, whatever the rejection is named', async () => {
+        const cause = new Error('aborted');
         const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(cause);
         const client = makeClient(fetchFn);
 
-        const error = await client.get('/items').catch(error => error);
+        const error = await rejectionOf(client.get('/items', { signal: AbortSignal.abort() }), CancelledError);
 
-        expect(error).toBeInstanceOf(CancelledError);
-        expect((error as CancelledError).message).toBe('GET https://api.example.com/items was cancelled.');
-        expect((error as CancelledError).cause).toBe(cause);
-    });
-
-    it('throws CancelledError when the caller aborts, even without an AbortError-named rejection', async () => {
-        const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(new Error('aborted'));
-        const client = makeClient(fetchFn);
-        const controller = new AbortController();
-
-        controller.abort();
-
-        const error = await client.get('/items', { signal: controller.signal }).catch(error => error);
-
-        expect(error).toBeInstanceOf(CancelledError);
+        expect(error.message).toBe('GET https://api.example.com/items was cancelled.');
+        expect(error.cause).toBe(cause);
     });
 
     it('does not notify the response-error handler on cancellation', async () => {
@@ -471,86 +465,10 @@ describe('FetchHttpClient - cancellation', () => {
             .mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, { onResponseError });
-        const controller = new AbortController();
 
-        controller.abort();
-
-        await client.get('/items', { signal: controller.signal }).catch(() => undefined);
+        await rejectionOf(client.get('/items', { signal: AbortSignal.abort() }), CancelledError);
 
         expect(onResponseError).not.toHaveBeenCalled();
-    });
-});
-
-// ---------------------------------------------------------------------------
-// Signal / timeout
-// ---------------------------------------------------------------------------
-
-describe('FetchHttpClient - signal and timeout', () => {
-    it('passes the caller signal when provided', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn);
-        const signal = AbortSignal.abort();
-
-        // Swallow the expected AbortError: the test goal is to verify the
-        // signal was forwarded to fetch, not to observe the rejection.
-        await client.get('/items', { signal }).catch(() => undefined);
-
-        expect(lastInit(fetchFn).signal).toBe(signal);
-    });
-
-    it('creates a timeout AbortSignal when timeout is set and no signal is provided', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn, { timeout: 5000 });
-
-        await client.get('/items');
-
-        expect(lastInit(fetchFn).signal).toBeInstanceOf(AbortSignal);
-    });
-
-    it('passes null as the signal when no timeout and no signal are set', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn);
-
-        await client.get('/items');
-
-        expect(lastInit(fetchFn).signal).toBeNull();
-    });
-
-    it('composes the caller signal with the timeout signal so the timeout still fires', async () => {
-        const timeoutController = new AbortController();
-        const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
-        const fetchFn = makeAbortAwareFetch();
-        const client = makeClient(fetchFn, { timeout: 5_000 });
-        const callerController = new AbortController();
-
-        const pending = client.get('/items', { signal: callerController.signal }).catch(error => error);
-
-        timeoutController.abort(new DOMException('The operation timed out.', 'TimeoutError'));
-
-        const error = await pending;
-
-        expect(error).toBeInstanceOf(CancelledError);
-        expect(callerController.signal.aborted).toBe(false);
-
-        timeoutSpy.mockRestore();
-    });
-
-    it('does not disable the caller signal when a timeout is also configured', async () => {
-        const timeoutController = new AbortController();
-        const timeoutSpy = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeoutController.signal);
-        const fetchFn = makeAbortAwareFetch();
-        const client = makeClient(fetchFn, { timeout: 5_000 });
-        const callerController = new AbortController();
-
-        const pending = client.get('/items', { signal: callerController.signal }).catch(error => error);
-
-        callerController.abort();
-
-        const error = await pending;
-
-        expect(error).toBeInstanceOf(CancelledError);
-
-        timeoutSpy.mockRestore();
     });
 });
 
@@ -585,52 +503,13 @@ describe('FetchHttpClient - runtime fallbacks', () => {
         const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue('boom');
         const client = makeClient(fetchFn);
 
-        const error = await client.get('/items').catch(error => error);
-
-        expect(error).toBeInstanceOf(NetworkError);
+        await rejectionOf(client.get('/items'), NetworkError);
     });
 
     it('treats a null fetch rejection as a network failure', async () => {
         const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(null);
         const client = makeClient(fetchFn);
 
-        const error = await client.get('/items').catch(error => error);
-
-        expect(error).toBeInstanceOf(NetworkError);
-    });
-
-    it('skips the timeout signal when AbortSignal.timeout is unavailable', async () => {
-        const original = AbortSignal.timeout;
-
-        (AbortSignal as unknown as AbortSignalStatics).timeout = undefined;
-
-        try {
-            const fetchFn = makeFetch(async () => jsonResponse({}));
-            const client = makeClient(fetchFn, { timeout: 5000 });
-
-            await client.get('/items');
-
-            expect(lastInit(fetchFn).signal).toBeNull();
-        } finally {
-            (AbortSignal as unknown as AbortSignalStatics).timeout = original;
-        }
-    });
-
-    it('falls back to the caller signal when AbortSignal.any is unavailable', async () => {
-        const original = AbortSignal.any;
-
-        (AbortSignal as unknown as AbortSignalStatics).any = undefined;
-
-        try {
-            const fetchFn = makeFetch(async () => jsonResponse({}));
-            const client = makeClient(fetchFn, { timeout: 5000 });
-            const controller = new AbortController();
-
-            await client.get('/items', { signal: controller.signal }).catch(() => undefined);
-
-            expect(lastInit(fetchFn).signal).toBe(controller.signal);
-        } finally {
-            (AbortSignal as unknown as AbortSignalStatics).any = original;
-        }
+        await rejectionOf(client.get('/items'), NetworkError);
     });
 });

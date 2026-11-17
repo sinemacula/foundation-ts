@@ -13,7 +13,7 @@
 
 import { ExponentialBackoff } from './exponential-backoff';
 import { RealtimeError } from './realtime-error';
-import { runReconnect } from './reconnect';
+import { type BeforeReconnectHook, runReconnect } from './reconnect';
 import type {
     RealtimeConnection,
     RealtimeMessage,
@@ -45,8 +45,11 @@ export interface WebSocketConnectionOptions {
     /** Override the WebSocket constructor. Defaults to `(url, protocols) => new WebSocket(url, protocols)`. */
     readonly webSocketFactory?: WebSocketFactory;
 
-    /** Awaited after the backoff delay fires and before each reconnect attempt opens a new WebSocket. Never called for the initial `connect()` or a manual `connect()` call. Wire the application's `TokenRefreshCoordinator` here so an expired token is refreshed before each reconnect, and pair it with the `url()` builder reading the fresh token; without this an expired-token connection retries forever with stale credentials. Rejection abandons the attempt and the next reconnect is scheduled through the existing backoff path. */
-    readonly beforeReconnect?: () => Promise<void>;
+    /** Awaited before each reconnect, never before a manual `connect()`; pair it with a `url()` builder that reads the fresh token. */
+    readonly beforeReconnect?: BeforeReconnectHook;
+
+    /** Receives the errors the connection contains rather than throws: a throwing subscriber or a failed reconnect open. */
+    readonly onError?: (error: unknown) => void;
 }
 
 /**
@@ -54,9 +57,7 @@ export interface WebSocketConnectionOptions {
  *
  * Reconnects automatically on non-client-initiated closes. All registered event
  * listeners are re-applied after every reconnect. Provides an additional
- * {@link WebSocketConnection.send} method for outbound messages. When
- * `beforeReconnect` is supplied, it is awaited before each reconnect opens a
- * new WebSocket.
+ * {@link WebSocketConnection.send} method for outbound messages.
  */
 export class WebSocketConnection implements RealtimeConnection {
     /** The endpoint URL, or a factory returning it per connect. */
@@ -72,7 +73,10 @@ export class WebSocketConnection implements RealtimeConnection {
     readonly #factory: WebSocketFactory;
 
     /** Optional hook awaited before each reconnect. */
-    readonly #beforeReconnect: (() => Promise<void>) | undefined;
+    readonly #beforeReconnect: BeforeReconnectHook | undefined;
+
+    /** The optional sink for errors the connection contains. */
+    readonly #onError: ((error: unknown) => void) | undefined;
 
     /** Registered message handlers, keyed by event name. */
     readonly #messageHandlers: Map<string, Set<RealtimeMessageHandler>> = new Map();
@@ -89,14 +93,17 @@ export class WebSocketConnection implements RealtimeConnection {
     /** The current zero-based reconnect attempt counter. */
     #attempt: number = 0;
 
-    /** The pending reconnect timer, or null when none. */
-    #reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    /** The pending reconnect timer, or undefined when none. */
+    #reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+    /** Advanced on every disconnect so a superseded reconnect attempt abandons itself. */
+    #generation: number = 0;
 
     /**
      * Construct a new WebSocket connection.
      *
-     * @param options - URL, protocols, backoff strategy, and optional WebSocket
-     * factory
+     * @param options - URL, protocols, backoff strategy, optional WebSocket
+     * factory, reconnect hook and error sink
      */
     constructor(options: WebSocketConnectionOptions) {
         this.#url = options.url;
@@ -104,6 +111,7 @@ export class WebSocketConnection implements RealtimeConnection {
         this.#backoff = options.backoff ?? new ExponentialBackoff();
         this.#factory = options.webSocketFactory ?? defaultWebSocketFactory;
         this.#beforeReconnect = options.beforeReconnect;
+        this.#onError = options.onError;
     }
 
     /**
@@ -115,19 +123,29 @@ export class WebSocketConnection implements RealtimeConnection {
 
     /**
      * Open the WebSocket connection. No-op when already connecting or open.
+     *
+     * @throws {@link RealtimeError} when the `url()` builder or socket factory
+     * throws; the state is left unchanged and the original error is the cause
      */
     connect(): void {
         if (this.#state === 'connecting' || this.#state === 'open') {
             return;
         }
 
-        this.#openSocket();
+        try {
+            this.#openSocket();
+        } catch (error) {
+            throw new RealtimeError('Cannot connect: the WebSocket could not be opened.', { cause: error });
+        }
     }
 
     /**
-     * Close the connection permanently, cancelling any pending reconnect.
+     * Close the connection and cancel any pending reconnect until the next
+     * `connect()`, which restarts the backoff.
      */
     disconnect(): void {
+        this.#generation += 1;
+        this.#attempt = 0;
         this.#cancelReconnect();
         this.#closeSocket();
         this.#setState('closed');
@@ -154,7 +172,7 @@ export class WebSocketConnection implements RealtimeConnection {
         handlers.add(handler);
 
         return () => {
-            this.#messageHandlers.get(event)?.delete(handler);
+            handlers.delete(handler);
         };
     }
 
@@ -187,29 +205,36 @@ export class WebSocketConnection implements RealtimeConnection {
     }
 
     /**
-     * Open a fresh WebSocket and wire its lifecycle handlers.
+     * Open a fresh WebSocket and own it before announcing the connecting state,
+     * so a subscriber that disconnects in response closes it. A throwing
+     * `url()` builder or factory leaves the state untouched.
      */
     #openSocket(): void {
-        this.#setState('connecting');
-
         const url = typeof this.#url === 'function' ? this.#url() : this.#url;
         const socket = this.#factory(url, this.#protocols);
 
         socket.onopen = () => {
-            this.#attempt = 0;
-            this.#setState('open');
+            if (this.#socket === socket) {
+                this.#attempt = 0;
+                this.#setState('open');
+            }
         };
 
         socket.onmessage = (event: MessageEvent) => {
-            this.#dispatchFrame(String(event.data));
+            if (this.#socket === socket) {
+                this.#dispatchFrame(String(event.data));
+            }
         };
 
         socket.onclose = () => {
-            this.#socket = null;
-            this.#scheduleReconnect();
+            if (this.#socket === socket) {
+                this.#socket = null;
+                this.#scheduleReconnect();
+            }
         };
 
         this.#socket = socket;
+        this.#setState('connecting');
     }
 
     /**
@@ -244,62 +269,74 @@ export class WebSocketConnection implements RealtimeConnection {
         for (const handler of handlers) {
             try {
                 handler(message);
-            } catch {
-                // A misbehaving subscriber must never starve the others.
+            } catch (error) {
+                this.#report(error);
             }
         }
     }
 
     /**
-     * Enter the connecting state and schedule the next reconnect after the
-     * backoff delay for the current attempt.
+     * Schedule the next reconnect after the backoff delay for the current
+     * attempt, then enter the connecting state. The timer is stored first so a
+     * subscriber that disconnects in response cancels it.
      */
     #scheduleReconnect(): void {
         const delay = this.#backoff.delayFor(this.#attempt++);
 
-        this.#setState('connecting');
-
         this.#reconnectTimer = setTimeout(() => {
-            this.#reconnectTimer = null;
+            this.#reconnectTimer = undefined;
             void this.#runReconnect();
         }, delay);
+
+        this.#setState('connecting');
     }
 
     /**
-     * Run one reconnect attempt, awaiting the optional beforeReconnect hook
-     * first. A disconnect that lands while the hook is pending must leave no
-     * trace once it settles, so the closed state is re-checked afterwards.
+     * Run one reconnect attempt, abandoning it if a disconnect lands first.
      */
     async #runReconnect(): Promise<void> {
+        const generation = this.#generation;
+
         await runReconnect({
             beforeReconnect: this.#beforeReconnect,
-            isClosed: () => this.#state === 'closed',
+            isStale: () => this.#generation > generation,
             reopen: () => this.#openSocket(),
             reschedule: () => this.#scheduleReconnect(),
+            onError: error => this.#report(error),
         });
     }
 
     /**
-     * Detach the lifecycle handlers from the active socket and close it.
+     * Pass a contained error to the `onError` sink, ignoring a throwing sink so
+     * one failure never starves the remaining subscribers.
+     *
+     * @param error - the contained error
+     */
+    #report(error: unknown): void {
+        try {
+            this.#onError?.(error);
+        } catch {
+            // The sink is the last resort; nothing is left to report to.
+        }
+    }
+
+    /**
+     * Release the active socket and close it. Ownership goes first, so its
+     * handlers ignore the close event and anything else it still delivers.
      */
     #closeSocket(): void {
-        if (this.#socket !== null) {
-            this.#socket.onopen = null;
-            this.#socket.onmessage = null;
-            this.#socket.onclose = null;
-            this.#socket.close();
-            this.#socket = null;
-        }
+        const socket = this.#socket;
+
+        this.#socket = null;
+        socket?.close();
     }
 
     /**
      * Cancel any pending reconnect timer.
      */
     #cancelReconnect(): void {
-        if (this.#reconnectTimer !== null) {
-            clearTimeout(this.#reconnectTimer);
-            this.#reconnectTimer = null;
-        }
+        clearTimeout(this.#reconnectTimer);
+        this.#reconnectTimer = undefined;
     }
 
     /**
@@ -317,8 +354,8 @@ export class WebSocketConnection implements RealtimeConnection {
         for (const handler of this.#stateHandlers) {
             try {
                 handler(next);
-            } catch {
-                // A misbehaving subscriber must never starve the others.
+            } catch (error) {
+                this.#report(error);
             }
         }
     }
@@ -383,17 +420,19 @@ function tryParseEnvelope(raw: string): {
     /** The payload text extracted from the envelope. */
     data: string;
 } | null {
+    let parsed: unknown;
+
     try {
-        const parsed: unknown = JSON.parse(raw);
-
-        if (!isEnvelopeShape(parsed)) {
-            return null;
-        }
-
-        const data = typeof parsed.data === 'string' ? parsed.data : JSON.stringify(parsed.data);
-
-        return { event: parsed.event, data };
+        parsed = JSON.parse(raw);
     } catch {
         return null;
     }
+
+    if (!isEnvelopeShape(parsed)) {
+        return null;
+    }
+
+    const data = typeof parsed.data === 'string' ? parsed.data : JSON.stringify(parsed.data);
+
+    return { event: parsed.event, data };
 }

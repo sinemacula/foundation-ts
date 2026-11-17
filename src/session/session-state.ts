@@ -14,16 +14,16 @@ import type { SessionUser } from './session-user';
 /**
  * The mutable session state the core transitions read and write.
  */
-export interface SessionState {
+export interface SessionState<U extends SessionUser = SessionUser> {
     /** The bearer token for the active session, or null when signed out. */
     accessToken: string | null;
 
-    /** The refresh token for the active session, or null when not issued. */
+    /** The refresh token for the active session, or null when not held. */
     refreshToken: string | null;
 
     /** Absolute session expiry in epoch milliseconds, or null when unknown. */
     expiresAtEpochMs: number | null;
 
     /** The authenticated user record, or null when not yet loaded. */
-    user: SessionUser | null;
+    user: U | null;
 }

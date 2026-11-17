@@ -40,7 +40,7 @@ services on top. Everything platform-specific arrives through an injected port.
 | `src/realtime/`      | Live connections behind a port: a WebSocket adapter plus the exponential-backoff reconnect platform adapters share | `RealtimeConnection`      |
 | `src/reporting/`     | Error reporting through a swappable reporter and a breadcrumb trail                                                | `ErrorReporter`           |
 | `src/router/`        | The navigation middleware contract and pipeline, generic over each platform's route and location types             | `RouteMiddleware`         |
-| `src/session/`       | The session core: lifecycle transitions, storage keys, redirect sanitising and a default `/auth` gateway           | `SessionApi`              |
+| `src/session/`       | The session core: lifecycle, refresh outcomes, async persistence and a default auth gateway (body or cookie)       | `SessionApi`              |
 | `src/storage/`       | A synchronous key-value storage port with in-memory and key-namespacing adapters                                   | `KeyValueStorage`         |
 | `src/support/`       | Shared primitives: service holders, deep freeze and record guards                                                  | -                         |
 | `src/theme/`         | Colour-scheme state: preference resolution and the OS-source and applier ports                                     | `ColorSchemeService`      |
@@ -50,6 +50,9 @@ services on top. Everything platform-specific arrives through an injected port.
 ```bash
 npm install @sinemacula/foundation
 ```
+
+The `exports` map always resolves to the compiled `dist/`, and the `prepare` script builds it, so a git dependency
+(`github:sinemacula/foundation-ts#<ref>`) installs the same output as the registry tarball.
 
 ## Import style
 
@@ -75,6 +78,64 @@ const core = await bootFoundationCore(options, { fetchFn }, runtimeUrl);
 Everything the core installs is reachable afterwards through the service accessors in
 `@sinemacula/foundation/app/services`.
 
+## Realtime
+
+`@sinemacula/foundation/realtime/web-socket-connection` is the WebSocket adapter for the `RealtimeConnection` port.
+It reconnects with exponential backoff after any close it did not initiate, and `disconnect()` stops it until the next
+`connect()`, which restarts the backoff. `beforeReconnect` runs before each reconnect and skips the attempt when it
+resolves `false` or rejects, so map the refresh outcome to that decision explicitly:
+
+```ts
+const connection = new WebSocketConnection({
+    url: () => `wss://example.test/realtime?token=${readAccessToken()}`,
+    beforeReconnect: async () => (await coordinator.refresh()).kind === 'refreshed',
+    onError: error => reporter.captureError(error),
+});
+
+connection.on('order.updated', message => applyOrderUpdate(message.data));
+connection.connect();
+```
+
+`onError` receives the errors the connection contains rather than throws: a subscriber that threw, or a reconnect
+whose `url()` builder or socket factory threw. The same failure inside `connect()` surfaces to the caller as a
+`RealtimeError` (`@sinemacula/foundation/realtime/realtime-error`) with the original error as its `cause`.
+
+## Querying
+
+`ApiQuery` speaks the `sinemacula/laravel-api-toolkit` query grammar. It is immutable: every call returns a new
+query.
+
+```ts
+const query = ApiQuery.create()
+    .where('status', 'active')
+    .orWhere([q => q.where('role', 'admin').where('verified', true), q => q.where('role', 'owner')])
+    .whereHas('posts', q => q.where('published', true))
+    .search('ada')
+    .orderBy('name')
+    .limit(25)
+    .fieldsFor('user', ['id', 'name', 'aggregates'])
+    .aggregatesFor('user', ['posts_count']);
+// filters={"status":"active","$or":[{"role":"admin","verified":true},{"role":"owner"}],
+//          "$has":{"posts":{"published":true}}}&search=ada&order=name&limit=25
+//          &fields[user]=id,name,aggregates&aggregates[user]=posts_count
+```
+
+- `andWhere` / `orWhere` take one builder per document; keys inside a document AND together, and repeated calls
+  append documents to the same group. An empty group or document throws a `QueryError`.
+- Conditions on one relation, through repeated `whereRelation` or `whereHas` calls, merge into one document, so the
+  same related row must match all of them.
+- Free-text search is the `search` parameter (`search(term)`), never a filter operator.
+- Aggregates render under the record's `aggregates` field only when `aggregates` is in `fields[type]` or the
+  resource's default fields.
+- `withTrashed()` / `onlyTrashed()` set `trashed=with` / `trashed=only`.
+- Changing the order clears any cursor; random order under cursor pagination throws.
+- `ResourceClient.list` returns `meta` (`{ mode: 'length-aware', total, count, hasMore }` or
+  `{ mode: 'cursor', hasMore }`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
+
+The toolkit enforces cost caps server-side and answers a request over one with a 422. The defaults are: `limit` 100,
+3 order keys, 5 aggregates, an offset of 500000 rows, 500 `$in` items, 100 filter nodes, a filter depth of 3, and
+8192 bytes of encoded filters.
+
 ## Quality gates
 
 | Command                 | What it runs                                           |
@@ -89,8 +150,7 @@ Everything the core installs is reachable afterwards through the service accesso
 ## Releases
 
 Releases are cut by release-please from Conventional Commit history and published to npm by CI through OIDC
-trusted publishing; the pack lifecycle compiles `dist/` and rewrites the manifest `exports` to its published
-form.
+trusted publishing; the `prepare` lifecycle compiles `dist/` before the tarball is packed.
 
 ## Contributing
 
