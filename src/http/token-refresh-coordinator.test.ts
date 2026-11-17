@@ -5,8 +5,9 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import type { RefreshOutcome } from '../session/session-outcomes';
 import { TokenRefreshCoordinator } from './token-refresh-coordinator';
 
 /** A promise plus its externally callable settlers. */
@@ -97,6 +98,26 @@ describe('TokenRefreshCoordinator', () => {
         await coordinator.refresh();
 
         expect(refreshFn).toHaveBeenCalledTimes(2);
+    });
+
+    it('types a refresh by what its refresher resolves with', () => {
+        /**
+         * Refresh to a classified outcome.
+         */
+        const refreshOutcome = (): Promise<RefreshOutcome> => Promise.resolve({ kind: 'refreshed' });
+
+        expectTypeOf(new TokenRefreshCoordinator({ refresh: refreshOutcome }).refresh()).toEqualTypeOf<
+            Promise<RefreshOutcome>
+        >();
+        expectTypeOf(new TokenRefreshCoordinator<RefreshOutcome>({ refresh: refreshOutcome }).refresh()).toEqualTypeOf<
+            Promise<RefreshOutcome>
+        >();
+        expectTypeOf<ReturnType<TokenRefreshCoordinator['refresh']>>().toEqualTypeOf<Promise<boolean>>();
+        expectTypeOf(
+            () =>
+                // @ts-expect-error a boolean refresher cannot back an outcome coordinator
+                new TokenRefreshCoordinator<RefreshOutcome>({ refresh: () => Promise.resolve(true) }),
+        ).toBeFunction();
     });
 
     it('clears the in-flight slot when the refresher rejects', async () => {
