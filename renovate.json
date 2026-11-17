@@ -54,6 +54,21 @@
             "automerge": false
         },
         {
+            "description": "The React Native smoke fixture moves as one PR, automerged once the smoke check passes on it.",
+            "matchFileNames": ["smoke/react-native/package.json"],
+            "matchDepTypes": ["devDependencies"],
+            "enabled": true,
+            "groupName": "react native smoke fixture",
+            "automerge": true
+        },
+        {
+            "description": "Fixture majors wait for dashboard approval.",
+            "matchFileNames": ["smoke/react-native/package.json"],
+            "matchUpdateTypes": ["major"],
+            "dependencyDashboardApproval": true,
+            "automerge": false
+        },
+        {
             "description": "Majors are reviewed one at a time, behind dashboard approval.",
             "matchFileNames": ["package.json"],
             "matchDepTypes": ["dependencies", "devDependencies"],

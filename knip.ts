@@ -14,7 +14,7 @@ import type { KnipConfig } from 'knip';
 
 import manifest from './package.json' with { type: 'json' };
 
-const sourceEntries = Object.values(manifest.exports).map(({ import: target }) =>
+const sourceEntries = Object.values(manifest.exports).map(({ default: target }) =>
     target.replace(/^\.\/dist\/(.+)\.js$/, 'src/$1.ts'),
 );
 

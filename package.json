@@ -21,283 +21,291 @@
     "exports": {
         "./analytics/analytics-tracker": {
             "types": "./dist/analytics/analytics-tracker.d.ts",
-            "import": "./dist/analytics/analytics-tracker.js"
+            "default": "./dist/analytics/analytics-tracker.js"
         },
         "./analytics/install-page-tracking": {
             "types": "./dist/analytics/install-page-tracking.d.ts",
-            "import": "./dist/analytics/install-page-tracking.js"
+            "default": "./dist/analytics/install-page-tracking.js"
         },
         "./analytics/null-analytics-tracker": {
             "types": "./dist/analytics/null-analytics-tracker.d.ts",
-            "import": "./dist/analytics/null-analytics-tracker.js"
+            "default": "./dist/analytics/null-analytics-tracker.js"
         },
         "./app/boot-foundation-core": {
             "types": "./dist/app/boot-foundation-core.d.ts",
-            "import": "./dist/app/boot-foundation-core.js"
+            "default": "./dist/app/boot-foundation-core.js"
         },
         "./app/foundation-boot-error": {
             "types": "./dist/app/foundation-boot-error.d.ts",
-            "import": "./dist/app/foundation-boot-error.js"
+            "default": "./dist/app/foundation-boot-error.js"
         },
         "./app/foundation-config": {
             "types": "./dist/app/foundation-config.d.ts",
-            "import": "./dist/app/foundation-config.js"
+            "default": "./dist/app/foundation-config.js"
         },
         "./app/services": {
             "types": "./dist/app/services.d.ts",
-            "import": "./dist/app/services.js"
+            "default": "./dist/app/services.js"
         },
         "./app/wire-http-client": {
             "types": "./dist/app/wire-http-client.d.ts",
-            "import": "./dist/app/wire-http-client.js"
+            "default": "./dist/app/wire-http-client.js"
         },
         "./app/wire-observability": {
             "types": "./dist/app/wire-observability.d.ts",
-            "import": "./dist/app/wire-observability.js"
+            "default": "./dist/app/wire-observability.js"
         },
         "./authorization/permission-set": {
             "types": "./dist/authorization/permission-set.d.ts",
-            "import": "./dist/authorization/permission-set.js"
+            "default": "./dist/authorization/permission-set.js"
         },
         "./config/chain-environment-source": {
             "types": "./dist/config/chain-environment-source.d.ts",
-            "import": "./dist/config/chain-environment-source.js"
+            "default": "./dist/config/chain-environment-source.js"
         },
         "./config/config-repository": {
             "types": "./dist/config/config-repository.d.ts",
-            "import": "./dist/config/config-repository.js"
+            "default": "./dist/config/config-repository.js"
         },
         "./config/environment": {
             "types": "./dist/config/environment.d.ts",
-            "import": "./dist/config/environment.js"
+            "default": "./dist/config/environment.js"
         },
         "./config/object-environment-source": {
             "types": "./dist/config/object-environment-source.d.ts",
-            "import": "./dist/config/object-environment-source.js"
+            "default": "./dist/config/object-environment-source.js"
         },
         "./config/prefixed-environment-source": {
             "types": "./dist/config/prefixed-environment-source.d.ts",
-            "import": "./dist/config/prefixed-environment-source.js"
+            "default": "./dist/config/prefixed-environment-source.js"
+        },
+        "./config/runtime-environment": {
+            "types": "./dist/config/runtime-environment.d.ts",
+            "default": "./dist/config/runtime-environment.js"
+        },
+        "./config/runtime-environment-error": {
+            "types": "./dist/config/runtime-environment-error.d.ts",
+            "default": "./dist/config/runtime-environment-error.js"
         },
         "./connectivity/connectivity-monitor": {
             "types": "./dist/connectivity/connectivity-monitor.d.ts",
-            "import": "./dist/connectivity/connectivity-monitor.js"
+            "default": "./dist/connectivity/connectivity-monitor.js"
         },
         "./feature-flags/feature-flags": {
             "types": "./dist/feature-flags/feature-flags.d.ts",
-            "import": "./dist/feature-flags/feature-flags.js"
+            "default": "./dist/feature-flags/feature-flags.js"
         },
         "./feature-flags/static-feature-flags": {
             "types": "./dist/feature-flags/static-feature-flags.d.ts",
-            "import": "./dist/feature-flags/static-feature-flags.js"
+            "default": "./dist/feature-flags/static-feature-flags.js"
         },
         "./http/bearer-token-interceptor": {
             "types": "./dist/http/bearer-token-interceptor.d.ts",
-            "import": "./dist/http/bearer-token-interceptor.js"
+            "default": "./dist/http/bearer-token-interceptor.js"
         },
         "./http/fetch-http-client": {
             "types": "./dist/http/fetch-http-client.d.ts",
-            "import": "./dist/http/fetch-http-client.js"
+            "default": "./dist/http/fetch-http-client.js"
         },
         "./http/http-client": {
             "types": "./dist/http/http-client.d.ts",
-            "import": "./dist/http/http-client.js"
+            "default": "./dist/http/http-client.js"
         },
         "./http/http-error": {
             "types": "./dist/http/http-error.d.ts",
-            "import": "./dist/http/http-error.js"
+            "default": "./dist/http/http-error.js"
         },
         "./http/module-http-contributions": {
             "types": "./dist/http/module-http-contributions.d.ts",
-            "import": "./dist/http/module-http-contributions.js"
+            "default": "./dist/http/module-http-contributions.js"
         },
         "./http/token-refresh-coordinator": {
             "types": "./dist/http/token-refresh-coordinator.d.ts",
-            "import": "./dist/http/token-refresh-coordinator.js"
+            "default": "./dist/http/token-refresh-coordinator.js"
         },
         "./i18n/i18n-error": {
             "types": "./dist/i18n/i18n-error.d.ts",
-            "import": "./dist/i18n/i18n-error.js"
+            "default": "./dist/i18n/i18n-error.js"
         },
         "./i18n/locale-service": {
             "types": "./dist/i18n/locale-service.d.ts",
-            "import": "./dist/i18n/locale-service.js"
+            "default": "./dist/i18n/locale-service.js"
         },
         "./logging/logger": {
             "types": "./dist/logging/logger.d.ts",
-            "import": "./dist/logging/logger.js"
+            "default": "./dist/logging/logger.js"
         },
         "./logging/null-logger": {
             "types": "./dist/logging/null-logger.d.ts",
-            "import": "./dist/logging/null-logger.js"
+            "default": "./dist/logging/null-logger.js"
         },
         "./notifications/confirmer": {
             "types": "./dist/notifications/confirmer.d.ts",
-            "import": "./dist/notifications/confirmer.js"
+            "default": "./dist/notifications/confirmer.js"
         },
         "./notifications/toaster": {
             "types": "./dist/notifications/toaster.d.ts",
-            "import": "./dist/notifications/toaster.js"
+            "default": "./dist/notifications/toaster.js"
         },
         "./query/api-query": {
             "types": "./dist/query/api-query.d.ts",
-            "import": "./dist/query/api-query.js"
+            "default": "./dist/query/api-query.js"
         },
         "./query/envelope": {
             "types": "./dist/query/envelope.d.ts",
-            "import": "./dist/query/envelope.js"
+            "default": "./dist/query/envelope.js"
         },
         "./query/filter-expression": {
             "types": "./dist/query/filter-expression.d.ts",
-            "import": "./dist/query/filter-expression.js"
+            "default": "./dist/query/filter-expression.js"
         },
         "./query/list-filter": {
             "types": "./dist/query/list-filter.d.ts",
-            "import": "./dist/query/list-filter.js"
+            "default": "./dist/query/list-filter.js"
         },
         "./query/list-query-definition": {
             "types": "./dist/query/list-query-definition.d.ts",
-            "import": "./dist/query/list-query-definition.js"
+            "default": "./dist/query/list-query-definition.js"
         },
         "./query/query-error": {
             "types": "./dist/query/query-error.d.ts",
-            "import": "./dist/query/query-error.js"
+            "default": "./dist/query/query-error.js"
         },
         "./query/resource-client": {
             "types": "./dist/query/resource-client.d.ts",
-            "import": "./dist/query/resource-client.js"
+            "default": "./dist/query/resource-client.js"
         },
         "./realtime/exponential-backoff": {
             "types": "./dist/realtime/exponential-backoff.d.ts",
-            "import": "./dist/realtime/exponential-backoff.js"
+            "default": "./dist/realtime/exponential-backoff.js"
         },
         "./realtime/realtime-connection": {
             "types": "./dist/realtime/realtime-connection.d.ts",
-            "import": "./dist/realtime/realtime-connection.js"
+            "default": "./dist/realtime/realtime-connection.js"
         },
         "./realtime/realtime-error": {
             "types": "./dist/realtime/realtime-error.d.ts",
-            "import": "./dist/realtime/realtime-error.js"
+            "default": "./dist/realtime/realtime-error.js"
         },
         "./realtime/reconnect": {
             "types": "./dist/realtime/reconnect.d.ts",
-            "import": "./dist/realtime/reconnect.js"
+            "default": "./dist/realtime/reconnect.js"
         },
         "./realtime/test-support/realtime-connection-contract": {
             "types": "./dist/realtime/test-support/realtime-connection-contract.d.ts",
-            "import": "./dist/realtime/test-support/realtime-connection-contract.js"
+            "default": "./dist/realtime/test-support/realtime-connection-contract.js"
         },
         "./realtime/web-socket-connection": {
             "types": "./dist/realtime/web-socket-connection.d.ts",
-            "import": "./dist/realtime/web-socket-connection.js"
+            "default": "./dist/realtime/web-socket-connection.js"
         },
         "./reporting/breadcrumb-trail": {
             "types": "./dist/reporting/breadcrumb-trail.d.ts",
-            "import": "./dist/reporting/breadcrumb-trail.js"
+            "default": "./dist/reporting/breadcrumb-trail.js"
         },
         "./reporting/error-reporter": {
             "types": "./dist/reporting/error-reporter.d.ts",
-            "import": "./dist/reporting/error-reporter.js"
+            "default": "./dist/reporting/error-reporter.js"
         },
         "./reporting/null-error-reporter": {
             "types": "./dist/reporting/null-error-reporter.d.ts",
-            "import": "./dist/reporting/null-error-reporter.js"
+            "default": "./dist/reporting/null-error-reporter.js"
         },
         "./router/middleware": {
             "types": "./dist/router/middleware.d.ts",
-            "import": "./dist/router/middleware.js"
+            "default": "./dist/router/middleware.js"
         },
         "./session/default-session-api": {
             "types": "./dist/session/default-session-api.d.ts",
-            "import": "./dist/session/default-session-api.js"
+            "default": "./dist/session/default-session-api.js"
         },
         "./session/in-process-session-lock": {
             "types": "./dist/session/in-process-session-lock.d.ts",
-            "import": "./dist/session/in-process-session-lock.js"
+            "default": "./dist/session/in-process-session-lock.js"
         },
         "./session/key-value-session-persistence": {
             "types": "./dist/session/key-value-session-persistence.d.ts",
-            "import": "./dist/session/key-value-session-persistence.js"
+            "default": "./dist/session/key-value-session-persistence.js"
         },
         "./session/redirect": {
             "types": "./dist/session/redirect.d.ts",
-            "import": "./dist/session/redirect.js"
+            "default": "./dist/session/redirect.js"
         },
         "./session/session-api": {
             "types": "./dist/session/session-api.d.ts",
-            "import": "./dist/session/session-api.js"
+            "default": "./dist/session/session-api.js"
         },
         "./session/session-core": {
             "types": "./dist/session/session-core.d.ts",
-            "import": "./dist/session/session-core.js"
+            "default": "./dist/session/session-core.js"
         },
         "./session/session-error": {
             "types": "./dist/session/session-error.d.ts",
-            "import": "./dist/session/session-error.js"
+            "default": "./dist/session/session-error.js"
         },
         "./session/session-lock": {
             "types": "./dist/session/session-lock.d.ts",
-            "import": "./dist/session/session-lock.js"
+            "default": "./dist/session/session-lock.js"
         },
         "./session/session-outcomes": {
             "types": "./dist/session/session-outcomes.d.ts",
-            "import": "./dist/session/session-outcomes.js"
+            "default": "./dist/session/session-outcomes.js"
         },
         "./session/session-persistence": {
             "types": "./dist/session/session-persistence.d.ts",
-            "import": "./dist/session/session-persistence.js"
+            "default": "./dist/session/session-persistence.js"
         },
         "./session/session-routes": {
             "types": "./dist/session/session-routes.d.ts",
-            "import": "./dist/session/session-routes.js"
+            "default": "./dist/session/session-routes.js"
         },
         "./session/session-state": {
             "types": "./dist/session/session-state.d.ts",
-            "import": "./dist/session/session-state.js"
+            "default": "./dist/session/session-state.js"
         },
         "./session/session-storage-keys": {
             "types": "./dist/session/session-storage-keys.d.ts",
-            "import": "./dist/session/session-storage-keys.js"
+            "default": "./dist/session/session-storage-keys.js"
         },
         "./session/session-tokens": {
             "types": "./dist/session/session-tokens.d.ts",
-            "import": "./dist/session/session-tokens.js"
+            "default": "./dist/session/session-tokens.js"
         },
         "./session/session-user": {
             "types": "./dist/session/session-user.d.ts",
-            "import": "./dist/session/session-user.js"
+            "default": "./dist/session/session-user.js"
         },
         "./storage/key-value-storage": {
             "types": "./dist/storage/key-value-storage.d.ts",
-            "import": "./dist/storage/key-value-storage.js"
+            "default": "./dist/storage/key-value-storage.js"
         },
         "./storage/memory-storage": {
             "types": "./dist/storage/memory-storage.d.ts",
-            "import": "./dist/storage/memory-storage.js"
+            "default": "./dist/storage/memory-storage.js"
         },
         "./storage/namespaced-storage": {
             "types": "./dist/storage/namespaced-storage.d.ts",
-            "import": "./dist/storage/namespaced-storage.js"
+            "default": "./dist/storage/namespaced-storage.js"
         },
         "./support/is-record": {
             "types": "./dist/support/is-record.d.ts",
-            "import": "./dist/support/is-record.js"
+            "default": "./dist/support/is-record.js"
         },
         "./support/service-holder": {
             "types": "./dist/support/service-holder.d.ts",
-            "import": "./dist/support/service-holder.js"
+            "default": "./dist/support/service-holder.js"
         },
         "./support/support-error": {
             "types": "./dist/support/support-error.d.ts",
-            "import": "./dist/support/support-error.js"
+            "default": "./dist/support/support-error.js"
         },
         "./theme/color-scheme": {
             "types": "./dist/theme/color-scheme.d.ts",
-            "import": "./dist/theme/color-scheme.js"
+            "default": "./dist/theme/color-scheme.js"
         },
         "./theme/color-scheme-service": {
             "types": "./dist/theme/color-scheme-service.d.ts",
-            "import": "./dist/theme/color-scheme-service.js"
+            "default": "./dist/theme/color-scheme-service.js"
         }
     },
     "files": ["dist", "README.md", "LICENSE"],
@@ -318,6 +326,7 @@
         "fmt": "qlty fmt",
         "smells": "qlty smells",
         "deadcode": "knip",
+        "smoke:react-native": "npm ci --prefix smoke/react-native && node smoke/react-native/run.mjs",
         "check:pkg": "rm -rf .pack && mkdir -p .pack && npm pack --pack-destination .pack --silent && publint .pack/*.tgz && attw .pack/*.tgz --profile esm-only",
         "prepare": "node scripts/build.mjs"
     },

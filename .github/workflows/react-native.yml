@@ -1,0 +1,70 @@
+# ==============================================================================
+# REACT NATIVE
+# ==============================================================================
+name: React Native
+
+# ==============================================================================
+# TRIGGERS
+# ==============================================================================
+on:
+    push:
+        branches: [ master ]
+    pull_request:
+        types: [ opened, synchronize, reopened, ready_for_review ]
+    workflow_dispatch:
+
+# ==============================================================================
+# CONCURRENCY
+# ==============================================================================
+concurrency:
+    group: react-native-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+# ==============================================================================
+# PERMISSIONS
+# ==============================================================================
+permissions:
+    contents: read
+
+# ==============================================================================
+# DEFAULTS
+# ==============================================================================
+defaults:
+    run:
+        shell: bash
+
+jobs:
+
+    # ==========================================================================
+    # JOB: SMOKE
+    # ==========================================================================
+    # Bundles the packed package with Metro for iOS and Android, compiles it to
+    # Hermes bytecode and loads every subpath, then requires each one under
+    # React Native's Jest preset.
+    smoke:
+        name: React Native smoke
+        runs-on: ubuntu-latest
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v7
+                with:
+                    persist-credentials: false
+
+            -   name: Setup Node.js
+                uses: actions/setup-node@v7
+                with:
+                    node-version-file: .nvmrc
+                    cache: npm
+                    cache-dependency-path: |
+                        package-lock.json
+                        smoke/react-native/package-lock.json
+
+            -   name: Install dependencies
+                run: npm ci
+
+            -   name: Install the React Native fixture
+                run: npm ci --prefix smoke/react-native
+
+            -   name: Run the smoke check
+                run: node smoke/react-native/run.mjs
