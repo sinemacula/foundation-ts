@@ -5,7 +5,9 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { afterAll, bench, describe } from 'vitest';
+import { afterAll, describe } from 'vitest';
+
+import { measure } from './support/measure';
 
 import { WebSocketConnection } from '../src/realtime/web-socket-connection';
 
@@ -71,7 +73,7 @@ describe('WebSocketConnection dispatch', () => {
         for (const handlers of [1, 10]) {
             const socket = openSocket(handlers);
 
-            bench(`dispatches a ${label} frame to ${String(handlers)} handlers`, () => {
+            measure(`dispatches a ${label} frame to ${String(handlers)} handlers`, () => {
                 socket.onmessage?.(frame);
             });
         }

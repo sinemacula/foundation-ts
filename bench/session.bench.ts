@@ -5,7 +5,9 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { bench, describe } from 'vitest';
+import { describe } from 'vitest';
+
+import { measure } from './support/measure';
 
 import { KeyValueSessionPersistence } from '../src/session/key-value-session-persistence';
 import type { SessionApi } from '../src/session/session-api';
@@ -31,7 +33,7 @@ await persistence.saveIf(
 await hydrateSession(state, context);
 
 describe('hydrateSession', () => {
-    bench('hydrates against an unchanged snapshot', async () => {
+    measure('hydrates against an unchanged snapshot', async () => {
         await hydrateSession(state, context);
     });
 });

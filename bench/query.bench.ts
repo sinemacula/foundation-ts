@@ -5,7 +5,9 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { bench, describe } from 'vitest';
+import { describe } from 'vitest';
+
+import { measure } from './support/measure';
 
 import { ApiQuery } from '../src/query/api-query';
 
@@ -23,7 +25,7 @@ function chainedWheres(count: number): ApiQuery {
 }
 
 describe('ApiQuery', () => {
-    bench('compiles a realistic list query', () => {
+    measure('compiles a realistic list query', () => {
         ApiQuery.create()
             .where('status', 'active')
             .where('total', '$ge', 100)
@@ -38,12 +40,12 @@ describe('ApiQuery', () => {
     });
 
     for (const count of [200, 1000]) {
-        bench(`compiles ${String(count)} chained where calls`, () => {
+        measure(`compiles ${String(count)} chained where calls`, () => {
             chainedWheres(count).toQueryString();
         });
     }
 
-    bench('compiles 100 whereRelation merges on one relation', () => {
+    measure('compiles 100 whereRelation merges on one relation', () => {
         let query = ApiQuery.create();
 
         for (let index = 0; index < 100; index++) {
