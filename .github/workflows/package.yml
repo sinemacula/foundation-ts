@@ -2,7 +2,8 @@
 # PACKAGE
 # ==============================================================================
 # Lints the packed tarball, imports and type-checks it from a scratch consumer,
-# and compares the public API with the committed report.
+# compares the public API with the committed report, and runs the contract
+# suites under the lowest Vitest the peer range allows.
 # ==============================================================================
 name: Package
 
@@ -69,3 +70,34 @@ jobs:
 
             -   name: Compare the public API with the report
                 run: npm run api:check
+
+    # ==========================================================================
+    # JOB: VITEST FLOOR
+    # ==========================================================================
+    vitest-floor:
+        name: Contract suites on Vitest 3.1
+        runs-on: ubuntu-latest
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v7
+                with:
+                    persist-credentials: false
+
+            -   name: Setup Node.js
+                uses: actions/setup-node@v7
+                with:
+                    node-version: '22'
+                    cache: npm
+
+            -   name: Install dependencies
+                run: npm ci
+
+            # Keep at the floor of the vitest peer range.
+            -   name: Install the lowest supported Vitest
+                run: npm install --no-save --no-audit --no-fund vitest@3.1.0
+
+            -   name: Run the contract suites
+                run: |
+                    suites=$(grep -rlE 'describe[A-Za-z]+Contract\(|defineRealtimeContractCases\(' src --include='*.test.ts')
+                    npx vitest run $suites
