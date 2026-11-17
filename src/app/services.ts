@@ -6,7 +6,7 @@
  */
 
 import type { AnalyticsTracker } from '../analytics/analytics-tracker';
-import type { ConfigRepository } from '../config/config-repository';
+import type { ConfigRepository, DeepReadonly } from '../config/config-repository';
 import type { FeatureFlags } from '../feature-flags/feature-flags';
 import type { HttpClient } from '../http/http-client';
 import type { Logger } from '../logging/logger';
@@ -18,7 +18,7 @@ import type { KeyValueStorage } from '../storage/key-value-storage';
 import { createServiceHolder } from '../support/service-holder';
 import type { ColorSchemeService } from '../theme/color-scheme-service';
 
-const configHolder = createServiceHolder<ConfigRepository<Record<string, unknown>>>('configuration');
+const configHolder = createServiceHolder<ConfigRepository<object>>('configuration');
 const httpHolder = createServiceHolder<HttpClient>('http client');
 const storageHolder = createServiceHolder<KeyValueStorage>('application storage');
 const toastsHolder = createServiceHolder<Toaster>('toast service');
@@ -47,7 +47,7 @@ const baseHolders = [
 /**
  * Install the configuration repository. Called once at boot.
  */
-export function installConfig(instance: ConfigRepository<Record<string, unknown>>): void {
+export function installConfig(instance: ConfigRepository<object>): void {
     configHolder.install(instance);
 }
 
@@ -56,8 +56,8 @@ export function installConfig(instance: ConfigRepository<Record<string, unknown>
  *
  * @throws {SupportError} when called before {@link installConfig}
  */
-export function appConfig<T = unknown>(): Readonly<T> {
-    return configHolder.resolve().all() as Readonly<T>;
+export function appConfig<T = unknown>(): DeepReadonly<T> {
+    return configHolder.resolve().all() as DeepReadonly<T>;
 }
 
 /**
@@ -65,9 +65,7 @@ export function appConfig<T = unknown>(): Readonly<T> {
  *
  * @throws {SupportError} when called before {@link installConfig}
  */
-export function appConfigRepository<
-    T extends Record<string, unknown> = Record<string, unknown>,
->(): ConfigRepository<T> {
+export function appConfigRepository<T extends object = Record<string, unknown>>(): ConfigRepository<T> {
     return configHolder.resolve() as ConfigRepository<T>;
 }
 

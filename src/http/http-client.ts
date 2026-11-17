@@ -24,16 +24,16 @@ export interface HttpRequestOptions {
     /** Query parameters appended to the request URL. */
     readonly query?: QueryParameters;
 
-    /** Extra request headers, merged over the client defaults. */
+    /** Extra request headers, merged over the client defaults; names are compared case-insensitively. */
     readonly headers?: Readonly<Record<string, string>>;
 
-    /** Abort signal that cancels the request when it fires. */
+    /** Abort signal that cancels the request when it fires, including while it waits on an interceptor or the unauthorized handler. */
     readonly signal?: AbortSignal;
 
     /** Whether credentials such as cookies are sent; omit for the platform default (same-origin in browsers). */
     readonly credentials?: HttpCredentialsMode;
 
-    /** Whether a 401 may trigger the unauthorized handler. Defaults to true; set false on the refresh request itself so a failed refresh cannot recurse. */
+    /** Whether a 401 may trigger the unauthorized handler. Defaults to true; set false on every request the refresh itself makes, or its 401 waits on the refresh forever. */
     readonly retryOnUnauthorized?: boolean;
 
     /** Whether this request's failures reach the response-error handler. Defaults to true; set false for requests that handle their own errors. */
@@ -50,7 +50,7 @@ export interface HttpRequest {
     /** The absolute request URL. */
     readonly url: string;
 
-    /** The resolved request headers. */
+    /** The resolved request headers, keyed by lower-case name. */
     readonly headers: Readonly<Record<string, string>>;
 
     /** The request body, before serialisation. */
@@ -67,10 +67,14 @@ export interface HttpRequest {
 export type RequestInterceptor = (request: HttpRequest) => HttpRequest | Promise<HttpRequest>;
 
 /**
- * Invoked when a request fails with 401. Return true to retry the request once
- * (e.g. after a successful token refresh).
+ * Invoked when a request fails with 401, at most once per call. Return true to
+ * retry the request once (e.g. after a successful token refresh). It receives
+ * the request that received the 401, so a handler can retry without refreshing
+ * when that request's credentials are already out of date. Requests the handler
+ * makes itself must set {@link HttpRequestOptions.retryOnUnauthorized} to
+ * false, or their 401 waits on the handler forever.
  */
-export type UnauthorizedHandler = () => Promise<boolean>;
+export type UnauthorizedHandler = (request: HttpRequest) => Promise<boolean>;
 
 /**
  * Invoked once with the final failure of a request, after any retries: an

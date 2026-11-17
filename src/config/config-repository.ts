@@ -5,17 +5,26 @@
  * @copyright   2026 Sine Macula Limited
  */
 
+import type { DeepReadonly } from '../support/deep-freeze';
 import { deepFreeze } from '../support/deep-freeze';
+
+export type { DeepReadonly } from '../support/deep-freeze';
 
 const MISSING = Symbol('missing');
 
 /**
  * Read-only, dot-notation-addressable configuration store.
  */
-export class ConfigRepository<T extends Record<string, unknown>> {
+export class ConfigRepository<T extends object = Record<string, unknown>> {
     /** The deep-frozen configuration tree. */
-    readonly #values: Readonly<T>;
+    readonly #values: DeepReadonly<T>;
 
+    /**
+     * Freeze `values` in place, recursively through enumerable own string-keyed
+     * properties and leaving functions untouched, then hold that reference.
+     * Intended for plain data, with no guarantee for accessors, class internals
+     * or Map and Set contents.
+     */
     constructor(values: T) {
         this.#values = deepFreeze(values);
     }
@@ -23,12 +32,13 @@ export class ConfigRepository<T extends Record<string, unknown>> {
     /**
      * Return the full, typed and frozen configuration tree.
      */
-    all(): Readonly<T> {
+    all(): DeepReadonly<T> {
         return this.#values;
     }
 
     /**
-     * Resolve a value by dot-notation path.
+     * Resolve a value by dot-notation path, reading own properties only, so
+     * inherited members such as `toString` never resolve.
      *
      * @param path - the dot-notation path (e.g. `app.urls.api`)
      * @param fallback - the value returned when the path does not resolve
@@ -37,7 +47,7 @@ export class ConfigRepository<T extends Record<string, unknown>> {
         let current: unknown = this.#values;
 
         for (const segment of path.split('.')) {
-            if (current === null || typeof current !== 'object' || !(segment in current)) {
+            if (current === null || typeof current !== 'object' || !Object.hasOwn(current, segment)) {
                 return fallback;
             }
 

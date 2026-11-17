@@ -5,7 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, expectTypeOf, it } from 'vitest';
 
 import {
     analytics,
@@ -33,9 +33,11 @@ import {
     resetFoundationServices,
     toasts,
 } from './services';
+import * as services from './services';
 import type { Confirmer } from '../notifications/confirmer';
 import type { Toaster } from '../notifications/toaster';
 import { NullAnalyticsTracker } from '../analytics/null-analytics-tracker';
+import type { DeepReadonly } from '../config/config-repository';
 import { ConfigRepository } from '../config/config-repository';
 import { StaticFeatureFlags } from '../feature-flags/static-feature-flags';
 import type { HttpClient } from '../http/http-client';
@@ -44,6 +46,7 @@ import type { RealtimeConnection } from '../realtime/realtime-connection';
 import { NullErrorReporter } from '../reporting/null-error-reporter';
 import { MemoryStorage } from '../storage/memory-storage';
 import type { ColorSchemeService } from '../theme/color-scheme-service';
+import type { FoundationConfig } from './foundation-config';
 
 /** Build an HTTP client stand-in that fails loudly if any method is invoked. */
 function createHttpClientStub(): HttpClient {
@@ -105,10 +108,31 @@ interface VersionedAppConfig {
     readonly app: VersionedApp;
 }
 
+/** An application configuration declared as an interface. */
+interface InterfaceAppConfig extends FoundationConfig {
+    /** Application-specific support settings. */
+    readonly support: {
+        /** The support contact address. */
+        readonly email: string;
+    };
+}
+
+/** An application configuration declared as a type alias. */
+type AliasAppConfig = FoundationConfig & {
+    /** Application-specific support settings. */
+    readonly support: {
+        /** The support contact address. */
+        readonly email: string;
+    };
+};
+
 /** One service accessor and how to install what it resolves. */
 interface ServiceCase {
     /** The accessor's name, for the test title. */
     readonly accessorName: string;
+
+    /** The module's install function for this service. */
+    readonly installer: (instance: never) => void;
 
     /** The error message the accessor throws before install. */
     readonly message: string;
@@ -120,9 +144,23 @@ interface ServiceCase {
     readonly accessor: () => unknown;
 }
 
+/**
+ * Build an interface-declared application configuration fixture.
+ */
+function createAppConfig(): InterfaceAppConfig {
+    return {
+        api: { baseUrl: 'https://api.example.com', timeout: 30_000 },
+        app: { name: 'Test App', environment: 'production', version: '1.0.0' },
+        featureFlags: { flags: {} },
+        locales: { default: 'en-GB', enabled: ['en-GB'], supported: { 'en-GB': { direction: 'ltr' } } },
+        support: { email: 'support@example.com' },
+    };
+}
+
 const serviceCases: readonly ServiceCase[] = [
     {
         accessorName: 'appConfigRepository',
+        installer: installConfig,
         message: 'configuration accessed before initialisation',
         install: () => {
             const repository = new ConfigRepository({ app: { name: 'playground' } });
@@ -135,6 +173,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'api',
+        installer: installApi,
         message: 'http client accessed before initialisation',
         install: () => {
             const client = createHttpClientStub();
@@ -147,6 +186,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'appStorage',
+        installer: installStorage,
         message: 'application storage accessed before initialisation',
         install: () => {
             const storage = new MemoryStorage();
@@ -159,6 +199,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'toasts',
+        installer: installToasts,
         message: 'toast service accessed before initialisation',
         install: () => {
             const service = createToasterStub();
@@ -171,6 +212,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'confirmDialogs',
+        installer: installConfirm,
         message: 'confirmation dialog service accessed before initialisation',
         install: () => {
             const service = createConfirmerStub();
@@ -183,6 +225,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'reporting',
+        installer: installReporting,
         message: 'error reporter accessed before initialisation',
         install: () => {
             const reporter = new NullErrorReporter();
@@ -195,6 +238,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'analytics',
+        installer: installAnalytics,
         message: 'analytics tracker accessed before initialisation',
         install: () => {
             const tracker = new NullAnalyticsTracker();
@@ -207,6 +251,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'logger',
+        installer: installLogger,
         message: 'logger accessed before initialisation',
         install: () => {
             const instance = new NullLogger();
@@ -219,6 +264,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'featureFlags',
+        installer: installFeatureFlags,
         message: 'feature-flag adapter accessed before initialisation',
         install: () => {
             const flags = new StaticFeatureFlags({ beta: true });
@@ -231,6 +277,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'colorScheme',
+        installer: installColorScheme,
         message: 'colour scheme service accessed before initialisation',
         install: () => {
             const service = createColorSchemeStub();
@@ -243,6 +290,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'realtime',
+        installer: installRealtime,
         message: 'realtime connection accessed before initialisation',
         install: () => {
             const connection = createRealtimeConnectionStub();
@@ -272,8 +320,12 @@ describe('foundation services', () => {
         });
     }
 
-    it('runs the expected number of base service pairs', () => {
-        expect(serviceCases).toHaveLength(11);
+    it('covers every install function the module exports', () => {
+        const exported = Object.entries(services)
+            .filter(([name]) => name.startsWith('install'))
+            .map(([, installer]) => installer);
+
+        expect(new Set(serviceCases.map(({ installer }) => installer))).toStrictEqual(new Set(exported));
     });
 
     it('keeps every other accessor uninstalled when one service is installed', () => {
@@ -349,6 +401,15 @@ describe('foundation services', () => {
             expect(tree.app.name).toBe('playground');
             expect(tree.app.version).toBe('1.2.3');
         });
+
+        it('types the tree as deeply read-only, or unknown without a shape', () => {
+            expectTypeOf(appConfig<InterfaceAppConfig>).returns.toEqualTypeOf<DeepReadonly<InterfaceAppConfig>>();
+            expectTypeOf(appConfig<InterfaceAppConfig>)
+                .returns.toHaveProperty('locales')
+                .toHaveProperty('enabled')
+                .toEqualTypeOf<readonly string[]>();
+            expectTypeOf(appConfig).returns.toBeUnknown();
+        });
     });
 
     describe('appConfigRepository', () => {
@@ -357,6 +418,19 @@ describe('foundation services', () => {
 
             expect(appConfigRepository().get('app.name')).toBe('playground');
             expect(appConfigRepository().get('app.missing', 'fallback')).toBe('fallback');
+        });
+
+        it('accepts application configs declared as an interface or a type alias', () => {
+            expectTypeOf(appConfigRepository<InterfaceAppConfig>).returns.toEqualTypeOf<
+                ConfigRepository<InterfaceAppConfig>
+            >();
+            expectTypeOf(appConfigRepository<AliasAppConfig>).returns.toEqualTypeOf<ConfigRepository<AliasAppConfig>>();
+        });
+
+        it('lets an application repository stand in for an untyped one', () => {
+            expectTypeOf<ConfigRepository<InterfaceAppConfig>>().toExtend<ConfigRepository<Record<string, unknown>>>();
+            expectTypeOf<ConfigRepository<AliasAppConfig>>().toExtend<ConfigRepository<Record<string, unknown>>>();
+            expectTypeOf(installConfig).toBeCallableWith(new ConfigRepository<InterfaceAppConfig>(createAppConfig()));
         });
     });
 });

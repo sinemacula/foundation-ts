@@ -5,7 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { BreadcrumbTrail } from './breadcrumb-trail';
 
@@ -99,6 +99,33 @@ describe('BreadcrumbTrail', () => {
             const messages = trail.list().map(b => b.message);
 
             expect(messages).toStrictEqual(['4', '5']);
+        });
+
+        it('keeps only the latest entry at capacity 1', () => {
+            const trail = new BreadcrumbTrail(1, () => 0);
+
+            trail.add({ category: 'a', message: 'first' });
+            trail.add({ category: 'a', message: 'second' });
+
+            expect(trail.list().map(b => b.message)).toStrictEqual(['second']);
+        });
+
+        it('records nothing, without reading the clock, at capacity 0', () => {
+            const clock = vi.fn(() => 0);
+            const trail = new BreadcrumbTrail(0, clock);
+
+            trail.add({ category: 'a', message: 'first' });
+            trail.add({ category: 'a', message: 'second' });
+
+            expect(trail.list()).toStrictEqual([]);
+            expect(clock).not.toHaveBeenCalled();
+        });
+
+        it.each([-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])('rejects a capacity of %s', capacity => {
+            expect(() => new BreadcrumbTrail(capacity)).toThrow(RangeError);
+            expect(() => new BreadcrumbTrail(capacity)).toThrow(
+                'The breadcrumb capacity must be a non-negative integer.',
+            );
         });
 
         it('defaults to a capacity of 50', () => {

@@ -116,6 +116,12 @@ describe('LocaleService', () => {
 
             expect(service.detect([])).toBe('fr-FR');
         });
+
+        it('matches a stored underscore locale', () => {
+            const { service } = makeService({ initialStored: 'en_GB', enabledLocales: ['en-US', 'en-GB'] });
+
+            expect(service.detect([])).toBe('en-GB');
+        });
     });
 
     describe('match', () => {
@@ -153,6 +159,51 @@ describe('LocaleService', () => {
             const { service } = makeService({ enabledLocales: ['en-GB', 'fr'] });
 
             expect(service.match('fr-CA')).toBe('fr');
+        });
+
+        const chinese = ['zh-CN', 'zh-TW', 'sr-Cyrl', 'sr-Latn'];
+
+        it.each([
+            [['en-GB', 'fr-FR'], 'fr_FR', 'fr-FR'],
+            [['en-US', 'en-GB'], 'EN_gb', 'en-GB'],
+            [chinese, 'zh-Hant-TW', 'zh-TW'],
+            [chinese, 'zh_TW', 'zh-TW'],
+            [chinese, 'sr-Latn-RS', 'sr-Latn'],
+            [['zh-Hans-CN', 'zh-Hant-TW'], 'zh-Hant-CN', 'zh-Hant-TW'],
+            [['zh-Hans', 'zh'], 'zh-Hant', 'zh'],
+            [['fr-FR', 'fr'], 'fr-CA', 'fr'],
+            [['en-US', 'en'], 'en-x-us', 'en'],
+            [['en-x-us', 'en'], 'en-x-us', 'en-x-us'],
+            [['es-419', 'es-ES'], 'es-419', 'es-419'],
+            [['de-DE', 'de-CH'], 'de-CH-1996', 'de-CH'],
+            [['de-DE', 'de-CH'], 'de-1996-CH', 'de-CH'],
+            [['ca-ES', 'ca-AD'], 'ca-valencia-AD', 'ca-AD'],
+            [['sl-IT', 'sl-rozaj'], 'sl-rozaj-IT', 'sl-IT'],
+            [['es', 'es-419'], 'es-Latn-419', 'es-419'],
+        ])('matches regardless of list order: %j with %s -> %s', (enabledLocales, candidate, expected) => {
+            expect(makeService({ enabledLocales }).service.match(candidate)).toBe(expected);
+            expect(makeService({ enabledLocales: [...enabledLocales].reverse() }).service.match(candidate)).toBe(
+                expected,
+            );
+        });
+
+        it.each([
+            [chinese, 'sr', 'sr-Cyrl'],
+            [chinese, 'zh-HK', 'zh-CN'],
+            [['zh-TW', 'zh-CN'], 'zh-HK', 'zh-TW'],
+        ])('breaks an equal-rank tie by list order: %j with %s -> %s', (enabledLocales, candidate, expected) => {
+            expect(makeService({ enabledLocales }).service.match(candidate)).toBe(expected);
+        });
+
+        it.each([
+            ['sr-Latn', 'sr-Cyrl'],
+            ['sr-Latn-ME', 'sr-Cyrl-RS'],
+        ])('falls back from %s to the same language in a conflicting script (%s)', (candidate, enabled) => {
+            expect(makeService({ enabledLocales: [enabled] }).service.match(candidate)).toBe(enabled);
+        });
+
+        it('returns null for a language that is not enabled', () => {
+            expect(makeService({ enabledLocales: chinese }).service.match('de')).toBeNull();
         });
     });
 
