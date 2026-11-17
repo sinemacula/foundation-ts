@@ -1,5 +1,5 @@
 /**
- * Unit tests for bearer-token-interceptor.
+ * Tests for the bearer-token request interceptor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -11,13 +11,8 @@ import { createBearerTokenInterceptor } from './bearer-token-interceptor';
 import type { HttpRequest } from './http-client';
 
 /**
- * Build a `Record<string, string>` from an array of `[key, value]` pairs.
- *
- * Keeps non-camelCase header names out of object-literal key positions so
- * naming-convention lint rules never see them.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain `Record<string, string>`
+ * Build a header record from pairs, keeping non-camelCase names out of
+ * object-literal keys where naming-convention lint rules would reject them.
  */
 function wire(entries: ReadonlyArray<readonly [string, string]>): Record<string, string> {
     return Object.fromEntries(entries);
@@ -25,9 +20,6 @@ function wire(entries: ReadonlyArray<readonly [string, string]>): Record<string,
 
 /**
  * Build a GET request with the given headers.
- *
- * @param headers - the request headers
- * @returns the request
  */
 function makeRequest(headers: Record<string, string> = {}): HttpRequest {
     return { method: 'GET', url: 'https://example.com/', headers, body: undefined };
@@ -50,7 +42,7 @@ describe('createBearerTokenInterceptor', () => {
         expect(result.headers).toMatchObject({ authorization: 'Bearer tok-abc' });
     });
 
-    it('does not mutate the original request headers when adding the token', () => {
+    it('does not mutate the original headers', () => {
         const interceptor = createBearerTokenInterceptor({ getAccessToken: () => 'tok-abc' });
         const original: Record<string, string> = {};
         void interceptor(makeRequest(original));
@@ -71,27 +63,13 @@ describe('createBearerTokenInterceptor', () => {
         );
     });
 
-    it('returns the same reference when the request already has an Authorization header', () => {
-        const interceptor = createBearerTokenInterceptor({ getAccessToken: () => 'tok-abc' });
-        const request = makeRequest(wire([['Authorization', 'Bearer existing']]));
-        const result = interceptor(request);
+    it.each(['Authorization', 'authorization', 'AUTHORIZATION'])(
+        'returns a request that already has an %s header unchanged',
+        header => {
+            const interceptor = createBearerTokenInterceptor({ getAccessToken: () => 'tok-abc' });
+            const request = makeRequest(wire([[header, 'Bearer existing']]));
 
-        expect(result).toBe(request);
-    });
-
-    it('returns the same reference when the request has a lowercase authorization header', () => {
-        const interceptor = createBearerTokenInterceptor({ getAccessToken: () => 'tok-abc' });
-        const request = makeRequest({ authorization: 'Bearer existing' });
-        const result = interceptor(request);
-
-        expect(result).toBe(request);
-    });
-
-    it('returns the same reference when the request has a mixed-case Authorization header', () => {
-        const interceptor = createBearerTokenInterceptor({ getAccessToken: () => 'tok-abc' });
-        const request = makeRequest(wire([['AUTHORIZATION', 'Bearer existing']]));
-        const result = interceptor(request);
-
-        expect(result).toBe(request);
-    });
+            expect(interceptor(request)).toBe(request);
+        },
+    );
 });

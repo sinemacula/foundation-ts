@@ -1,6 +1,5 @@
 /**
- * Unit tests for FetchHttpClient - response handling (success parsing, error
- * mapping, validation errors, and blob downloads).
+ * Tests for how FetchHttpClient parses responses and maps failures to errors.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -20,27 +19,16 @@ interface UserBody {
     readonly name: string;
 }
 
-// ---------------------------------------------------------------------------
-// Stub type
-// ---------------------------------------------------------------------------
-
-/** Explicit overload signature so mock.calls carries a typed tuple, not []. */
+/** The fetch call signature, so mock.calls carries a typed tuple. */
 type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 
 /** A constructor of the error type a rejection is expected to have. */
 type ErrorType<E extends Error> = new (...args: never[]) => E;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /**
  * Build a JSON response.
  *
- * @param body - the value to serialise
- * @param status - the response status
  * @param extra - additional response headers
- * @returns the response
  */
 function jsonResponse(body: unknown, status = 200, extra: Record<string, string> = {}): Response {
     return new Response(JSON.stringify(body), {
@@ -51,10 +39,6 @@ function jsonResponse(body: unknown, status = 200, extra: Record<string, string>
 
 /**
  * Build a plain-text response.
- *
- * @param body - the response text
- * @param status - the response status
- * @returns the response
  */
 function textResponse(body: string, status = 200): Response {
     return new Response(body, {
@@ -65,9 +49,6 @@ function textResponse(body: string, status = 200): Response {
 
 /**
  * Build a response without a body.
- *
- * @param status - the response status
- * @returns the response
  */
 function emptyResponse(status = 204): Response {
     return new Response(null, { status });
@@ -75,9 +56,6 @@ function emptyResponse(status = 204): Response {
 
 /**
  * Build an HTML error response.
- *
- * @param status - the response status
- * @returns the response
  */
 function nonJsonErrorResponse(status: number): Response {
     return new Response('<html>error</html>', {
@@ -88,9 +66,6 @@ function nonJsonErrorResponse(status: number): Response {
 
 /**
  * Wrap a fetch implementation in a typed stub.
- *
- * @param impl - the fetch implementation
- * @returns the stub
  */
 function makeFetch(
     impl: (...args: FetchArgs) => Promise<Response>,
@@ -100,10 +75,6 @@ function makeFetch(
 
 /**
  * Build a client against the stub with optional extra options.
- *
- * @param fetchFn - the fetch stub
- * @param extra - options to merge over the base URL and stub
- * @returns the client
  */
 function makeClient(
     fetchFn: typeof fetch,
@@ -114,10 +85,6 @@ function makeClient(
 
 /**
  * Await a request expected to reject with a given error type.
- *
- * @param promise - the pending request
- * @param type - the error type the rejection must have
- * @returns the rejection
  */
 async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: ErrorType<E>): Promise<E> {
     const error = await promise.catch((rejection: unknown) => rejection);
@@ -129,18 +96,10 @@ async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: Err
 
 /**
  * Request a path from a server sending one response, and return the rejection.
- *
- * @param response - the response the server sends
- * @param type - the error type the rejection must have
- * @returns the rejection
  */
 function rejectionFor<E extends Error>(response: Response, type: ErrorType<E>): Promise<E> {
     return rejectionOf(makeClient(makeFetch(async () => response)).get('/fail'), type);
 }
-
-// ---------------------------------------------------------------------------
-// Successful response parsing
-// ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - success response parsing', () => {
     it('returns undefined for an empty body', async () => {
@@ -170,9 +129,8 @@ describe('FetchHttpClient - success response parsing', () => {
         expect(result).toBe('hello world');
     });
 
-    it('returns the raw string when the content-type header is absent (null from headers.get)', async () => {
-        // A Blob with an empty MIME type produces a Response whose headers
-        // carry no content-type, exercising the ?? fallback branch.
+    it('returns the raw string when the content-type header is absent', async () => {
+        // An untyped Blob body leaves the response without a content-type.
         const fetchFn = makeFetch(async () => new Response(new Blob(['raw body'], { type: '' }), { status: 200 }));
         const client = makeClient(fetchFn);
 
@@ -182,10 +140,6 @@ describe('FetchHttpClient - success response parsing', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Non-ok response mapping
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - error response mapping', () => {
     it('uses the payload message when present', async () => {
         const error = await rejectionFor(jsonResponse({ message: 'custom error' }, 400), HttpError);
@@ -193,19 +147,16 @@ describe('FetchHttpClient - error response mapping', () => {
         expect(error.message).toBe('custom error');
     });
 
-    it('uses a generic status message when payload has no message', async () => {
-        const error = await rejectionFor(jsonResponse({ code: 'E001' }, 400), HttpError);
+    it.each([
+        ['has no message', { code: 'E001' }],
+        ['is not a record', 'not a record'],
+    ])('uses a generic status message when the payload %s', async (_case, body) => {
+        const error = await rejectionFor(jsonResponse(body, 400), HttpError);
 
         expect(error.message).toBe('Request failed with status 400.');
     });
 
-    it('uses a generic status message when payload is not a record', async () => {
-        const error = await rejectionFor(jsonResponse('not a record', 400), HttpError);
-
-        expect(error.message).toBe('Request failed with status 400.');
-    });
-
-    it('sets payload to null when error body is not JSON', async () => {
+    it('sets the payload to null when the error body is not JSON', async () => {
         const error = await rejectionFor(nonJsonErrorResponse(500), HttpError);
 
         expect(error.payload).toBeNull();
@@ -257,16 +208,10 @@ describe('FetchHttpClient - error response mapping', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// API error envelope
-// ---------------------------------------------------------------------------
-
 /**
  * Build an API error envelope response.
  *
- * @param status - the response status
- * @param error - the envelope's `error` object
- * @returns the response
+ * @param error - the envelope's `error` object, without its status
  */
 function envelopeResponse(status: number, error: Record<string, unknown>): Response {
     return jsonResponse({ error: { status, ...error } }, status);
@@ -289,9 +234,6 @@ const MISTYPED_COST_VALUES: Readonly<Record<(typeof COST_FIELDS)[number], unknow
 
 /**
  * Build the complete query-cost meta without one of its fields.
- *
- * @param field - the field to leave out
- * @returns the meta without the field
  */
 function costMetaWithout(field: (typeof COST_FIELDS)[number]): Record<string, unknown> {
     return Object.fromEntries(Object.entries(COST_META).filter(([key]) => key !== field));
@@ -419,7 +361,7 @@ describe('FetchHttpClient - API error envelope', () => {
         },
     );
 
-    it('builds a MaintenanceError for the maintenance code, distinct from a plain 503', async () => {
+    it('builds a MaintenanceError for the maintenance code but not for a plain 503', async () => {
         const maintenance = await rejectionFor(
             envelopeResponse(503, { code: 10200, title: 'Maintenance' }),
             MaintenanceError,
@@ -446,10 +388,6 @@ describe('FetchHttpClient - API error envelope', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Response-error handler
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - response-error handler', () => {
     it('notifies the handler with the HttpError and the resolved request on a non-ok response', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ message: 'boom' }, 500));
@@ -469,7 +407,7 @@ describe('FetchHttpClient - response-error handler', () => {
         });
     });
 
-    it('does not notify the handler when the request opts out with notifyOnError: false', async () => {
+    it('does not notify the handler when the request opts out', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({}, 500));
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, { onResponseError });
@@ -479,7 +417,7 @@ describe('FetchHttpClient - response-error handler', () => {
         expect(onResponseError).not.toHaveBeenCalled();
     });
 
-    it('does not attempt to notify when no response-error handler is configured', async () => {
+    it('rejects with the HttpError when no handler is configured', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ message: 'boom' }, 500));
         const client = makeClient(fetchFn);
 
@@ -498,7 +436,7 @@ describe('FetchHttpClient - response-error handler', () => {
         expect(error.message).toBe('boom');
     });
 
-    it('does not notify the handler when an interceptor throws before the request is resolved', async () => {
+    it('does not notify the handler when an interceptor throws', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({}));
         const onResponseError = vi.fn();
         const interceptor = vi.fn(() => {
@@ -513,12 +451,8 @@ describe('FetchHttpClient - response-error handler', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Downloads
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - download', () => {
-    it('returns the response body as a Blob with the correct bytes', async () => {
+    it('returns the response body as a Blob', async () => {
         const fetchFn = makeFetch(async () => new Response(new Blob(['file bytes']), { status: 200 }));
         const client = makeClient(fetchFn);
 

@@ -1,6 +1,5 @@
 /**
- * Unit tests for FetchHttpClient - request construction (verbs, URLs, query
- * parameters, body/content-type, default headers).
+ * Tests for how FetchHttpClient builds the requests it sends.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -11,23 +10,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { FetchHttpClient } from './fetch-http-client';
 import type { HttpRequest } from './http-client';
 
-// ---------------------------------------------------------------------------
-// Stub type
-// ---------------------------------------------------------------------------
-
-/** Explicit overload signature so mock.calls carries a typed tuple, not []. */
+/** The fetch call signature, so mock.calls carries a typed tuple. */
 type FetchArgs = [input: Request | string | URL, init?: RequestInit];
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 /**
  * Build a JSON response.
- *
- * @param body - the value to serialise
- * @param status - the response status
- * @returns the response
  */
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
@@ -38,9 +25,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 /**
  * Build a response without a body.
- *
- * @param status - the response status
- * @returns the response
  */
 function emptyResponse(status = 204): Response {
     return new Response(null, { status });
@@ -48,9 +32,6 @@ function emptyResponse(status = 204): Response {
 
 /**
  * Wrap a fetch implementation in a typed stub.
- *
- * @param impl - the fetch implementation
- * @returns the stub
  */
 function makeFetch(
     impl: (...args: FetchArgs) => Promise<Response>,
@@ -60,10 +41,6 @@ function makeFetch(
 
 /**
  * Build a client against the stub with optional extra options.
- *
- * @param fetchFn - the fetch stub
- * @param extra - options to merge over the base URL and stub
- * @returns the client
  */
 function makeClient(
     fetchFn: typeof fetch,
@@ -73,10 +50,7 @@ function makeClient(
 }
 
 /**
- * Return the URL from the most-recent call to a fetch stub.
- *
- * @param fn - the fetch stub
- * @returns the URL string
+ * Return the URL from the most recent call to a fetch stub.
  */
 function lastUrl(fn: ReturnType<typeof makeFetch>): string {
     const call = fn.mock.calls.at(-1);
@@ -86,10 +60,8 @@ function lastUrl(fn: ReturnType<typeof makeFetch>): string {
 }
 
 /**
- * Return the RequestInit from the most-recent call to a fetch stub.
- *
- * @param fn - the fetch stub
- * @returns the RequestInit object (may be undefined when not passed)
+ * Return the RequestInit from the most recent call to a fetch stub, or an empty
+ * one when none was passed.
  */
 function lastInit(fn: ReturnType<typeof makeFetch>): RequestInit {
     const call = fn.mock.calls.at(-1);
@@ -98,21 +70,25 @@ function lastInit(fn: ReturnType<typeof makeFetch>): RequestInit {
 }
 
 /**
- * Return the headers record from the most-recent call to a fetch stub.
- *
- * @param fn - the fetch stub
- * @returns the headers as a plain record
+ * Return the headers record from the most recent call to a fetch stub.
  */
 function lastHeaders(fn: ReturnType<typeof makeFetch>): Record<string, string> {
     return (lastInit(fn).headers ?? {}) as Record<string, string>;
 }
 
-// ---------------------------------------------------------------------------
-// HTTP verbs
-// ---------------------------------------------------------------------------
+/**
+ * Build a FormData carrying one file.
+ */
+function formDataWithFile(): FormData {
+    const formData = new FormData();
+
+    formData.append('file', new Blob(['content']), 'file.txt');
+
+    return formData;
+}
 
 describe('FetchHttpClient - verbs', () => {
-    it('GET sends a GET request to the correct URL', async () => {
+    it('sends a GET request to the resolved URL', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ ok: true }));
         const client = makeClient(fetchFn);
 
@@ -122,146 +98,52 @@ describe('FetchHttpClient - verbs', () => {
         expect(lastInit(fetchFn).method).toBe('GET');
     });
 
-    it('POST sends a POST request and resolves the parsed body', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({ id: 1 }));
-        const client = makeClient(fetchFn);
+    it.each([
+        ['POST', { id: 1 }, (client: FetchHttpClient) => client.post('/users', { name: 'Alice' })],
+        ['PUT', { id: 1, name: 'Bob' }, (client: FetchHttpClient) => client.put('/users/1', { name: 'Bob' })],
+        ['PATCH', { id: 1, active: false }, (client: FetchHttpClient) => client.patch('/users/1', { active: false })],
+        ['DELETE', { deleted: true }, (client: FetchHttpClient) => client.delete('/users/1')],
+    ] as const)('sends a %s request and resolves the parsed body', async (verb, body, invoke) => {
+        const fetchFn = makeFetch(async () => jsonResponse(body));
 
-        const result = await client.post('/users', { name: 'Alice' });
+        const result = await invoke(makeClient(fetchFn));
 
-        expect(lastInit(fetchFn).method).toBe('POST');
-        expect(result).toEqual({ id: 1 });
-    });
-
-    it('PUT sends a PUT request and resolves the parsed body', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({ id: 1, name: 'Bob' }));
-        const client = makeClient(fetchFn);
-
-        const result = await client.put('/users/1', { name: 'Bob' });
-
-        expect(lastInit(fetchFn).method).toBe('PUT');
-        expect(result).toEqual({ id: 1, name: 'Bob' });
-    });
-
-    it('PATCH sends a PATCH request and resolves the parsed body', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({ id: 1, active: false }));
-        const client = makeClient(fetchFn);
-
-        const result = await client.patch('/users/1', { active: false });
-
-        expect(lastInit(fetchFn).method).toBe('PATCH');
-        expect(result).toEqual({ id: 1, active: false });
-    });
-
-    it('DELETE sends a DELETE request and resolves the parsed body', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({ deleted: true }));
-        const client = makeClient(fetchFn);
-
-        const result = await client.delete('/users/1');
-
-        expect(lastInit(fetchFn).method).toBe('DELETE');
-        expect(result).toEqual({ deleted: true });
+        expect(lastInit(fetchFn).method).toBe(verb);
+        expect(result).toEqual(body);
     });
 });
-
-// ---------------------------------------------------------------------------
-// URL construction
-// ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - URL construction', () => {
-    it('trims a trailing slash from baseUrl', async () => {
+    it.each([
+        ['trims a trailing slash from the base URL', 'https://api.example.com/', '/items', '/items'],
+        ['trims a leading slash from the path', 'https://api.example.com', '/items', '/items'],
+        ['handles a path without a leading slash', 'https://api.example.com', 'items', '/items'],
+        ['trims multiple leading slashes from the path', 'https://api.example.com', '///items', '/items'],
+        ['trims multiple trailing slashes from the base URL', 'https://api.example.com//', '/items', '/items'],
+        ['preserves interior slashes in the path', 'https://api.example.com', 'users/1/orders', '/users/1/orders'],
+    ])('%s', async (_case, baseUrl, path, expected) => {
         const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = new FetchHttpClient({ baseUrl: 'https://api.example.com/', fetchFn });
+        const client = new FetchHttpClient({ baseUrl, fetchFn });
 
-        await client.get('/items');
+        await client.get(path);
 
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/items');
-    });
-
-    it('trims a leading slash from path', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn);
-
-        await client.get('/items');
-
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/items');
-    });
-
-    it('handles a path without a leading slash', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn);
-
-        await client.get('items');
-
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/items');
-    });
-
-    it('trims multiple leading slashes from path', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn);
-
-        await client.get('///items');
-
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/items');
-    });
-
-    it('trims multiple trailing slashes from baseUrl', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = new FetchHttpClient({ baseUrl: 'https://api.example.com//', fetchFn });
-
-        await client.get('/items');
-
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/items');
-    });
-
-    it('preserves interior slashes in the path', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({}));
-        const client = makeClient(fetchFn);
-
-        await client.get('users/1/orders');
-
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/users/1/orders');
+        expect(lastUrl(fetchFn)).toBe(`https://api.example.com${expected}`);
     });
 });
 
-// ---------------------------------------------------------------------------
-// Query parameters
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - query parameters', () => {
-    it('appends string query params', async () => {
+    it.each([
+        ['appends a string query param', { q: 'hello' }, '/items?q=hello'],
+        ['appends a number query param', { page: 2 }, '/items?page=2'],
+        ['appends a boolean query param', { active: true }, '/items?active=true'],
+        ['skips an undefined query param', { page: undefined }, '/items'],
+    ])('%s', async (_case, query, expected) => {
         const fetchFn = makeFetch(async () => jsonResponse([]));
         const client = makeClient(fetchFn);
 
-        await client.get('/search', { query: { q: 'hello' } });
+        await client.get('/items', { query });
 
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/search?q=hello');
-    });
-
-    it('appends number query params', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse([]));
-        const client = makeClient(fetchFn);
-
-        await client.get('/items', { query: { page: 2 } });
-
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/items?page=2');
-    });
-
-    it('appends boolean query params', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse([]));
-        const client = makeClient(fetchFn);
-
-        await client.get('/items', { query: { active: true } });
-
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/items?active=true');
-    });
-
-    it('skips undefined query param values', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse([]));
-        const client = makeClient(fetchFn);
-
-        await client.get('/items', { query: { page: undefined } });
-
-        expect(lastUrl(fetchFn)).toBe('https://api.example.com/items');
+        expect(lastUrl(fetchFn)).toBe(`https://api.example.com${expected}`);
     });
 
     it('omits the ? when there are no query params', async () => {
@@ -274,10 +156,6 @@ describe('FetchHttpClient - query parameters', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Request body & content-type
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - body and content-type', () => {
     it('serialises the body to JSON for POST', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ id: 1 }));
@@ -288,7 +166,7 @@ describe('FetchHttpClient - body and content-type', () => {
         expect(lastInit(fetchFn).body).toBe('{"name":"Alice"}');
     });
 
-    it('adds content-type application/json when body is present and header absent', async () => {
+    it('adds a JSON content-type to a body without one', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ id: 1 }));
         const client = makeClient(fetchFn);
 
@@ -309,7 +187,7 @@ describe('FetchHttpClient - body and content-type', () => {
         expect(headers['x-request-id']).toBe('abc');
     });
 
-    it('does not override Content-Type when caller sets it (title-case)', async () => {
+    it('keeps a title-case Content-Type the caller sets', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ id: 1 }));
         const client = makeClient(fetchFn);
 
@@ -321,7 +199,7 @@ describe('FetchHttpClient - body and content-type', () => {
         expect(headers['content-type']).toBeUndefined();
     });
 
-    it('does not override content-type when caller sets it (lowercase)', async () => {
+    it('keeps a lowercase content-type the caller sets', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({ id: 1 }));
         const client = makeClient(fetchFn);
 
@@ -330,58 +208,32 @@ describe('FetchHttpClient - body and content-type', () => {
         expect(lastHeaders(fetchFn)['content-type']).toBe('text/csv');
     });
 
-    it('sends no body and no content-type for GET', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse([]));
-        const client = makeClient(fetchFn);
+    it.each([
+        ['GET', (client: FetchHttpClient) => client.get('/items'), jsonResponse([])],
+        ['DELETE', (client: FetchHttpClient) => client.delete('/items/1'), emptyResponse(204)],
+    ] as const)('sends no body and no content-type for %s', async (_verb, invoke, response) => {
+        const fetchFn = makeFetch(async () => response);
 
-        await client.get('/items');
+        await invoke(makeClient(fetchFn));
 
-        const init = lastInit(fetchFn);
         const headerKeys = Object.keys(lastHeaders(fetchFn)).map(headerKey => headerKey.toLowerCase());
 
-        expect(init.body).toBeUndefined();
+        expect(lastInit(fetchFn).body).toBeUndefined();
         expect(headerKeys).not.toContain('content-type');
     });
 
-    it('sends no body and no content-type for DELETE', async () => {
-        const fetchFn = makeFetch(async () => emptyResponse(204));
-        const client = makeClient(fetchFn);
-
-        await client.delete('/items/1');
-
-        const init = lastInit(fetchFn);
-        const headerKeys = Object.keys(lastHeaders(fetchFn)).map(headerKey => headerKey.toLowerCase());
-
-        expect(init.body).toBeUndefined();
-        expect(headerKeys).not.toContain('content-type');
-    });
-
-    it('passes a FormData body through unchanged and does not set content-type', async () => {
+    it.each([
+        ['FormData', formDataWithFile()],
+        ['Blob', new Blob(['binary data'], { type: 'application/octet-stream' })],
+    ])('passes a %s body through unchanged without a content-type', async (_type, body) => {
         const fetchFn = makeFetch(async () => jsonResponse({ ok: true }));
         const client = makeClient(fetchFn);
-        const formData = new FormData();
-        formData.append('file', new Blob(['content']), 'file.txt');
 
-        await client.post('/uploads', formData);
+        await client.post('/uploads', body);
 
-        const init = lastInit(fetchFn);
         const headerKeys = Object.keys(lastHeaders(fetchFn)).map(headerKey => headerKey.toLowerCase());
 
-        expect(init.body).toBe(formData);
-        expect(headerKeys).not.toContain('content-type');
-    });
-
-    it('passes a Blob body through unchanged and does not set content-type', async () => {
-        const fetchFn = makeFetch(async () => jsonResponse({ ok: true }));
-        const client = makeClient(fetchFn);
-        const blob = new Blob(['binary data'], { type: 'application/octet-stream' });
-
-        await client.post('/uploads', blob);
-
-        const init = lastInit(fetchFn);
-        const headerKeys = Object.keys(lastHeaders(fetchFn)).map(headerKey => headerKey.toLowerCase());
-
-        expect(init.body).toBe(blob);
+        expect(lastInit(fetchFn).body).toBe(body);
         expect(headerKeys).not.toContain('content-type');
     });
 
@@ -395,10 +247,6 @@ describe('FetchHttpClient - body and content-type', () => {
         expect(lastHeaders(fetchFn)['x-trace']).toBe('1');
     });
 });
-
-// ---------------------------------------------------------------------------
-// Default headers
-// ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - defaultHeaders', () => {
     it('merges default headers into every request', async () => {
@@ -419,10 +267,6 @@ describe('FetchHttpClient - defaultHeaders', () => {
         expect(lastHeaders(fetchFn)['x-api-key']).toBe('override');
     });
 });
-
-// ---------------------------------------------------------------------------
-// Accept header
-// ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - accept header', () => {
     it('asks for JSON by default', async () => {
@@ -493,10 +337,6 @@ describe('FetchHttpClient - accept header', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Credentials
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - credentials', () => {
     it.each(['omit', 'same-origin', 'include'] as const)(
         'sends the %s credentials mode to fetch',
@@ -519,7 +359,7 @@ describe('FetchHttpClient - credentials', () => {
         expect(lastInit(fetchFn)).not.toHaveProperty('credentials');
     });
 
-    it('carries the credentials mode on the request interceptors resolve', async () => {
+    it('shows interceptors the credentials mode and sends the one they return', async () => {
         const seen: HttpRequest[] = [];
         const fetchFn = makeFetch(async () => jsonResponse({}));
         const client = makeClient(fetchFn, {

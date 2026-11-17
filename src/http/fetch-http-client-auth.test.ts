@@ -1,6 +1,5 @@
 /**
- * Unit tests for FetchHttpClient - authentication flows, network errors,
- * cancellation, default fetch fallback, and download-specific auth handling.
+ * Tests for FetchHttpClient interceptors, 401 handling and transport failures.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -23,26 +22,14 @@ interface GlobalBody {
     readonly global: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Stub type
-// ---------------------------------------------------------------------------
-
-/** Explicit overload signature so mock.calls carries a typed tuple, not []. */
+/** The fetch call signature, so mock.calls carries a typed tuple. */
 type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 
 /** A constructor of the error type a rejection is expected to have. */
 type ErrorType<E extends Error> = new (...args: never[]) => E;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /**
  * Build a JSON response.
- *
- * @param body - the value to serialise
- * @param status - the response status
- * @returns the response
  */
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
@@ -53,9 +40,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 /**
  * Wrap a fetch implementation in a typed stub.
- *
- * @param impl - the fetch implementation
- * @returns the stub
  */
 function makeFetch(
     impl: (...args: FetchArgs) => Promise<Response>,
@@ -65,10 +49,6 @@ function makeFetch(
 
 /**
  * Build a client against the stub with optional extra options.
- *
- * @param fetchFn - the fetch stub
- * @param extra - options to merge over the base URL and stub
- * @returns the client
  */
 function makeClient(
     fetchFn: typeof fetch,
@@ -78,10 +58,8 @@ function makeClient(
 }
 
 /**
- * Return the RequestInit from the most-recent call to a fetch stub.
- *
- * @param fn - the fetch stub
- * @returns the RequestInit object (may be undefined when not passed)
+ * Return the RequestInit from the most recent call to a fetch stub, or an empty
+ * one when none was passed.
  */
 function lastInit(fn: ReturnType<typeof makeFetch>): RequestInit {
     const call = fn.mock.calls.at(-1);
@@ -90,10 +68,7 @@ function lastInit(fn: ReturnType<typeof makeFetch>): RequestInit {
 }
 
 /**
- * Return the headers record from the most-recent call to a fetch stub.
- *
- * @param fn - the fetch stub
- * @returns the headers as a plain record
+ * Return the headers record from the most recent call to a fetch stub.
  */
 function lastHeaders(fn: ReturnType<typeof makeFetch>): Record<string, string> {
     return (lastInit(fn).headers ?? {}) as Record<string, string>;
@@ -101,10 +76,6 @@ function lastHeaders(fn: ReturnType<typeof makeFetch>): Record<string, string> {
 
 /**
  * Await a request expected to reject with a given error type.
- *
- * @param promise - the pending request
- * @param type - the error type the rejection must have
- * @returns the rejection
  */
 async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: ErrorType<E>): Promise<E> {
     const error = await promise.catch((rejection: unknown) => rejection);
@@ -113,10 +84,6 @@ async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: Err
 
     return error as E;
 }
-
-// ---------------------------------------------------------------------------
-// Request interceptors
-// ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - request interceptors', () => {
     it('runs zero interceptors without error', async () => {
@@ -154,7 +121,7 @@ describe('FetchHttpClient - request interceptors', () => {
         expect(order).toStrictEqual([1, 2]);
     });
 
-    it('each interceptor receives the output of the previous one', async () => {
+    it('passes each interceptor the output of the one before', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({}));
         const first = vi.fn(request => ({ ...request, headers: { ...request.headers, 'x-first': 'yes' } }));
         const second = vi.fn(request => ({ ...request, headers: { ...request.headers, 'x-second': 'yes' } }));
@@ -182,26 +149,9 @@ describe('FetchHttpClient - request interceptors', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// 401 / unauthorized handling
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - 401 unauthorized handling', () => {
-    it('retries the request exactly once when onUnauthorized returns true', async () => {
-        const fetchFn = vi
-            .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValueOnce(new Response('', { status: 401 }))
-            .mockResolvedValueOnce(jsonResponse({ retried: true }));
-        const onUnauthorized = vi.fn().mockResolvedValue(true);
-        const client = makeClient(fetchFn, { onUnauthorized });
-
-        const result = await client.get<RetriedBody>('/secure');
-
-        expect(fetchFn).toHaveBeenCalledTimes(2);
-        expect(result).toStrictEqual({ retried: true });
-    });
-
     it.each([
+        ['get', (client: FetchHttpClient) => client.get<RetriedBody>('/secure')],
         ['post', (client: FetchHttpClient) => client.post<RetriedBody>('/secure', { a: 1 })],
         ['put', (client: FetchHttpClient) => client.put<RetriedBody>('/secure', { a: 1 })],
         ['patch', (client: FetchHttpClient) => client.patch<RetriedBody>('/secure', { a: 1 })],
@@ -234,7 +184,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
         expect(fetchFn).toHaveBeenCalledTimes(1);
     });
 
-    it('throws HttpError(401) and does not retry when onUnauthorized returns false', async () => {
+    it('rejects with the 401 without retrying when the refresh fails', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockImplementation(async () => new Response('', { status: 401 }));
@@ -288,7 +238,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
         expect(onUnauthorized).toHaveBeenCalledTimes(1);
     });
 
-    it('throws HttpError(401) immediately when no onUnauthorized handler is configured', async () => {
+    it('rejects with the 401 when no unauthorized handler is configured', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockImplementation(async () => new Response('', { status: 401 }));
@@ -326,7 +276,7 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
         expect(onResponseError).not.toHaveBeenCalled();
     });
 
-    it('notifies the response-error handler once with the final error when the retry also fails', async () => {
+    it('notifies the response-error handler once when the retry also fails', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockImplementation(async () => new Response('', { status: 401 }));
@@ -340,10 +290,6 @@ describe('FetchHttpClient - 401 unauthorized handling', () => {
         expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
     });
 });
-
-// ---------------------------------------------------------------------------
-// download() - interceptors and 401 handling
-// ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - download interceptors and 401 handling', () => {
     it('applies a bearer-token interceptor to download requests', async () => {
@@ -387,12 +333,8 @@ describe('FetchHttpClient - download interceptors and 401 handling', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Network failure
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - network failure', () => {
-    it('throws a NetworkError naming the failed request and carrying the rejection when fetch rejects', async () => {
+    it('throws a NetworkError naming the request when fetch rejects', async () => {
         const cause = new TypeError('Failed to fetch');
         const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(cause);
         const client = makeClient(fetchFn);
@@ -403,7 +345,7 @@ describe('FetchHttpClient - network failure', () => {
         expect(error.cause).toBe(cause);
     });
 
-    it('notifies the response-error handler with the NetworkError on transport failure', async () => {
+    it('notifies the response-error handler of the NetworkError', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockRejectedValue(new TypeError('Failed to fetch'));
@@ -416,7 +358,7 @@ describe('FetchHttpClient - network failure', () => {
         expect(onResponseError).toHaveBeenCalledWith(error, expect.objectContaining({ method: 'GET' }));
     });
 
-    it('throws NetworkError, not CancelledError, when a present signal is not aborted', async () => {
+    it('throws a NetworkError when the caller signal has not aborted', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockRejectedValue(new TypeError('Failed to fetch'));
@@ -426,10 +368,6 @@ describe('FetchHttpClient - network failure', () => {
         await rejectionOf(client.get('/items', { signal: controller.signal }), NetworkError);
     });
 });
-
-// ---------------------------------------------------------------------------
-// Cancellation
-// ---------------------------------------------------------------------------
 
 describe('FetchHttpClient - cancellation', () => {
     it.each([
@@ -472,10 +410,6 @@ describe('FetchHttpClient - cancellation', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// Default fetchFn - uses globalThis.fetch
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - default fetchFn', () => {
     afterEach(() => {
         vi.unstubAllGlobals();
@@ -494,20 +428,12 @@ describe('FetchHttpClient - default fetchFn', () => {
     });
 });
 
-// ---------------------------------------------------------------------------
-// RN runtime fallbacks
-// ---------------------------------------------------------------------------
-
 describe('FetchHttpClient - runtime fallbacks', () => {
-    it('treats a non-object fetch rejection as a network failure', async () => {
-        const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue('boom');
-        const client = makeClient(fetchFn);
-
-        await rejectionOf(client.get('/items'), NetworkError);
-    });
-
-    it('treats a null fetch rejection as a network failure', async () => {
-        const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(null);
+    it.each([
+        ['non-object', 'boom'],
+        ['null', null],
+    ])('treats a %s fetch rejection as a network failure', async (_case, rejection) => {
+        const fetchFn = vi.fn<(...args: FetchArgs) => Promise<Response>>().mockRejectedValue(rejection);
         const client = makeClient(fetchFn);
 
         await rejectionOf(client.get('/items'), NetworkError);

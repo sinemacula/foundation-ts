@@ -1,5 +1,5 @@
 /**
- * Unit tests for FetchHttpClient - opt-in transient retry policy.
+ * Tests for the FetchHttpClient opt-in transient retry policy.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -18,26 +18,14 @@ interface RecoveredBody {
     readonly recovered: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Stub type
-// ---------------------------------------------------------------------------
-
-/** Explicit overload signature so mock.calls carries a typed tuple, not []. */
+/** The fetch call signature, so mock.calls carries a typed tuple. */
 type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 
 /** A constructor of the error type a rejection is expected to have. */
 type ErrorType<E extends Error> = new (...args: never[]) => E;
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /**
  * Build a JSON response.
- *
- * @param body - the value to serialise
- * @param status - the response status
- * @returns the response
  */
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), {
@@ -48,10 +36,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 /**
  * Build a client against the stub with optional extra options.
- *
- * @param fetchFn - the fetch stub
- * @param extra - options to merge over the base URL and stub
- * @returns the client
  */
 function makeClient(
     fetchFn: typeof fetch,
@@ -62,10 +46,6 @@ function makeClient(
 
 /**
  * Await a request expected to reject with a given error type.
- *
- * @param promise - the pending request
- * @param type - the error type the rejection must have
- * @returns the rejection
  */
 async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: ErrorType<E>): Promise<E> {
     const error = await promise.catch((rejection: unknown) => rejection);
@@ -75,7 +55,9 @@ async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: Err
     return error as E;
 }
 
-/** Fixed-delay backoff for deterministic retry-delay assertions. */
+/**
+ * Build a backoff that always waits the given delay.
+ */
 function fixedBackoff(delay: number): ExponentialBackoff {
     return new ExponentialBackoff({ initialDelay: delay, multiplier: 1, maxDelay: delay });
 }
@@ -89,7 +71,7 @@ describe('FetchHttpClient - transient retry', () => {
         vi.useRealTimers();
     });
 
-    it('recovers after one 503, awaiting the backoff delay before the next attempt', async () => {
+    it('recovers from a 503 after the backoff delay', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockResolvedValueOnce(jsonResponse({}, 503))
@@ -107,7 +89,7 @@ describe('FetchHttpClient - transient retry', () => {
         await expect(pending).resolves.toStrictEqual({ recovered: true });
     });
 
-    it('recovers after a NetworkError then succeeds', async () => {
+    it('recovers from a NetworkError', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockRejectedValueOnce(new TypeError('Failed to fetch'))
@@ -122,7 +104,7 @@ describe('FetchHttpClient - transient retry', () => {
         expect(fetchFn).toHaveBeenCalledTimes(2);
     });
 
-    it('uses the default retry attempts and backoff when retry is enabled without options', async () => {
+    it('defaults the attempts and backoff when retry is enabled without options', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockResolvedValueOnce(jsonResponse({}, 503))
@@ -132,7 +114,7 @@ describe('FetchHttpClient - transient retry', () => {
 
         const pending = client.get<RecoveredBody>('/items');
 
-        // Default ExponentialBackoff: 1 000 ms then 2 000 ms.
+        // The default backoff waits 1000ms, then 2000ms.
         await vi.advanceTimersByTimeAsync(1_000);
         expect(fetchFn).toHaveBeenCalledTimes(2);
 
@@ -142,7 +124,7 @@ describe('FetchHttpClient - transient retry', () => {
         await expect(pending).resolves.toStrictEqual({ recovered: true });
     });
 
-    it('exhausts the retry budget then throws the final error with one notification', async () => {
+    it('throws the final error with one notification once the budget is spent', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockImplementation(async () => jsonResponse({}, 503));
@@ -204,7 +186,7 @@ describe('FetchHttpClient - transient retry', () => {
         expect(fetchFn).toHaveBeenCalledTimes(1);
     });
 
-    it('accepts any structural backoff exposing delayFor', async () => {
+    it('accepts any backoff exposing delayFor', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockResolvedValueOnce(jsonResponse({}, 502))
@@ -253,7 +235,7 @@ describe('FetchHttpClient - transient retry', () => {
         expect(fetchFn).toHaveBeenCalledTimes(2);
     });
 
-    it('retries a transport failure an interceptor throws before the request resolves', async () => {
+    it('retries a transport failure thrown by an interceptor', async () => {
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()
             .mockResolvedValueOnce(jsonResponse({ recovered: true }));
@@ -291,7 +273,7 @@ describe('FetchHttpClient - transient retry', () => {
         expect(fetchFn).toHaveBeenCalledTimes(2);
     });
 
-    it('stops when the caller aborts a retried attempt, without a further attempt or notification', async () => {
+    it('stops without notifying when the caller aborts a retried attempt', async () => {
         const caller = new AbortController();
         const fetchFn = vi
             .fn<(...args: FetchArgs) => Promise<Response>>()

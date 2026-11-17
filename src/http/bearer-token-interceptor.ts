@@ -1,9 +1,5 @@
 /**
- * Bearer-token request interceptor.
- *
- * Attaches `Authorization: Bearer <token>` to outgoing requests. The token
- * comes from an {@link AccessTokenProvider} port so the HTTP layer stays
- * decoupled from any particular auth store.
+ * Request interceptor attaching a bearer token from an access-token port.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,12 +20,9 @@ export interface AccessTokenProvider {
 }
 
 /**
- * Build an interceptor that attaches the provider's token to each request.
- *
- * Requests that already carry an Authorization header are left untouched.
- *
- * @param provider - the access token provider
- * @returns the request interceptor
+ * Build an interceptor that sends the provider's token as a bearer
+ * Authorization header, leaving a request untouched when there is no token or
+ * it already carries one.
  */
 export function createBearerTokenInterceptor(provider: AccessTokenProvider): RequestInterceptor {
     return (request: HttpRequest): HttpRequest => {
@@ -47,10 +40,8 @@ export function createBearerTokenInterceptor(provider: AccessTokenProvider): Req
 }
 
 /**
- * Determine whether a request already carries an Authorization header.
- *
- * @param request - the outgoing request
- * @returns true when an Authorization header is present
+ * Determine whether a request already carries an Authorization header,
+ * case-insensitively.
  */
 function hasAuthorizationHeader(request: HttpRequest): boolean {
     return Object.keys(request.headers).some(key => key.toLowerCase() === 'authorization');

@@ -1,5 +1,5 @@
 /**
- * Unit tests for token-refresh-coordinator.
+ * Tests for the single-flight token refresh coordinator.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -22,9 +22,7 @@ interface Deferred<T> {
 }
 
 /**
- * Create a deferred promise so tests can control resolution timing.
- *
- * @returns the promise and its settlers
+ * Create a promise whose settlement the test controls.
  */
 function deferred<T>(): Deferred<T> {
     let resolve!: (value: T) => void;
@@ -45,7 +43,7 @@ interface Outcome {
 }
 
 describe('TokenRefreshCoordinator', () => {
-    it('calls the refresher once for a single refresh call', async () => {
+    it('calls the refresher once for a single refresh', async () => {
         const refreshFn = vi.fn().mockResolvedValue(true);
         const coordinator = new TokenRefreshCoordinator({ refresh: refreshFn });
 
@@ -91,7 +89,7 @@ describe('TokenRefreshCoordinator', () => {
         expect(secondResult).toBe(true);
     });
 
-    it('triggers a fresh refresher call after the first settles', async () => {
+    it('refreshes again once the first refresh settles', async () => {
         const refreshFn = vi.fn().mockResolvedValue(true);
         const coordinator = new TokenRefreshCoordinator({ refresh: refreshFn });
 
@@ -114,7 +112,7 @@ describe('TokenRefreshCoordinator', () => {
         expect(refreshFn).toHaveBeenCalledTimes(2);
     });
 
-    it('concurrent calls all reject when the refresher rejects', async () => {
+    it('rejects every concurrent caller when the refresher rejects', async () => {
         const { promise, reject } = deferred<boolean>();
         const refreshFn = vi.fn(() => promise);
         const coordinator = new TokenRefreshCoordinator({ refresh: refreshFn });

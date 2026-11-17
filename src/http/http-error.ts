@@ -1,8 +1,5 @@
 /**
- * Error hierarchy for the HTTP layer.
- *
- * Every failure a client surfaces is one of these types, so callers branch on
- * `instanceof` and never inspect raw fetch internals.
+ * The HTTP layer's error hierarchy, which callers branch on with `instanceof`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

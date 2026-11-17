@@ -1,6 +1,5 @@
 /**
- * Unit tests for FetchHttpClient - abort signals, the request timeout, body
- * read failures, and cancellation during a retry backoff.
+ * Tests for FetchHttpClient abort signals, timeouts and body read failures.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -11,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FetchHttpClient } from './fetch-http-client';
 import { CancelledError, HttpError, NetworkError, ResponseParseError, TimeoutError } from './http-error';
 
-/** Explicit overload signature so mock.calls carries a typed tuple, not []. */
+/** The fetch call signature, so mock.calls carries a typed tuple. */
 type FetchArgs = [input: Request | string | URL, init?: RequestInit];
 
 /** A typed fetch stub. */
@@ -22,10 +21,6 @@ type ErrorType<E extends Error> = new (...args: never[]) => E;
 
 /**
  * Build a JSON response.
- *
- * @param body - the value to serialise
- * @param status - the response status
- * @returns the response
  */
 function jsonResponse(body: unknown, status = 200): Response {
     return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
@@ -33,10 +28,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 /**
  * Build a JSON-typed response whose body stream is driven by a start hook.
- *
- * @param start - receives the stream controller when the stream starts
- * @param status - the response status
- * @returns the response
  */
 function streamedResponse(
     start: (controller: ReadableStreamDefaultController<Uint8Array>) => void,
@@ -50,9 +41,6 @@ function streamedResponse(
 
 /**
  * Wrap a fetch implementation in a typed stub.
- *
- * @param impl - the fetch implementation
- * @returns the stub
  */
 function makeFetch(impl: (...args: FetchArgs) => Promise<Response>): FetchStub {
     return vi.fn<(...args: FetchArgs) => Promise<Response>>(impl);
@@ -60,10 +48,6 @@ function makeFetch(impl: (...args: FetchArgs) => Promise<Response>): FetchStub {
 
 /**
  * Build a client against the stub with optional extra options.
- *
- * @param fetchFn - the fetch stub
- * @param extra - options to merge over the base URL and stub
- * @returns the client
  */
 function makeClient(
     fetchFn: typeof fetch,
@@ -74,10 +58,6 @@ function makeClient(
 
 /**
  * Await a request expected to reject with a given error type.
- *
- * @param promise - the pending request
- * @param type - the error type the rejection must have
- * @returns the rejection
  */
 async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: ErrorType<E>): Promise<E> {
     const error = await promise.catch((rejection: unknown) => rejection);
@@ -89,22 +69,14 @@ async function rejectionOf<E extends Error>(promise: Promise<unknown>, type: Err
 
 /**
  * Read the signal handed to the most recent fetch call.
- *
- * @param fn - the fetch stub
- * @returns the signal, or null/undefined when none was passed
  */
 function lastSignal(fn: FetchStub): AbortSignal | null | undefined {
     return fn.mock.calls.at(-1)?.[1]?.signal;
 }
 
 /**
- * A fetch implementation that mimics real fetch's abort behaviour: it rejects
- * with the signal's reason as soon as its signal aborts, and otherwise never
- * settles.
- *
- * @param _input - the request URL, unused
- * @param init - the request init carrying the signal
- * @returns a response promise that only ever rejects
+ * A fetch implementation that, like real fetch, rejects with the signal's
+ * reason once its signal aborts, and otherwise never settles.
  */
 function hangUntilAborted(_input: FetchArgs[0], init?: RequestInit): Promise<Response> {
     const signal = init?.signal;
@@ -128,9 +100,7 @@ function hangUntilAborted(_input: FetchArgs[0], init?: RequestInit): Promise<Res
 
 /**
  * A fetch implementation that ignores its signal and fails as a dropped
- * connection after a delay.
- *
- * @returns a response promise that rejects after ten seconds
+ * connection after ten seconds.
  */
 function failAfterTenSeconds(): Promise<Response> {
     return new Promise<Response>((_resolve, reject) => {
@@ -143,8 +113,6 @@ function failAfterTenSeconds(): Promise<Response> {
 /**
  * A fetch stub whose response arrives at once but whose body only ends by
  * erroring with the signal's reason once the signal aborts.
- *
- * @returns the fetch stub
  */
 function makeHangingBodyFetch(): FetchStub {
     return makeFetch(async (_input, init) =>
@@ -158,9 +126,6 @@ function makeHangingBodyFetch(): FetchStub {
 
 /**
  * A response whose body stream fails partway, as on a connection reset.
- *
- * @param status - the response status
- * @returns the response
  */
 function resetBodyResponse(status = 200): Response {
     return streamedResponse(controller => {
@@ -221,7 +186,7 @@ describe('FetchHttpClient - request timeout', () => {
         vi.useRealTimers();
     });
 
-    it('rejects with a TimeoutError, a NetworkError subtype, once the timeout elapses', async () => {
+    it('rejects with a TimeoutError once the timeout elapses', async () => {
         const fetchFn = makeFetch(hangUntilAborted);
         const onResponseError = vi.fn();
         const client = makeClient(fetchFn, { timeout: 5_000, onResponseError });
@@ -266,7 +231,7 @@ describe('FetchHttpClient - request timeout', () => {
         }
     });
 
-    it('rejects with a CancelledError carrying the caller reason when the caller aborts first', async () => {
+    it('rejects with a CancelledError when the caller aborts first', async () => {
         const onResponseError = vi.fn();
         const client = makeClient(makeFetch(hangUntilAborted), { timeout: 5_000, onResponseError });
         const caller = new AbortController();
@@ -316,7 +281,7 @@ describe('FetchHttpClient - request timeout', () => {
         await pending;
     });
 
-    it('maps an AbortError that neither the timeout nor the caller caused to a NetworkError', async () => {
+    it('maps an AbortError neither the timeout nor the caller caused to a NetworkError', async () => {
         const cause = new DOMException('The operation was aborted.', 'AbortError');
         const client = makeClient(
             makeFetch(() => Promise.reject(cause)),
@@ -438,7 +403,7 @@ describe('FetchHttpClient - cancellation during retry backoff', () => {
         vi.useRealTimers();
     });
 
-    it('stops waiting and rejects with a CancelledError when the caller aborts during the backoff', async () => {
+    it('rejects with a CancelledError when the caller aborts during the backoff', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({}, 503));
         const onResponseError = vi.fn();
         const backoff = { delayFor: (): number => 10_000 };
@@ -460,7 +425,7 @@ describe('FetchHttpClient - cancellation during retry backoff', () => {
         expect(onResponseError).not.toHaveBeenCalled();
     });
 
-    it('names the redacted request URL when an interceptor failed before the request resolved', async () => {
+    it('names the redacted URL when an interceptor failed before the request resolved', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({}));
         const caller = new AbortController();
         const client = makeClient(fetchFn, {
@@ -484,7 +449,7 @@ describe('FetchHttpClient - cancellation during retry backoff', () => {
         expect(fetchFn).not.toHaveBeenCalled();
     });
 
-    it('skips the backoff entirely when the caller signal aborted during the failed attempt', async () => {
+    it('skips the backoff when the caller aborted during the failed attempt', async () => {
         const caller = new AbortController();
         const fetchFn = makeFetch(() => {
             caller.abort();
