@@ -1197,15 +1197,44 @@ Exported as `@sinemacula/foundation/session/key-value-session-persistence`.
 
 ```ts
 import type { KeyValueStorage } from "../storage/key-value-storage.js";
+import type { KeyValueSessionRecordStoreOptions } from "./key-value-session-record-store.js";
+import { RecordSessionPersistence } from "./record-session-persistence.js";
+export type KeyValueSessionPersistenceOptions = KeyValueSessionRecordStoreOptions;
+export declare class KeyValueSessionPersistence extends RecordSessionPersistence {
+    constructor(storage: KeyValueStorage, options?: KeyValueSessionPersistenceOptions);
+}
+```
+
+## dist/session/key-value-session-record-store.d.ts
+
+Exported as `@sinemacula/foundation/session/key-value-session-record-store`.
+
+```ts
+import type { KeyValueStorage } from "../storage/key-value-storage.js";
 import type { SessionLock } from "./session-lock.js";
-import type { PersistedSession, SessionClearResult, SessionPersistence, SessionSaveResult, SessionSnapshot, SessionVersion } from "./session-persistence.js";
-export interface KeyValueSessionPersistenceOptions {
+import type { SessionRecordStore } from "./session-record-store.js";
+export interface KeyValueSessionRecordStoreOptions {
     readonly key?: string;
     readonly lock?: SessionLock;
 }
-export declare class KeyValueSessionPersistence implements SessionPersistence {
+export declare class KeyValueSessionRecordStore implements SessionRecordStore {
     #private;
-    constructor(storage: KeyValueStorage, options?: KeyValueSessionPersistenceOptions);
+    constructor(storage: KeyValueStorage, options?: KeyValueSessionRecordStoreOptions);
+    read(): Promise<string | null>;
+    swap(decide: (current: string | null) => string | null): Promise<void>;
+}
+```
+
+## dist/session/record-session-persistence.d.ts
+
+Exported as `@sinemacula/foundation/session/record-session-persistence`.
+
+```ts
+import type { PersistedSession, SessionClearResult, SessionPersistence, SessionSaveResult, SessionSnapshot, SessionVersion } from "./session-persistence.js";
+import type { SessionRecordStore } from "./session-record-store.js";
+export declare class RecordSessionPersistence implements SessionPersistence {
+    #private;
+    constructor(store: SessionRecordStore);
     load(): Promise<SessionSnapshot>;
     saveIf(expected: SessionVersion, session: PersistedSession): Promise<SessionSaveResult>;
     clearIf(expected: SessionVersion): Promise<SessionClearResult>;
@@ -1380,6 +1409,17 @@ export interface SessionPersistence {
 }
 ```
 
+## dist/session/session-record-store.d.ts
+
+Exported as `@sinemacula/foundation/session/session-record-store`.
+
+```ts
+export interface SessionRecordStore {
+    read(): Promise<string | null>;
+    swap(decide: (current: string | null) => string | null): Promise<void>;
+}
+```
+
 ## dist/session/session-routes.d.ts
 
 Exported as `@sinemacula/foundation/session/session-routes`.
@@ -1513,6 +1553,20 @@ export interface SessionPersistenceContractHarness {
     broken(): SessionPersistence;
 }
 export declare function describeSessionPersistenceContract(harness: SessionPersistenceContractHarness): void;
+```
+
+## dist/session/test-support/session-record-store-contract.d.ts
+
+Exported as `@sinemacula/foundation/session/test-support/session-record-store-contract`.
+
+```ts
+import type { SessionRecordStore } from "../session-record-store.js";
+export interface SessionRecordStoreContractHarness {
+    create(): () => SessionRecordStore;
+    failing(record: string): () => SessionRecordStore;
+    broken(): SessionRecordStore;
+}
+export declare function describeSessionRecordStoreContract(harness: SessionRecordStoreContractHarness): void;
 ```
 
 ## dist/storage/key-value-storage.d.ts
