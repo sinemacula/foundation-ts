@@ -23,12 +23,14 @@ export class PrefixedEnvironmentSource implements EnvironmentSource {
     }
 
     /**
-     * Look `key` up under its prefixed name, discarding non-string values.
+     * Look `key` up among the record's own properties under its prefixed name,
+     * discarding inherited and non-string values.
      *
      * @param key - the unprefixed environment variable name
      */
     get(key: string): string | undefined {
-        const value = this.#values[`${this.#prefix}${key}`];
+        const prefixedKey = `${this.#prefix}${key}`;
+        const value = Object.hasOwn(this.#values, prefixedKey) ? this.#values[prefixedKey] : undefined;
 
         return typeof value === 'string' ? value : undefined;
     }

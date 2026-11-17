@@ -9,6 +9,24 @@ import type { KeyValueStorage } from '../storage/key-value-storage';
 
 const DEFAULT_STORAGE_KEY = 'locale';
 
+const SCRIPT_SUBTAG = /^[a-z]{4}$/;
+
+const REGION_SUBTAG = /^(?:[a-z]{2}|\d{3})$/;
+
+/**
+ * The language, script and region subtags of a normalised locale tag.
+ */
+interface LanguageTag {
+    /** The primary language subtag. */
+    readonly language: string;
+
+    /** The script subtag, when present. */
+    readonly script: string | undefined;
+
+    /** The region subtag, when present. */
+    readonly region: string | undefined;
+}
+
 /**
  * Construction options for {@link LocaleService}.
  */
@@ -76,29 +94,43 @@ export class LocaleService {
     }
 
     /**
-     * Match a candidate case-insensitively against the enabled locales: an
-     * exact match first, then a language match (`fr-CA` matches `fr-FR`).
+     * Match a candidate against the enabled locales, ignoring case and reading
+     * `_` as `-`: an exact match first, then the best locale of the same
+     * language, ranked by script and then region. For each, a matching subtag
+     * beats one the enabled locale leaves out, which beats any other; ties go
+     * to list order. Variants, extensions and private-use subtags are ignored,
+     * and no likely subtags are inferred, so `zh-HK` does not imply `Hant`.
      *
      * @returns the matching enabled locale, or null when none matches
      */
     match(candidate: string): string | null {
-        const normalised = candidate.toLowerCase();
+        const normalised = normalise(candidate);
+        const exact = this.#enabledLocales.find(locale => normalise(locale) === normalised);
+
+        if (exact !== undefined) {
+            return exact;
+        }
+
+        const wanted = parseTag(normalised);
+        let best: string | null = null;
+        let bestScore = -1;
 
         for (const locale of this.#enabledLocales) {
-            if (locale.toLowerCase() === normalised) {
-                return locale;
+            const offered = parseTag(normalise(locale));
+
+            if (offered.language !== wanted.language) {
+                continue;
+            }
+
+            const score = subtagRank(wanted.script, offered.script) * 3 + subtagRank(wanted.region, offered.region);
+
+            if (score > bestScore) {
+                best = locale;
+                bestScore = score;
             }
         }
 
-        const language = languageOf(normalised);
-
-        for (const locale of this.#enabledLocales) {
-            if (languageOf(locale.toLowerCase()) === language) {
-                return locale;
-            }
-        }
-
-        return null;
+        return best;
     }
 
     /**
@@ -110,10 +142,42 @@ export class LocaleService {
 }
 
 /**
- * Extract the language subtag from a lower-cased locale code.
+ * Lower-case a locale tag and read `_` separators as `-`.
  */
-function languageOf(locale: string): string {
-    const separatorIndex = locale.indexOf('-');
+function normalise(locale: string): string {
+    return locale.toLowerCase().replaceAll('_', '-');
+}
 
-    return separatorIndex === -1 ? locale : locale.slice(0, separatorIndex);
+/**
+ * Split a normalised tag into its language, script and region, ignoring
+ * everything from the first singleton subtag on.
+ */
+function parseTag(tag: string): LanguageTag {
+    const separator = tag.indexOf('-');
+
+    if (separator === -1) {
+        return { language: tag, script: undefined, region: undefined };
+    }
+
+    const subtags = tag.slice(separator + 1).split('-');
+    const singleton = subtags.findIndex(subtag => subtag.length === 1);
+    const core = singleton === -1 ? subtags : subtags.slice(0, singleton);
+
+    return {
+        language: tag.slice(0, separator),
+        script: core.find(subtag => SCRIPT_SUBTAG.test(subtag)),
+        region: core.find(subtag => REGION_SUBTAG.test(subtag)),
+    };
+}
+
+/**
+ * Rank how well an enabled locale's subtag serves the wanted one: 2 for a
+ * match, 1 when the enabled locale leaves it out, 0 otherwise.
+ */
+function subtagRank(wanted: string | undefined, offered: string | undefined): number {
+    if (wanted === offered) {
+        return 2;
+    }
+
+    return offered === undefined ? 1 : 0;
 }

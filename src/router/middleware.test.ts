@@ -102,6 +102,34 @@ describe('runMiddlewarePipeline', () => {
         expect(result).toStrictEqual({ kind: 'redirect', to: '/async-target' });
     });
 
+    it.each([
+        ['rejects', (error: Error) => Promise.reject(error)],
+        [
+            'throws synchronously',
+            (error: Error) => {
+                throw error;
+            },
+        ],
+    ])('fails closed when a middleware %s', async (_, fail) => {
+        const error = new Error('guard failed');
+        const failing: StubMiddleware = { handle: () => fail(error) };
+        const later: StubMiddleware = { handle: vi.fn().mockResolvedValue(next()) };
+
+        await expect(runMiddlewarePipeline([failing, later], context)).rejects.toBe(error);
+        expect(later.handle).not.toHaveBeenCalled();
+    });
+
+    it('accepts a synchronous decision', async () => {
+        const syncMiddleware: StubMiddleware = { handle: () => redirect('/sync') };
+        const later: StubMiddleware = { handle: vi.fn().mockResolvedValue(next()) };
+
+        await expect(runMiddlewarePipeline([syncMiddleware, later], context)).resolves.toStrictEqual({
+            kind: 'redirect',
+            to: '/sync',
+        });
+        expect(later.handle).not.toHaveBeenCalled();
+    });
+
     it('short-circuits when the first middleware redirects', async () => {
         const redirectResult: MiddlewareResult<StubLocation> = redirect('/early');
         const firstMiddleware: StubMiddleware = { handle: vi.fn().mockResolvedValue(redirectResult) };

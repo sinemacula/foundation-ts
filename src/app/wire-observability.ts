@@ -8,6 +8,7 @@
 import type { AnalyticsTracker } from '../analytics/analytics-tracker';
 import { ConsoleAnalyticsTracker } from '../analytics/console-analytics-tracker';
 import { NullAnalyticsTracker } from '../analytics/null-analytics-tracker';
+import type { DeepReadonly } from '../config/config-repository';
 import { ConsoleLogger } from '../logging/console-logger';
 import type { Logger } from '../logging/logger';
 import { NullLogger } from '../logging/null-logger';
@@ -23,16 +24,16 @@ import type { FoundationConfig } from './foundation-config';
  */
 export interface WireObservabilityOptions<T extends FoundationConfig> {
     /** The frozen application configuration. */
-    readonly config: Readonly<T>;
+    readonly config: DeepReadonly<T>;
 
     /** Error-reporter factory; wins over the environment default. */
-    readonly reporter?: (settings: Readonly<T>) => ErrorReporter;
+    readonly reporter?: (settings: DeepReadonly<T>) => ErrorReporter;
 
     /** Analytics-tracker factory; wins over the environment default. */
-    readonly analytics?: (settings: Readonly<T>) => AnalyticsTracker;
+    readonly analytics?: (settings: DeepReadonly<T>) => AnalyticsTracker;
 
     /** Logger factory; wins over the environment default. */
-    readonly logger?: (settings: Readonly<T>) => Logger;
+    readonly logger?: (settings: DeepReadonly<T>) => Logger;
 }
 
 /**
