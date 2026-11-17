@@ -210,8 +210,7 @@ export async function bootFoundationCore<T extends FoundationConfig>(
     options.onPhase?.('http-client');
 
     const http = wireHttpClient({
-        // Same frozen object as settings, typed as the http wiring expects.
-        config: definition,
+        config: settings,
         fetchFn: platform.fetchFn,
         contributions,
         ...(options.http?.interceptors === undefined ? {} : { interceptors: options.http.interceptors }),

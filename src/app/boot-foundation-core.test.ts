@@ -182,6 +182,9 @@ interface CoreTyping<T extends FoundationConfig> {
     /** The logger factory's settings parameter. */
     readonly logger: SettingsOf<ObservabilityOptions<T>['logger']>;
 
+    /** The configuration the HTTP client factory receives. */
+    readonly httpClient: Parameters<NonNullable<NonNullable<FoundationCoreOptions<T>['http']>['client']>>[0]['config'];
+
     /** What booting with the configuration resolves to. */
     readonly boot: ReturnType<typeof bootFoundationCore<T>>;
 }
@@ -208,6 +211,9 @@ interface ExpectedCoreTyping<T extends FoundationConfig> {
 
     /** Deeply read-only settings for the logger factory. */
     readonly logger: DeepReadonly<T>;
+
+    /** Deeply read-only settings for the HTTP client factory. */
+    readonly httpClient: DeepReadonly<T>;
 
     /** The core typed by the configuration. */
     readonly boot: Promise<FoundationCore<T>>;
@@ -879,6 +885,33 @@ describe('bootFoundationCore', () => {
             expect(received[0]).toBe(core.settings);
             expect(core.settings.support.emails).toStrictEqual(['support@example.com']);
             expect(Object.isFrozen(core.settings.support.emails)).toBe(true);
+        });
+
+        it('hands the HTTP client factory the frozen settings, nested arrays read-only', async () => {
+            const received: DeepReadonly<InterfaceAppConfig>[] = [];
+
+            const core = await bootFoundationCore<InterfaceAppConfig>(
+                {
+                    ...interfaceBootOptions(),
+                    define: () => createAppConfig(),
+                    http: {
+                        client: tools => {
+                            received.push(tools.config);
+
+                            expectTypeOf(() => {
+                                // @ts-expect-error the nested configuration is read-only
+                                tools.config.support.emails.push('other@example.com');
+                            }).toBeFunction();
+
+                            return createHttpClientStub();
+                        },
+                    },
+                },
+                { fetchFn: createFetchStub() },
+            );
+
+            expect(received).toStrictEqual([core.settings]);
+            expect(received[0]).toBe(core.settings);
         });
     });
 
