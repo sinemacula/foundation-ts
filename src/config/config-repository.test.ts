@@ -57,10 +57,10 @@ describe('ConfigRepository', () => {
             expect(config.get('app.urls.api', 'fallback')).toBe('fallback');
         });
 
-        it('returns the fallback when traversal hits a primitive mid-path', () => {
+        it.each(['app.name.sub', 'app.name.length'])('returns the fallback when %s descends into a primitive', path => {
             const config = new ConfigRepository({ app: { name: 'string' } });
 
-            expect(config.get('app.name.sub', 'fallback')).toBe('fallback');
+            expect(config.get(path, 'fallback')).toBe('fallback');
         });
 
         it('returns the fallback when the root-level segment is missing', () => {
@@ -73,6 +73,31 @@ describe('ConfigRepository', () => {
             const config = new ConfigRepository({ app: { urls: { api: 'https://api.example.com' } } });
 
             expect(config.get('app.urls')).toStrictEqual({ api: 'https://api.example.com' });
+        });
+
+        it.each(['toString', 'constructor', '__proto__', 'hasOwnProperty', 'app.toString', 'app.constructor'])(
+            'falls back for the inherited member %s',
+            path => {
+                const config = new ConfigRepository({ app: { name: 'MyApp' } });
+
+                expect(config.get(path, 'fallback')).toBe('fallback');
+                expect(config.has(path)).toBe(false);
+            },
+        );
+
+        it.each([
+            ['an array index', 'locales.1', 'fr-FR'],
+            ['an array length', 'locales.length', 2],
+        ])('resolves %s as an own property', (_, path, expected) => {
+            const config = new ConfigRepository({ locales: ['en-GB', 'fr-FR'] });
+
+            expect(config.get(path)).toBe(expected);
+        });
+
+        it('resolves an own __proto__ key parsed from JSON', () => {
+            const config = new ConfigRepository(JSON.parse('{"__proto__":{"a":1}}') as Record<string, unknown>);
+
+            expect(config.get('__proto__.a')).toBe(1);
         });
     });
 

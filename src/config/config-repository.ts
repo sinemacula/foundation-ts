@@ -28,7 +28,8 @@ export class ConfigRepository<T extends Record<string, unknown>> {
     }
 
     /**
-     * Resolve a value by dot-notation path.
+     * Resolve a value by dot-notation path, reading own properties only, so
+     * inherited members such as `toString` never resolve.
      *
      * @param path - the dot-notation path (e.g. `app.urls.api`)
      * @param fallback - the value returned when the path does not resolve
@@ -37,7 +38,7 @@ export class ConfigRepository<T extends Record<string, unknown>> {
         let current: unknown = this.#values;
 
         for (const segment of path.split('.')) {
-            if (current === null || typeof current !== 'object' || !(segment in current)) {
+            if (current === null || typeof current !== 'object' || !Object.hasOwn(current, segment)) {
                 return fallback;
             }
 
