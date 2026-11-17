@@ -25,15 +25,15 @@ import type { BreadcrumbTrail } from "../reporting/breadcrumb-trail.js";
 export interface RouteTarget {
     readonly name?: unknown;
     readonly path: string;
-    readonly fullPath: string;
 }
 export interface NavigationHooks {
-    afterEach(cb: (to: RouteTarget, from: RouteTarget) => void): () => void;
+    afterEach(cb: (to: RouteTarget, from: RouteTarget, failure?: unknown) => void): () => void;
 }
 export interface PageTrackingOptions {
     readonly router: NavigationHooks;
     readonly tracker: AnalyticsTracker;
     readonly trail?: BreadcrumbTrail;
+    readonly onError?: (error: unknown) => void;
 }
 export declare function installPageTracking(options: PageTrackingOptions): () => void;
 ```
@@ -58,6 +58,7 @@ Exported as `@sinemacula/foundation/app/boot-foundation-core`.
 
 ```ts
 import type { AnalyticsTracker } from "../analytics/analytics-tracker.js";
+import type { DeepReadonly } from "../config/config-repository.js";
 import { ConfigRepository } from "../config/config-repository.js";
 import type { Environment } from "../config/environment.js";
 import type { RuntimeEnvironmentSource } from "../config/runtime-environment.js";
@@ -77,7 +78,7 @@ export interface PlatformCore {
 }
 export type FoundationCorePhase = "runtime-environment" | "configuration" | "storage" | "feature-flags" | "notifications" | "observability" | "http-client";
 export interface FoundationCoreRegistration<T extends FoundationConfig> {
-    readonly config: ConfigRepository<T & Record<string, unknown>>;
+    readonly config: ConfigRepository<T>;
     readonly environment: Environment;
 }
 export interface FoundationCoreOptions<T extends FoundationConfig> {
@@ -87,11 +88,11 @@ export interface FoundationCoreOptions<T extends FoundationConfig> {
     readonly storage: KeyValueStorage;
     readonly toasts: Toaster;
     readonly confirm: Confirmer;
-    readonly featureFlags?: (settings: Readonly<T>) => FeatureFlags;
+    readonly featureFlags?: (settings: DeepReadonly<T>) => FeatureFlags;
     readonly observability?: {
-        readonly reporter?: (settings: Readonly<T>) => ErrorReporter;
-        readonly analytics?: (settings: Readonly<T>) => AnalyticsTracker;
-        readonly logger?: (settings: Readonly<T>) => Logger;
+        readonly reporter?: (settings: DeepReadonly<T>) => ErrorReporter;
+        readonly analytics?: (settings: DeepReadonly<T>) => AnalyticsTracker;
+        readonly logger?: (settings: DeepReadonly<T>) => Logger;
     };
     readonly http?: {
         readonly interceptors?: readonly RequestInterceptor[];
@@ -104,8 +105,8 @@ export interface FoundationCoreOptions<T extends FoundationConfig> {
 }
 export interface FoundationCore<T extends FoundationConfig> {
     readonly environment: Environment;
-    readonly repository: ConfigRepository<T & Record<string, unknown>>;
-    readonly settings: Readonly<T>;
+    readonly repository: ConfigRepository<T>;
+    readonly settings: DeepReadonly<T>;
     readonly flags: FeatureFlags;
     readonly observability: WiredObservability;
     readonly http: HttpClient;
@@ -158,7 +159,7 @@ Exported as `@sinemacula/foundation/app/services`.
 
 ```ts
 import type { AnalyticsTracker } from "../analytics/analytics-tracker.js";
-import type { ConfigRepository } from "../config/config-repository.js";
+import type { ConfigRepository, DeepReadonly } from "../config/config-repository.js";
 import type { FeatureFlags } from "../feature-flags/feature-flags.js";
 import type { HttpClient } from "../http/http-client.js";
 import type { Logger } from "../logging/logger.js";
@@ -168,9 +169,9 @@ import type { RealtimeConnection } from "../realtime/realtime-connection.js";
 import type { ErrorReporter } from "../reporting/error-reporter.js";
 import type { KeyValueStorage } from "../storage/key-value-storage.js";
 import type { ColorSchemeService } from "../theme/color-scheme-service.js";
-export declare function installConfig(instance: ConfigRepository<Record<string, unknown>>): void;
-export declare function appConfig<T = unknown>(): Readonly<T>;
-export declare function appConfigRepository<T extends Record<string, unknown> = Record<string, unknown>>(): ConfigRepository<T>;
+export declare function installConfig(instance: ConfigRepository<object>): void;
+export declare function appConfig<T = unknown>(): DeepReadonly<T>;
+export declare function appConfigRepository<T extends object = Record<string, unknown>>(): ConfigRepository<T>;
 export declare function installApi(instance: HttpClient): void;
 export declare function api(): HttpClient;
 export declare function installStorage(instance: KeyValueStorage): void;
@@ -227,15 +228,16 @@ Exported as `@sinemacula/foundation/app/wire-observability`.
 
 ```ts
 import type { AnalyticsTracker } from "../analytics/analytics-tracker.js";
+import type { DeepReadonly } from "../config/config-repository.js";
 import type { Logger } from "../logging/logger.js";
 import { BreadcrumbTrail } from "../reporting/breadcrumb-trail.js";
 import type { ErrorReporter } from "../reporting/error-reporter.js";
 import type { FoundationConfig } from "./foundation-config.js";
 export interface WireObservabilityOptions<T extends FoundationConfig> {
-    readonly config: Readonly<T>;
-    readonly reporter?: (settings: Readonly<T>) => ErrorReporter;
-    readonly analytics?: (settings: Readonly<T>) => AnalyticsTracker;
-    readonly logger?: (settings: Readonly<T>) => Logger;
+    readonly config: DeepReadonly<T>;
+    readonly reporter?: (settings: DeepReadonly<T>) => ErrorReporter;
+    readonly analytics?: (settings: DeepReadonly<T>) => AnalyticsTracker;
+    readonly logger?: (settings: DeepReadonly<T>) => Logger;
 }
 export interface WiredObservability {
     readonly reporter: ErrorReporter;
@@ -276,10 +278,12 @@ export declare class ChainEnvironmentSource implements EnvironmentSource {
 Exported as `@sinemacula/foundation/config/config-repository`.
 
 ```ts
-export declare class ConfigRepository<T extends Record<string, unknown>> {
+import type { DeepReadonly } from "../support/deep-freeze.js";
+export type { DeepReadonly } from "../support/deep-freeze.js";
+export declare class ConfigRepository<T extends object = Record<string, unknown>> {
     #private;
     constructor(values: T);
-    all(): Readonly<T>;
+    all(): DeepReadonly<T>;
     get(path: string, fallback?: unknown): unknown;
     has(path: string): boolean;
 }
@@ -296,14 +300,14 @@ export interface EnvironmentSource {
 export declare class Environment {
     #private;
     constructor(source: EnvironmentSource);
-    string(key: string): string | undefined;
     string(key: string, fallback: string): string;
-    boolean(key: string): boolean | undefined;
+    string(key: string, fallback?: string): string | undefined;
     boolean(key: string, fallback: boolean): boolean;
-    integer(key: string): number | undefined;
+    boolean(key: string, fallback?: boolean): boolean | undefined;
     integer(key: string, fallback: number): number;
-    json<T>(key: string): T | undefined;
+    integer(key: string, fallback?: number): number | undefined;
     json<T>(key: string, fallback: T): T;
+    json<T>(key: string, fallback?: T): T | undefined;
 }
 ```
 
@@ -369,6 +373,22 @@ export interface ConnectivityMonitor {
 }
 ```
 
+## dist/connectivity/test-support/connectivity-monitor-contract.d.ts
+
+Exported as `@sinemacula/foundation/connectivity/test-support/connectivity-monitor-contract`.
+
+```ts
+import type { ConnectivityMonitor } from "../connectivity-monitor.js";
+export interface ConnectivityMonitorFixture {
+    readonly monitor: ConnectivityMonitor;
+    readonly report: (online: boolean) => void;
+}
+export interface ConnectivityMonitorContractHarness {
+    create(initial: boolean): ConnectivityMonitorFixture;
+}
+export declare function describeConnectivityMonitorContract(harness: ConnectivityMonitorContractHarness): void;
+```
+
 ## dist/feature-flags/feature-flags.d.ts
 
 Exported as `@sinemacula/foundation/feature-flags/feature-flags`.
@@ -379,7 +399,10 @@ export type FlagEvaluationContext = Readonly<Record<string, string | number | bo
 export type FlagsChangeHandler = () => void;
 export interface FeatureFlags {
     isEnabled(key: string, fallback?: boolean): boolean;
-    variant<Value extends FlagValue>(key: string, fallback: Value): Value;
+    variant(key: string, fallback: string): string;
+    variant(key: string, fallback: number): number;
+    variant(key: string, fallback: boolean): boolean;
+    variant<Value extends FlagValue = FlagValue>(key: string, fallback: NoInfer<Value>): NoInfer<Value>;
     setContext(context: FlagEvaluationContext): void;
     onChange(handler: FlagsChangeHandler): () => void;
 }
@@ -391,16 +414,40 @@ Exported as `@sinemacula/foundation/feature-flags/static-feature-flags`.
 
 ```ts
 import type { FeatureFlags, FlagEvaluationContext, FlagsChangeHandler, FlagValue } from "./feature-flags.js";
+export interface StaticFeatureFlagsOptions {
+    readonly onError?: (error: unknown) => void;
+}
 export declare class StaticFeatureFlags implements FeatureFlags {
     #private;
-    constructor(flags?: Readonly<Record<string, FlagValue>>);
+    constructor(flags?: Readonly<Record<string, FlagValue>>, options?: StaticFeatureFlagsOptions);
     isEnabled(key: string, fallback?: boolean): boolean;
-    variant<Value extends FlagValue>(key: string, fallback: Value): Value;
+    variant(key: string, fallback: string): string;
+    variant(key: string, fallback: number): number;
+    variant(key: string, fallback: boolean): boolean;
+    variant<Value extends FlagValue = FlagValue>(key: string, fallback: NoInfer<Value>): NoInfer<Value>;
     setContext(context: FlagEvaluationContext): void;
     onChange(handler: FlagsChangeHandler): () => void;
     replace(flags: Readonly<Record<string, FlagValue>>): void;
     get context(): FlagEvaluationContext;
 }
+```
+
+## dist/feature-flags/test-support/feature-flags-contract.d.ts
+
+Exported as `@sinemacula/foundation/feature-flags/test-support/feature-flags-contract`.
+
+```ts
+import type { FeatureFlags, FlagValue } from "../feature-flags.js";
+type FlagRecord = Readonly<Record<string, FlagValue>>;
+export interface FeatureFlagsContractSubject {
+    readonly flags: FeatureFlags;
+    change(next: FlagRecord): void | Promise<void>;
+}
+export interface FeatureFlagsContractHarness {
+    create(flags: FlagRecord): FeatureFlagsContractSubject;
+}
+export declare function describeFeatureFlagsContract(harness: FeatureFlagsContractHarness): void;
+export {};
 ```
 
 ## dist/http/bearer-token-interceptor.d.ts
@@ -474,7 +521,7 @@ export interface HttpRequest {
     readonly credentials?: HttpCredentialsMode;
 }
 export type RequestInterceptor = (request: HttpRequest) => HttpRequest | Promise<HttpRequest>;
-export type UnauthorizedHandler = () => Promise<boolean>;
+export type UnauthorizedHandler = (request: HttpRequest) => Promise<boolean>;
 export type ResponseErrorHandler = (error: unknown, request: HttpRequest) => void;
 export interface HttpClient {
     get<T>(path: string, options?: HttpRequestOptions): Promise<T>;
@@ -876,10 +923,13 @@ export declare class ResourceClient<Value> {
 Exported as `@sinemacula/foundation/realtime/exponential-backoff`.
 
 ```ts
+export type BackoffJitter = "none" | "full" | "equal";
 export interface ExponentialBackoffOptions {
     readonly initialDelay?: number;
     readonly multiplier?: number;
     readonly maxDelay?: number;
+    readonly jitter?: BackoffJitter;
+    readonly random?: () => number;
 }
 export declare class ExponentialBackoff {
     #private;
@@ -924,10 +974,11 @@ export declare class RealtimeError extends Error {
 Exported as `@sinemacula/foundation/realtime/reconnect`.
 
 ```ts
-export type BeforeReconnectHook = () => Promise<boolean | undefined> | Promise<void>;
+export declare const STABLE_CONNECTION_MS = 5000;
+export type BeforeReconnectHook = (signal: AbortSignal) => Promise<boolean | undefined> | Promise<void>;
 export interface ReconnectSteps {
     readonly beforeReconnect: BeforeReconnectHook | undefined;
-    readonly isStale: () => boolean;
+    readonly signal: AbortSignal;
     readonly reopen: () => void;
     readonly reschedule: () => void;
     readonly onError?: (error: unknown) => void;
@@ -935,18 +986,43 @@ export interface ReconnectSteps {
 export declare function runReconnect(steps: ReconnectSteps): Promise<void>;
 ```
 
+## dist/realtime/subscribers.d.ts
+
+Exported as `@sinemacula/foundation/realtime/subscribers`.
+
+```ts
+export type SubscriberDelivery<T> = (value: T, isLive?: () => boolean) => void;
+export declare class SubscriberList<T> {
+    #private;
+    constructor(report: (error: unknown) => void);
+    get size(): number;
+    add(handler: (value: T) => void): () => void;
+    snapshot(): SubscriberDelivery<T>;
+    emit(value: T): void;
+}
+export declare class EventSubscribers<T> {
+    #private;
+    constructor(report: (error: unknown) => void);
+    has(event: string): boolean;
+    events(): string[];
+    on(event: string, handler: (value: T) => void): () => void;
+    snapshot(event: string): SubscriberDelivery<T> | undefined;
+}
+```
+
 ## dist/realtime/test-support/realtime-connection-contract.d.ts
 
 Exported as `@sinemacula/foundation/realtime/test-support/realtime-connection-contract`.
 
 ```ts
-import { ExponentialBackoff } from "../exponential-backoff.js";
+import type { ExponentialBackoff } from "../exponential-backoff.js";
 import type { RealtimeConnection } from "../realtime-connection.js";
 import type { BeforeReconnectHook } from "../reconnect.js";
 export interface ContractConnectionOptions {
     readonly url: string | (() => string);
     readonly backoff?: ExponentialBackoff;
     readonly beforeReconnect?: BeforeReconnectHook;
+    readonly onError?: (error: unknown) => void;
 }
 export interface ContractTransport {
     readonly url: string;
@@ -963,6 +1039,7 @@ export interface RealtimeContractHarness {
     create(options: ContractConnectionOptions): {
         connection: RealtimeConnection;
         transports: ContractTransportRegistry;
+        setFactoryError: (error: Error | null) => void;
     };
 }
 export declare function describeRealtimeContract(harness: RealtimeContractHarness): void;
@@ -1092,7 +1169,7 @@ export interface SessionPaths {
 export interface DefaultSessionApiOptions<C = PasswordCredentials> {
     readonly transport?: RefreshTokenTransport;
     readonly paths?: SessionPaths;
-    readonly loginBody?: (credentials: C, device: SessionDevice) => unknown;
+    readonly loginBody?: (credentials: C, device: SessionDevice, refreshToken: string | null) => unknown;
     readonly now?: () => number;
 }
 export interface SessionUserMapping<U extends SessionUser> {
@@ -1121,8 +1198,7 @@ Exported as `@sinemacula/foundation/session/key-value-session-persistence`.
 ```ts
 import type { KeyValueStorage } from "../storage/key-value-storage.js";
 import type { SessionLock } from "./session-lock.js";
-import type { SessionClearResult, SessionPersistence, SessionSaveResult, SessionSnapshot } from "./session-persistence.js";
-import type { SessionTokens } from "./session-tokens.js";
+import type { PersistedSession, SessionClearResult, SessionPersistence, SessionSaveResult, SessionSnapshot, SessionVersion } from "./session-persistence.js";
 export interface KeyValueSessionPersistenceOptions {
     readonly key?: string;
     readonly lock?: SessionLock;
@@ -1131,8 +1207,8 @@ export declare class KeyValueSessionPersistence implements SessionPersistence {
     #private;
     constructor(storage: KeyValueStorage, options?: KeyValueSessionPersistenceOptions);
     load(): Promise<SessionSnapshot>;
-    saveIf(expectedRevision: number, tokens: SessionTokens): Promise<SessionSaveResult>;
-    clearIf(expectedRevision: number): Promise<SessionClearResult>;
+    saveIf(expected: SessionVersion, session: PersistedSession): Promise<SessionSaveResult>;
+    clearIf(expected: SessionVersion): Promise<SessionClearResult>;
 }
 ```
 
@@ -1151,6 +1227,7 @@ Exported as `@sinemacula/foundation/session/session-api`.
 
 ```ts
 import type { LoginResult, RefreshResult } from "./session-outcomes.js";
+import type { SessionTokens } from "./session-tokens.js";
 import type { SessionUser } from "./session-user.js";
 export interface SessionDevice {
     readonly uuid: string;
@@ -1161,9 +1238,9 @@ export interface PasswordCredentials {
     readonly password: string;
 }
 export interface SessionApi<U extends SessionUser = SessionUser, C = PasswordCredentials> {
-    login(credentials: C, device: SessionDevice): Promise<LoginResult>;
+    login(credentials: C, device: SessionDevice, refreshToken: string | null): Promise<LoginResult>;
     refresh(refreshToken: string | null): Promise<RefreshResult>;
-    logout(refreshToken: string | null): Promise<void>;
+    logout(tokens: SessionTokens): Promise<void>;
     currentUser(): Promise<U>;
 }
 ```
@@ -1174,6 +1251,7 @@ Exported as `@sinemacula/foundation/session/session-core`.
 
 ```ts
 import type { PasswordCredentials, SessionApi, SessionDevice } from "./session-api.js";
+import type { SessionLock } from "./session-lock.js";
 import type { LoginOutcome, RefreshOutcome } from "./session-outcomes.js";
 import type { SessionPersistence } from "./session-persistence.js";
 import type { SessionState } from "./session-state.js";
@@ -1182,14 +1260,16 @@ export interface SessionCoreContext<U extends SessionUser = SessionUser, C = Pas
     readonly persistence: SessionPersistence;
     readonly api: SessionApi<U, C>;
     readonly device: () => SessionDevice;
+    readonly createLineage: () => string;
+    readonly exchangeLock?: SessionLock;
 }
 export declare function createInitialSessionState<U extends SessionUser = SessionUser>(): SessionState<U>;
-export declare function hydrateSession<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<U, C>): Promise<void>;
-export declare function loginWithCredentials<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<U, C>, credentials: C): Promise<LoginOutcome>;
-export declare function refreshSession<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<U, C>): Promise<RefreshOutcome>;
-export declare function logoutSession<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<U, C>): Promise<void>;
-export declare function clearSession<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<U, C>): Promise<void>;
-export declare function rehydrateSessionUser<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<U, C>): Promise<void>;
+export declare function hydrateSession<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<NoInfer<U>, C>): Promise<void>;
+export declare function loginWithCredentials<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<NoInfer<U>, C>, credentials: C): Promise<LoginOutcome>;
+export declare function refreshSession<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<NoInfer<U>, C>): Promise<RefreshOutcome>;
+export declare function logoutSession<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<NoInfer<U>, C>): Promise<void>;
+export declare function clearSession<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<NoInfer<U>, C>): Promise<void>;
+export declare function rehydrateSessionUser<U extends SessionUser, C>(state: SessionState<U>, context: SessionCoreContext<NoInfer<U>, C>): Promise<void>;
 export declare function sessionIdentity(state: SessionState<SessionUser>): object | null;
 ```
 
@@ -1269,9 +1349,17 @@ Exported as `@sinemacula/foundation/session/session-persistence`.
 
 ```ts
 import type { SessionTokens } from "./session-tokens.js";
+export interface PersistedSession {
+    readonly lineage: string;
+    readonly tokens: SessionTokens;
+}
 export interface SessionSnapshot {
     readonly revision: number;
-    readonly tokens: SessionTokens | null;
+    readonly session: PersistedSession | null;
+}
+export interface SessionVersion {
+    readonly revision: number;
+    readonly lineage: string | null;
 }
 export interface SessionSnapshotChanged {
     readonly status: "changed";
@@ -1287,8 +1375,8 @@ export type SessionClearResult = {
 } | SessionSnapshotChanged;
 export interface SessionPersistence {
     load(): Promise<SessionSnapshot>;
-    saveIf(expectedRevision: number, tokens: SessionTokens): Promise<SessionSaveResult>;
-    clearIf(expectedRevision: number): Promise<SessionClearResult>;
+    saveIf(expected: SessionVersion, session: PersistedSession): Promise<SessionSaveResult>;
+    clearIf(expected: SessionVersion): Promise<SessionClearResult>;
 }
 ```
 
@@ -1356,6 +1444,77 @@ export interface SessionUser {
 }
 ```
 
+## dist/session/test-support/fake-auth-server.d.ts
+
+Exported as `@sinemacula/foundation/session/test-support/fake-auth-server`.
+
+```ts
+import type { PasswordCredentials, SessionApi } from "../session-api.js";
+import type { SessionUser } from "../session-user.js";
+export type FakeRevocationReason = "signed_out" | "rotation_reuse" | "superseded";
+export type FakeAuthOperation = "login" | "refresh" | "logout" | "currentUser";
+export interface FakeAuthServerOptions {
+    readonly now: () => number;
+    readonly graceMs?: number;
+    readonly accessTtlMs?: number;
+    readonly transport?: "body" | "cookie";
+    readonly password?: string;
+}
+export interface FakeAuthApiOptions {
+    readonly accessToken: () => string | null;
+    readonly before?: (operation: FakeAuthOperation) => Promise<void>;
+}
+export interface FakeServerSession {
+    readonly id: string;
+    readonly owner: string;
+    readonly rotation: number;
+    readonly previous: number | null;
+    readonly rotatedAt: number | null;
+    readonly revoked: FakeRevocationReason | null;
+}
+export interface FakeAuthRequest {
+    readonly operation: FakeAuthOperation;
+    readonly bearer: string | null;
+    readonly refreshToken: string | null;
+}
+export declare class FakeAuthServer {
+    #private;
+    readonly requests: FakeAuthRequest[];
+    constructor(options: FakeAuthServerOptions);
+    get cookie(): string | null;
+    session(id: string): FakeServerSession | undefined;
+    sessions(): FakeServerSession[];
+    sessionOf(accessToken: string | null): FakeServerSession | undefined;
+    issuerOf(accessToken: string | null): FakeServerSession | undefined;
+    api(options: FakeAuthApiOptions): SessionApi<SessionUser, PasswordCredentials>;
+}
+```
+
+## dist/session/test-support/session-lock-contract.d.ts
+
+Exported as `@sinemacula/foundation/session/test-support/session-lock-contract`.
+
+```ts
+import type { SessionLock } from "../session-lock.js";
+export interface SessionLockContractHarness {
+    create(): () => SessionLock;
+}
+export declare function describeSessionLockContract(harness: SessionLockContractHarness): void;
+```
+
+## dist/session/test-support/session-persistence-contract.d.ts
+
+Exported as `@sinemacula/foundation/session/test-support/session-persistence-contract`.
+
+```ts
+import type { SessionPersistence } from "../session-persistence.js";
+export interface SessionPersistenceContractHarness {
+    create(): () => SessionPersistence;
+    broken(): SessionPersistence;
+}
+export declare function describeSessionPersistenceContract(harness: SessionPersistenceContractHarness): void;
+```
+
 ## dist/storage/key-value-storage.d.ts
 
 Exported as `@sinemacula/foundation/storage/key-value-storage`.
@@ -1395,6 +1554,29 @@ export declare class NamespacedStorage implements KeyValueStorage {
     set(key: string, value: string): void;
     remove(key: string): void;
 }
+```
+
+## dist/storage/test-support/key-value-storage-contract.d.ts
+
+Exported as `@sinemacula/foundation/storage/test-support/key-value-storage-contract`.
+
+```ts
+import type { KeyValueStorage } from "../key-value-storage.js";
+export interface KeyValueStorageContractHarness {
+    create(): KeyValueStorage;
+}
+export declare function describeKeyValueStorageContract(harness: KeyValueStorageContractHarness): void;
+```
+
+## dist/support/deep-freeze.d.ts
+
+Internal.
+
+```ts
+export type DeepReadonly<T> = T extends (...args: never[]) => unknown ? T : T extends object ? {
+    readonly [K in keyof T]: DeepReadonly<T[K]>;
+} : T;
+export declare function deepFreeze<T>(value: T): DeepReadonly<T>;
 ```
 
 ## dist/support/is-record.d.ts
@@ -1450,6 +1632,7 @@ export interface ColorSchemeServiceOptions {
     readonly applier: ColorSchemeApplier;
     readonly storageKey?: string;
     readonly defaultPreference?: ColorSchemePreference;
+    readonly onError?: (error: unknown) => void;
 }
 export declare class ColorSchemeService {
     #private;
