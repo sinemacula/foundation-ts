@@ -129,6 +129,78 @@ export function describeFeatureFlagsContract(harness: FeatureFlagsContractHarnes
                 expect(kept).toHaveBeenCalledOnce();
             });
 
+            it('runs a handler subscribed twice once per registration, each unsubscribe removing its own', async () => {
+                const { flags, change } = harness.create({});
+                const handler = vi.fn();
+                const unsubscribe = flags.onChange(handler);
+
+                flags.onChange(handler);
+                await change({ flag: true });
+                unsubscribe();
+                unsubscribe();
+                await change({ flag: false });
+
+                expect(handler).toHaveBeenCalledTimes(3);
+            });
+
+            it('runs a handler subscribed during a change only from the next change', async () => {
+                const { flags, change } = harness.create({ step: 0 });
+                const late = vi.fn(() => flags.variant('step', 0));
+                let subscribed = false;
+
+                flags.onChange(() => {
+                    if (!subscribed) {
+                        subscribed = true;
+                        flags.onChange(late);
+                    }
+                });
+                await change({ step: 1 });
+
+                expect(late).not.toHaveBeenCalled();
+
+                await change({ step: 2 });
+
+                expect(late).toHaveBeenCalledOnce();
+                expect(late).toHaveLastReturnedWith(2);
+            });
+
+            it('skips a handler unsubscribed during a change', async () => {
+                const { flags, change } = harness.create({});
+                const removed = vi.fn();
+                const unsubscribes: Array<() => void> = [];
+
+                flags.onChange(() => {
+                    unsubscribes[0]?.();
+                });
+                unsubscribes.push(flags.onChange(removed));
+                await change({ flag: true });
+
+                expect(removed).not.toHaveBeenCalled();
+            });
+
+            it('delivers a change made by a handler once the current delivery has finished', async () => {
+                const { flags, change } = harness.create({ step: 0 });
+                const seen: string[] = [];
+                let nested = Promise.resolve();
+                let changed = false;
+
+                flags.onChange(() => {
+                    seen.push(`a:${String(flags.variant('step', 0))}`);
+
+                    if (!changed) {
+                        changed = true;
+                        nested = Promise.resolve(change({ step: 2 }));
+                    }
+                });
+                flags.onChange(() => {
+                    seen.push(`b:${String(flags.variant('step', 0))}`);
+                });
+                await change({ step: 1 });
+                await nested;
+
+                expect(seen).toStrictEqual(['a:1', 'b:2', 'a:2', 'b:2']);
+            });
+
             it('isolates a throwing handler from the others and from the change', async () => {
                 const { flags, change } = harness.create({ flag: false });
                 const failure = new Error('handler failed');

@@ -68,10 +68,14 @@ export interface FeatureFlags {
 
     /**
      * Subscribe to flag-set changes; the handler runs synchronously after each
-     * change. A synchronously throwing handler neither stops the others nor
-     * propagates to whoever made the change.
+     * change. Every call is its own registration, removed only by its own
+     * unsubscribe. A change reaches the handlers registered when it was made,
+     * skipping any removed meanwhile, and a change made from inside a handler
+     * is delivered once the current delivery has finished, so a handler can
+     * already read later flags. A synchronously throwing handler neither stops
+     * the others nor propagates to whoever made the change.
      *
-     * @returns an unsubscribe function
+     * @returns a function that removes this registration
      */
     onChange(handler: FlagsChangeHandler): () => void;
 }
