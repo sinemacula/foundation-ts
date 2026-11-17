@@ -32,7 +32,9 @@ export interface PasswordCredentials {
 }
 
 /**
- * Typed access to the session endpoints.
+ * Typed access to the session endpoints. Sign-in, refresh and sign-out run
+ * while the session core holds its exchange lock, so none of them may trigger a
+ * refresh.
  */
 export interface SessionApi<U extends SessionUser = SessionUser, C = PasswordCredentials> {
     /**
@@ -50,9 +52,6 @@ export interface SessionApi<U extends SessionUser = SessionUser, C = PasswordCre
     /**
      * Exchange the refresh credential for a new session. Implementations
      * classify failures into the result rather than throwing.
-     *
-     * Runs while the session core holds its exchange lock, so it must not
-     * trigger a refresh itself.
      *
      * @param refreshToken - the refresh token from the current session, or null
      * when none is held (as when the refresh credential travels in a cookie)

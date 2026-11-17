@@ -54,7 +54,7 @@ export interface SessionCoreContext<U extends SessionUser = SessionUser, C = Pas
     /** Create the lineage of a new sign-in: a non-empty string unique to it, such as a random UUID; not a secret. */
     readonly createLineage: () => string;
 
-    /** Serialises every sign-in, refresh and sign-out exchange across the contexts sharing the persisted session, such as a Web Lock, and is never the persistence's own lock. Default: one in-process lock per state, which suffices only while one state uses the persisted session. */
+    /** Serialises every sign-in, refresh and sign-out exchange across the contexts sharing the persisted session, such as a Web Lock, and is never the persistence's own lock; a request that never settles holds every later exchange, so give the HTTP client a timeout that aborts it. Default: one in-process lock per state, which suffices only while one state uses the persisted session. */
     readonly exchangeLock?: SessionLock;
 }
 
@@ -155,6 +155,9 @@ interface Exchange {
 
     /** Send the sign-in request, presenting the given refresh token. */
     readonly send: (refreshToken: string | null) => Promise<LoginResult>;
+
+    /** Sign an issued session out on the server, swallowing a failure. */
+    readonly signOut: (tokens: SessionTokens) => Promise<void>;
 }
 
 /**
@@ -254,6 +257,13 @@ export async function loginWithCredentials<U extends SessionUser, C>(
             attempt,
             lineage,
             send: refreshToken => context.api.login(credentials, device, refreshToken),
+            signOut: async tokens => {
+                try {
+                    await context.api.logout(tokens);
+                } catch {
+                    // The orphaned server session is left to expire.
+                }
+            },
         }),
     );
 
@@ -295,7 +305,10 @@ export async function loginWithCredentials<U extends SessionUser, C>(
  * reported as such. A transient or other failure keeps the tokens. A signed-out
  * state makes no request. A rotation that could not be persisted is invisible
  * to other contexts, so one of them presenting the spent token after the
- * server's grace window can still get the session revoked.
+ * server's grace window can still get the session revoked. Likewise, when a
+ * sign-in's session is held by no context and neither clearing the stored
+ * session nor signing that session out succeeds, a refresh can present its
+ * cookie for the stored session.
  */
 export async function refreshSession<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -329,9 +342,9 @@ export async function refreshSession<U extends SessionUser, C>(
  * captured tokens. The server is asked only while the persisted session is
  * still the one this sign-out left, so a sign-in that landed meanwhile, in any
  * context, is never signed out; a skipped or failed request leaves the server
- * session to expire. Resolves once the server attempt has settled or been
- * skipped, which does not confirm revocation; a persistence failure is then
- * rethrown.
+ * session to expire. The request holds the exchange lock until it settles.
+ * Resolves once the server attempt has settled or been skipped, which does not
+ * confirm revocation; a persistence failure is then rethrown.
  */
 export async function logoutSession<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -419,10 +432,12 @@ export function sessionIdentity(state: SessionState<SessionUser>): object | null
  * Send a sign-in, install the session it issues and persist it, all while
  * holding the exchange lock. A session that cannot be persisted, or that a
  * later sign-in overtook before it was, is rolled back before the lock is
- * released, so no context holds a session whose version was never written. A
- * session issued after the sign-in was overtaken signs the state out when its
- * refresh credential was not handed back, since the cookie carrying it no
- * longer belongs to the held session.
+ * released, so no context holds a session whose version was never written. An
+ * issued session no context holds is signed out on the server, deleting its
+ * cookie before another context's exchange can present it. A session issued
+ * after the sign-in was overtaken also signs the state out when its refresh
+ * credential was not handed back, since the cookie carrying it no longer
+ * belongs to the held session.
  *
  * @returns the installed sign-in, or what the sign-in reports instead
  */
@@ -442,9 +457,13 @@ async function exchangeCredentials(
     const result = await exchange.send(state.refreshToken);
 
     if (!isLatest()) {
-        // Its cookie may have replaced the one the held session refreshes with.
-        if (result.kind === 'authenticated' && result.tokens.refreshToken === null) {
-            await reset(scope).catch(() => undefined);
+        if (result.kind === 'authenticated') {
+            await exchange.signOut(result.tokens);
+
+            // Its cookie may have replaced the held session's refresh cookie.
+            if (result.tokens.refreshToken === null) {
+                await reset(scope).catch(() => undefined);
+            }
         }
 
         return SUPERSEDED;
@@ -474,12 +493,14 @@ async function exchangeCredentials(
         );
     } catch (error) {
         await rollBack(scope, isInstalled);
+        await exchange.signOut(result.tokens);
 
         throw error;
     }
 
     if (saved === null) {
         await rollBack(scope, isInstalled);
+        await exchange.signOut(result.tokens);
 
         return SUPERSEDED;
     }

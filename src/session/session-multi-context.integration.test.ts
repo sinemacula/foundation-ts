@@ -233,6 +233,15 @@ function served(server: FakeAuthServer, operation: FakeAuthOperation): number {
 }
 
 /**
+ * Name the session each sign-out request's bearer token was issued for.
+ */
+function signedOut(server: FakeAuthServer): Array<string | null> {
+    return server.requests
+        .filter(request => request.operation === 'logout')
+        .map(request => server.issuerOf(request.bearer)?.id ?? null);
+}
+
+/**
  * Let every queued callback run.
  */
 async function flush(): Promise<void> {
@@ -348,7 +357,7 @@ describe('contexts sharing a persisted session', () => {
             ['valid', false],
             ['expired', true],
         ])(
-            'makes no request once the sign-in rolled back its unpersisted session, the bearer token %s',
+            'makes no request once the sign-in rolled back and signed out its unpersisted session, the bearer token %s',
             async (_label, expired) => {
                 const { built, b, login, logout, release } = await queued(expired);
                 built.storage.failures = 1;
@@ -358,16 +367,17 @@ describe('contexts sharing a persisted session', () => {
                 await expect(login).resolves.toHaveProperty('message', 'quota');
                 await logout;
                 expect(b.state.accessToken).toBeNull();
-                expect(served(built.server, 'logout')).toBe(0);
-                expect(built.server.session('s4')?.revoked).toBeNull();
+                expect(signedOut(built.server)).toStrictEqual(['s4']);
+                expect(built.server.cookie).toBeNull();
+                expect(built.server.sessions().map(session => session.revoked)).toStrictEqual([null, 'signed_out']);
             },
         );
 
         it.each([
-            ['valid, signs A out and deletes the orphaned cookie', false, ['signed_out', null]],
-            ['expired, falls back to the orphaned cookie and revokes its session', true, [null, 'signed_out']],
+            ['valid, signs A out', false, ['signed_out', 'signed_out']],
+            ['expired, finding no cookie left to sign out', true, [null, 'signed_out']],
         ])(
-            'proceeds once neither the save nor its rollback could be written; the bearer token %s',
+            'proceeds once the sign-in signed out a session it could neither save nor roll back; the bearer token %s',
             async (_label, expired, revoked) => {
                 const { built, b, login, logout, release } = await queued(expired);
                 built.storage.failures = 2;
@@ -377,7 +387,7 @@ describe('contexts sharing a persisted session', () => {
                 await expect(login).resolves.toHaveProperty('message', 'quota');
                 await logout;
                 expect(b.state.accessToken).toBeNull();
-                expect(served(built.server, 'logout')).toBe(1);
+                expect(signedOut(built.server)).toStrictEqual(['s4', 's1']);
                 expect(built.server.cookie).toBeNull();
                 expect(built.server.sessions().map(session => session.revoked)).toStrictEqual(revoked);
             },
@@ -405,8 +415,8 @@ describe('contexts sharing a persisted session', () => {
                 await expect(login).resolves.toHaveProperty('message', 'unreadable');
                 await logout;
                 await expect(newer).resolves.toStrictEqual({ kind: 'authenticated' });
-                expect(served(built.server, 'logout')).toBe(0);
-                expect(built.server.session('s4')?.revoked).toBe('superseded');
+                expect(signedOut(built.server)).toStrictEqual(['s4']);
+                expect(built.server.session('s4')?.revoked).toBe('signed_out');
                 expect(built.server.sessionOf(b.state.accessToken)?.revoked).toBeNull();
                 await expect(refreshSession(b.state, b.context)).resolves.toStrictEqual({ kind: 'refreshed' });
             },
@@ -447,7 +457,8 @@ describe('contexts sharing a persisted session', () => {
             release();
 
             await expect(overtaken).resolves.toStrictEqual({ kind: 'superseded' });
-            expect(built.server.cookie).toBe('refresh-s4-5');
+            expect(built.server.cookie).toBeNull();
+            expect(built.server.session('s4')?.revoked).toBe('signed_out');
             expect(a.state).toStrictEqual(createInitialSessionState());
             expect(JSON.parse(built.storage.get('auth.session') ?? 'null')).toMatchObject({ session: null });
 
@@ -465,6 +476,20 @@ describe('contexts sharing a persisted session', () => {
             }
         },
     );
+
+    it('never pair the cookie of a sign-in that could be neither saved nor rolled back with the stored session', async () => {
+        const built = world({ transport: 'cookie' });
+        const [a, b] = await twoSignedIn(built);
+        built.storage.failures = 2;
+
+        await expect(loginWithCredentials(a.state, a.context, BOB)).rejects.toThrow('quota');
+
+        expect(built.server.cookie).toBeNull();
+        expect(built.server.sessions().map(session => session.revoked)).toStrictEqual([null, 'signed_out']);
+        await expect(refreshSession(b.state, b.context)).resolves.toHaveProperty('kind', 'rejected');
+        expect(b.state).toStrictEqual(createInitialSessionState());
+        expect(JSON.parse(built.storage.get('auth.session') ?? 'null')).toMatchObject({ session: null });
+    });
 
     it('lose the session when a rotation that could not be persisted is replayed after the grace window', async () => {
         const built = world();

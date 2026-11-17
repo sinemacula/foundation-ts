@@ -578,7 +578,8 @@ describe('hydrateSession', () => {
 
         await expect(login).resolves.toStrictEqual({ kind: 'superseded' });
         expect(tokensOf(state)).toStrictEqual(tokens('elsewhere'));
-        expect(api.calls).toStrictEqual(['login']);
+        expect(api.calls).toStrictEqual(['login', 'logout']);
+        expect(api.logoutCalls).toStrictEqual([tokens('a')]);
     });
 
     it.each([
@@ -884,10 +885,31 @@ describe('loginWithCredentials', () => {
         expect(persistence.snapshot).toStrictEqual({ revision: 3, session: null });
     });
 
-    it('rolls the session back when it cannot be persisted', async () => {
+    it('rolls the session back and signs it out when it cannot be persisted', async () => {
         const { state, api, persistence, context } = fixture();
         api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
         api.users.push(ALICE);
+        persistence.saveFailure = new Error('quota');
+
+        await expect(loginWithCredentials(state, context, CREDENTIALS)).rejects.toThrow('quota');
+
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.operations).toStrictEqual(['save@0:access-a', 'clear@0']);
+        expect(api.logoutCalls).toStrictEqual([tokens('a')]);
+    });
+
+    it.each([
+        ['rejects', (): Promise<void> => Promise.reject(new Error('offline'))],
+        [
+            'throws',
+            (): Promise<void> => {
+                throw new Error('offline');
+            },
+        ],
+    ])('rethrows the persistence failure when signing the unpersisted session out %s', async (_label, logout) => {
+        const { state, api, persistence, context } = fixture();
+        api.logins.push({ kind: 'authenticated', tokens: tokens('a') });
+        api.logout = logout;
         persistence.saveFailure = new Error('quota');
 
         await expect(loginWithCredentials(state, context, CREDENTIALS)).rejects.toThrow('quota');
@@ -911,7 +933,9 @@ describe('loginWithCredentials', () => {
         const { state, api, persistence, context } = fixture();
         const gate = deferred<undefined>();
         const later = deferred<LoginResult>();
+        const signedOut = deferred<undefined>();
         api.logins.push({ kind: 'authenticated', tokens: tokens('a') }, later.promise);
+        api.logouts.push(signedOut.promise);
         api.users.push(BOB);
         persistence.saveGate = gate.promise;
         persistence.saveFailure = new Error('quota');
@@ -922,8 +946,14 @@ describe('loginWithCredentials', () => {
         const second = loginWithCredentials(state, context, CREDENTIALS);
 
         gate.resolve(undefined);
+        await flush();
+
+        expect(api.calls).toStrictEqual(['login', 'logout']);
+
+        signedOut.resolve(undefined);
 
         await expect(first).rejects.toThrow('quota');
+        expect(api.logoutCalls).toStrictEqual([tokens('a')]);
         expect(state).toStrictEqual(createInitialSessionState());
         expect(api.loginCalls.map(call => call.refreshToken)).toStrictEqual([null, null]);
 
@@ -952,6 +982,7 @@ describe('loginWithCredentials', () => {
         await expect(first).resolves.toStrictEqual({ kind: 'superseded' });
         await expect(second).resolves.toStrictEqual({ kind: 'authenticated' });
         expect(api.loginCalls.map(call => call.refreshToken)).toStrictEqual([null, null]);
+        expect(api.logoutCalls).toStrictEqual([tokens('a')]);
         expect(persistence.operations).toStrictEqual(['save@0:access-a', 'clear@0', 'clear@1', 'save@2:access-b']);
         expect(persistence.snapshot).toStrictEqual({ revision: 3, session: persisted('b', 'lineage-2') });
     });
@@ -1983,6 +2014,7 @@ describe('logoutSession', () => {
             await expect(first).resolves.toStrictEqual({ kind: 'superseded' });
             expect(state).toStrictEqual(createInitialSessionState());
             expect(persistence.snapshot.session).toBeNull();
+            expect(api.logoutCalls).toStrictEqual([tokens('b', { refreshToken: null })]);
 
             await second.catch(() => undefined);
 
@@ -2007,6 +2039,28 @@ describe('logoutSession', () => {
         await expect(second).rejects.toThrow('Invalid');
         expect(state).toStrictEqual({ ...tokens('a', { refreshToken: null }), user: ALICE });
         expect(persistence.operations).toStrictEqual([]);
+        expect(api.logoutCalls).toStrictEqual([]);
+    });
+
+    it('signs the state out when signing an overtaken cookie sign-in out throws', async () => {
+        const { state, api, persistence, context } = await signedIn(tokens('a', { refreshToken: null }));
+        const response = deferred<LoginResult>();
+        api.logins.push(response.promise, new HttpError(422, 'Invalid'));
+        api.logout = (): Promise<void> => {
+            throw new Error('offline');
+        };
+
+        const first = loginWithCredentials(state, context, CREDENTIALS);
+
+        await flush();
+        const second = loginWithCredentials(state, context, CREDENTIALS);
+
+        response.resolve({ kind: 'authenticated', tokens: tokens('b', { refreshToken: null }) });
+
+        await expect(first).resolves.toStrictEqual({ kind: 'superseded' });
+        await expect(second).rejects.toThrow('Invalid');
+        expect(state).toStrictEqual(createInitialSessionState());
+        expect(persistence.snapshot).toStrictEqual({ revision: 2, session: null });
     });
 
     it('still reports an overtaken cookie sign-in as superseded when the store cannot be cleared', async () => {
