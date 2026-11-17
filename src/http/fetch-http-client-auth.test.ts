@@ -720,6 +720,47 @@ describe('FetchHttpClient - cancellation while not in flight', () => {
         expect(fetchFn).toHaveBeenCalledTimes(fetches);
     });
 
+    it('never invokes the handler when the caller aborts as the 401 arrives', async () => {
+        const caller = new AbortController();
+        const reason = new Error('navigated away');
+        const fetchFn = makeFetch(() => {
+            caller.abort(reason);
+
+            return Promise.resolve(unauthorized());
+        });
+        const onUnauthorized = vi.fn<UnauthorizedHandler>().mockResolvedValue(true);
+        const client = makeClient(fetchFn, { onUnauthorized });
+
+        const error = await rejectionOf(client.get('/secure', { signal: caller.signal }), CancelledError);
+
+        expect(error.message).toBe('GET https://api.example.com/secure was cancelled.');
+        expect(error.cause).toBe(reason);
+        expect(onUnauthorized).not.toHaveBeenCalled();
+        expect(fetchFn).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+        ['no handler is set', {}, {}],
+        [
+            'the request opts out of the handler',
+            { onUnauthorized: () => Promise.resolve(true) },
+            { retryOnUnauthorized: false },
+        ],
+    ])('keeps a 401 the caller aborted as it arrived when %s', async (_case, extra, options) => {
+        const caller = new AbortController();
+        const fetchFn = makeFetch(() => {
+            caller.abort();
+
+            return Promise.resolve(unauthorized());
+        });
+        const client = makeClient(fetchFn, extra);
+
+        const error = await rejectionOf(client.get('/secure', { ...options, signal: caller.signal }), HttpError);
+
+        expect(error.status).toBe(401);
+        expect(fetchFn).toHaveBeenCalledOnce();
+    });
+
     it('runs no interceptor and no fetch for an already-aborted signal', async () => {
         const fetchFn = makeFetch(async () => jsonResponse({}));
         const interceptor = vi.fn((request: HttpRequest) => request);
