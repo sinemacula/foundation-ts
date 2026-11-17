@@ -7,9 +7,9 @@
 
 import { createServer } from 'node:http';
 import type { IncomingMessage, Server, ServerResponse } from 'node:http';
-import type { AddressInfo, Socket } from 'node:net';
+import type { AddressInfo } from 'node:net';
 
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { FetchHttpClient } from './fetch-http-client';
 import type { FetchHttpClientOptions } from './fetch-http-client';
@@ -39,10 +39,7 @@ interface Signal {
     readonly fire: () => void;
 }
 
-/** Every socket the server has accepted, destroyed on teardown. */
-const sockets = new Set<Socket>();
-
-/** The test server, listening on an ephemeral port. */
+/** The current test's server, on a fresh port so no connection outlives it. */
 let server: Server;
 
 /** The server's base URL, set once it listens. */
@@ -105,13 +102,9 @@ function failureOf(promise: Promise<unknown>, headersSeen: Signal): Promise<[unk
     );
 }
 
-beforeAll(async () => {
+beforeEach(async () => {
     server = createServer((request, response) => {
         route(request, response);
-    });
-    server.on('connection', socket => {
-        sockets.add(socket);
-        socket.on('close', () => sockets.delete(socket));
     });
 
     await new Promise<void>(resolve => {
@@ -121,13 +114,9 @@ beforeAll(async () => {
     baseUrl = `http://127.0.0.1:${String((server.address() as AddressInfo).port)}`;
 });
 
-afterEach(() => {
-    for (const socket of sockets) {
-        socket.destroy();
-    }
-});
+afterEach(async () => {
+    server.closeAllConnections();
 
-afterAll(async () => {
     await new Promise<void>((resolve, reject) => {
         server.close(error => {
             if (error === undefined) {
