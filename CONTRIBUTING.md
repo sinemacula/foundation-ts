@@ -101,6 +101,9 @@ npx vitest run -t "rehydrateSessionUser"
 release-please cuts releases from the Conventional Commit history, and CI publishes them to npm through OIDC trusted
 publishing. The `prepare` script builds `dist/` before the tarball is packed.
 
+Below 1.0.0 every release is a new minor version, breaking or not, so a `^0.x` range never moves to a release
+unannounced. Graduating to 1.0.0 is an explicit decision that also restores the default versioning strategy.
+
 ## Security
 
 If you discover a security vulnerability, please report it directly to Sine Macula rather than opening a public issue.
