@@ -61,11 +61,14 @@ Run everything through qlty rather than invoking the underlying tools directly; 
 Run the full suite before submitting:
 
 ```bash
-npm run typecheck        # Type-check with tsc
-npm run test:coverage    # Unit tests, with 100% coverage enforced
-npm run deadcode         # Dead-code detection with knip
-npm run build            # Production build
-npm run check:pkg        # Packaging checks (publint + attw) on the built tarball
+npm run typecheck          # Type-check with tsc
+npm run test:coverage      # Unit tests, with 100% coverage enforced
+npm run deadcode           # Dead-code detection with knip
+npm run build              # Production build
+npm run check:pkg          # Packaging checks (publint + attw) on the built tarball
+npm run smoke:node         # Import every export from the packed tarball under Node
+npm run smoke:react-native # Load every export under Metro, Hermes and Jest
+npm run api:check          # Fail if the public API differs from api/foundation.api.md
 ```
 
 Single test file or test:
