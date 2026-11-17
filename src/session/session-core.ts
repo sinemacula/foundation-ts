@@ -6,10 +6,11 @@
  * once a later sign-in, sign-out, clear or adoption has started, and a sign-out
  * or clear removes whatever session is then held unless a sign-in has landed
  * since. A refresh or user fetch applies only to the session it started on,
- * which a rotation keeps. Persistence operations on one state run one at a
- * time, each re-checking supersession before it writes. A stored snapshot
- * replaces the state only at a higher revision, so a rotated pair that could
- * not be persisted is never traded back for the spent pair still stored.
+ * which a rotation keeps and every other change replaces, a sign-out as soon as
+ * it starts. Persistence operations on one state run one at a time, each
+ * re-checking supersession before it writes. A stored snapshot replaces the
+ * state only at a higher revision, so a rotated pair that could not be
+ * persisted is never traded back for the spent pair still stored.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
