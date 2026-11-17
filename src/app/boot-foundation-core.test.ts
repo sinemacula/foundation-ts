@@ -18,6 +18,7 @@ import type { ModuleHttpContributions } from '../http/module-http-contributions'
 import { NullLogger } from '../logging/null-logger';
 import type { Confirmer } from '../notifications/confirmer';
 import type { Toaster } from '../notifications/toaster';
+import type { ErrorReporter } from '../reporting/error-reporter';
 import { NullErrorReporter } from '../reporting/null-error-reporter';
 import { MemoryStorage } from '../storage/memory-storage';
 import { SupportError } from '../support/support-error';
@@ -597,6 +598,73 @@ describe('bootFoundationCore', () => {
         expect(analytics()).toBe(core.observability.analytics);
         expect(logger()).toBe(core.observability.logger);
         expect(api()).toBe(core.http);
+    });
+
+    describe('the default feature flags', () => {
+        /**
+         * Boot with the default flags over a reporter whose capture is given.
+         */
+        async function bootFlags(captureError: ErrorReporter['captureError']): Promise<StaticFeatureFlags> {
+            const reporter: ErrorReporter = { captureError, captureMessage: vi.fn(), setUser: vi.fn() };
+            const core = await bootFoundationCore(
+                {
+                    createEnvironment: () => environmentOf(),
+                    define: () => createConfig(),
+                    storage: new MemoryStorage(),
+                    toasts: createToasterStub(),
+                    confirm: createConfirmerStub(),
+                    observability: { reporter: () => reporter },
+                    collectHttpContributions: () => createContributions(),
+                },
+                { fetchFn: createFetchStub() },
+            );
+
+            return core.flags as StaticFeatureFlags;
+        }
+
+        it('reports a failing change handler to the installed reporter', async () => {
+            const failure = new Error('handler failed');
+            const captureError = vi.fn();
+            const later = vi.fn();
+            const flags = await bootFlags(captureError);
+
+            flags.onChange(() => {
+                throw failure;
+            });
+            flags.onChange(later);
+            flags.replace({});
+
+            expect(captureError).toHaveBeenCalledExactlyOnceWith(failure, { source: 'feature-flags' });
+            expect(later).toHaveBeenCalledOnce();
+        });
+
+        it.each([
+            [
+                'a throwing reporter',
+                (): void => {
+                    throw new Error('reporter failed');
+                },
+                false,
+            ],
+            ['no installed reporter', vi.fn(), true],
+        ])('contains %s and runs the remaining handlers', async (_case, captureError, reset) => {
+            const later = vi.fn();
+            const flags = await bootFlags(captureError);
+
+            if (reset) {
+                resetFoundationServices();
+            }
+
+            flags.onChange(() => {
+                throw new Error('handler failed');
+            });
+            flags.onChange(later);
+
+            expect(() => {
+                flags.replace({});
+            }).not.toThrow();
+            expect(later).toHaveBeenCalledOnce();
+        });
     });
 
     it('passes the fetched runtime document into createEnvironment', async () => {

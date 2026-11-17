@@ -21,7 +21,14 @@ import type { Toaster } from '../notifications/toaster';
 import type { ErrorReporter } from '../reporting/error-reporter';
 import type { KeyValueStorage } from '../storage/key-value-storage';
 import type { FoundationConfig } from './foundation-config';
-import { installConfig, installConfirm, installFeatureFlags, installStorage, installToasts } from './services';
+import {
+    installConfig,
+    installConfirm,
+    installFeatureFlags,
+    installStorage,
+    installToasts,
+    reporting,
+} from './services';
 import type { WireHttpClientTools } from './wire-http-client';
 import { wireHttpClient } from './wire-http-client';
 import type { WiredObservability } from './wire-observability';
@@ -80,7 +87,7 @@ export interface FoundationCoreOptions<T extends FoundationConfig> {
     /** The confirmation prompter to install; resolved by the kernel. */
     readonly confirm: Confirmer;
 
-    /** Feature-flag adapter factory; wins over the config-delivered default. */
+    /** Feature-flag adapter factory; wins over the config-delivered default, which reports a failing change handler to the installed error reporter. */
     readonly featureFlags?: (settings: DeepReadonly<T>) => FeatureFlags;
 
     /** Observability factories; each wins over the environment default. */
@@ -174,7 +181,13 @@ export async function bootFoundationCore<T extends FoundationConfig>(
 
     options.onPhase?.('feature-flags');
 
-    const flags = options.featureFlags?.(settings) ?? new StaticFeatureFlags(settings.featureFlags.flags);
+    const flags =
+        options.featureFlags?.(settings) ??
+        new StaticFeatureFlags(settings.featureFlags.flags, {
+            onError: error => {
+                reporting().captureError(error, { source: 'feature-flags' });
+            },
+        });
 
     installFeatureFlags(flags);
 
