@@ -29,11 +29,11 @@ jobs:
     # build - all from the shared reusable workflow. This package has no
     # browser surface, so the e2e job is off.
     tests:
-        uses: sinemacula/.github/.github/workflows/node-tests.yml@v2.0.0
-        # Shared workflows from v2 ask for packages: read, which callers grant.
+        uses: sinemacula/.github/.github/workflows/node-tests.yml@v3.0.2
+        # The shared jobs inherit only what this job grants; the coverage upload
+        # signs in through OIDC.
         permissions:
             contents: read
             id-token: write
-            packages: read
         with:
             run-e2e: false
