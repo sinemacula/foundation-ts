@@ -16,7 +16,7 @@ describe('PermissionSet', () => {
         expect(permissions.allows('users.view')).toBe(true);
     });
 
-    it('does not allow a permission that is not granted', () => {
+    it('denies a permission that is not granted', () => {
         const permissions = new PermissionSet(['users.view']);
 
         expect(permissions.allows('users.edit')).toBe(false);
@@ -52,7 +52,7 @@ describe('PermissionSet', () => {
         expect(permissions.allows('users.view')).toBe(false);
     });
 
-    it('does not allow an empty permission string when not explicitly granted', () => {
+    it('denies an empty permission unless granted', () => {
         const permissions = new PermissionSet(['users.view']);
 
         expect(permissions.allows('')).toBe(false);
@@ -71,7 +71,7 @@ describe('PermissionSet', () => {
             expect(permissions.allows('users.edit.self')).toBe(true);
         });
 
-        it('does not allow a permission that only shares a text prefix, not a boundary', () => {
+        it('denies a permission sharing only the text before the boundary', () => {
             const permissions = new PermissionSet(['users.*']);
 
             expect(permissions.allows('usersx.view')).toBe(false);
@@ -85,7 +85,7 @@ describe('PermissionSet', () => {
             expect(permissions.allows('users:view')).toBe(true);
         });
 
-        it('does not allow a permission that only shares a text prefix, not a boundary', () => {
+        it('denies a permission sharing only the text before the boundary', () => {
             const permissions = new PermissionSet(['users:*']);
 
             expect(permissions.allows('usersx:view')).toBe(false);

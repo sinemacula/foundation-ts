@@ -20,92 +20,31 @@ describe('ConsoleAnalyticsTracker', () => {
         infoSpy.mockRestore();
     });
 
-    describe('track', () => {
-        it('calls console.info with the prefix, label and event name', () => {
-            const tracker = new ConsoleAnalyticsTracker();
+    describe.each(['track', 'page', 'identify'] as const)('%s', method => {
+        it('logs the prefixed call', () => {
+            new ConsoleAnalyticsTracker()[method]('subject');
 
-            tracker.track('button_clicked');
-
-            expect(infoSpy).toHaveBeenCalledWith('[AnalyticsTracker] track', 'button_clicked');
+            expect(infoSpy).toHaveBeenCalledWith(`[AnalyticsTracker] ${method}`, 'subject');
         });
 
-        it('calls console.info with properties when provided', () => {
-            const tracker = new ConsoleAnalyticsTracker();
-            const props = { label: 'submit' };
+        it('logs the attributes when given', () => {
+            const attributes = { plan: 'pro' };
 
-            tracker.track('button_clicked', props);
+            new ConsoleAnalyticsTracker()[method]('subject', attributes);
 
-            expect(infoSpy).toHaveBeenCalledWith('[AnalyticsTracker] track', 'button_clicked', props);
+            expect(infoSpy).toHaveBeenCalledWith(`[AnalyticsTracker] ${method}`, 'subject', attributes);
         });
 
-        it('does not pass a third argument when properties are omitted', () => {
-            const tracker = new ConsoleAnalyticsTracker();
-
-            tracker.track('event');
-
-            expect(infoSpy.mock.calls[0]).toHaveLength(2);
-        });
-    });
-
-    describe('page', () => {
-        it('calls console.info with the prefix, label and page name', () => {
-            const tracker = new ConsoleAnalyticsTracker();
-
-            tracker.page('Home');
-
-            expect(infoSpy).toHaveBeenCalledWith('[AnalyticsTracker] page', 'Home');
-        });
-
-        it('calls console.info with properties when provided', () => {
-            const tracker = new ConsoleAnalyticsTracker();
-            const props = { path: '/home' };
-
-            tracker.page('Home', props);
-
-            expect(infoSpy).toHaveBeenCalledWith('[AnalyticsTracker] page', 'Home', props);
-        });
-
-        it('does not pass a third argument when properties are omitted', () => {
-            const tracker = new ConsoleAnalyticsTracker();
-
-            tracker.page('Home');
-
-            expect(infoSpy.mock.calls[0]).toHaveLength(2);
-        });
-    });
-
-    describe('identify', () => {
-        it('calls console.info with the prefix, label and user id', () => {
-            const tracker = new ConsoleAnalyticsTracker();
-
-            tracker.identify('user-42');
-
-            expect(infoSpy).toHaveBeenCalledWith('[AnalyticsTracker] identify', 'user-42');
-        });
-
-        it('calls console.info with traits when provided', () => {
-            const tracker = new ConsoleAnalyticsTracker();
-            const traits = { plan: 'pro' };
-
-            tracker.identify('user-42', traits);
-
-            expect(infoSpy).toHaveBeenCalledWith('[AnalyticsTracker] identify', 'user-42', traits);
-        });
-
-        it('does not pass a third argument when traits are omitted', () => {
-            const tracker = new ConsoleAnalyticsTracker();
-
-            tracker.identify('user-42');
+        it('omits absent attributes', () => {
+            new ConsoleAnalyticsTracker()[method]('subject');
 
             expect(infoSpy.mock.calls[0]).toHaveLength(2);
         });
     });
 
     describe('reset', () => {
-        it('calls console.info with the prefix and label', () => {
-            const tracker = new ConsoleAnalyticsTracker();
-
-            tracker.reset();
+        it('logs the prefixed call', () => {
+            new ConsoleAnalyticsTracker().reset();
 
             expect(infoSpy).toHaveBeenCalledWith('[AnalyticsTracker] reset');
         });

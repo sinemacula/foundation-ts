@@ -1,9 +1,5 @@
 /**
- * Console logger adapter.
- *
- * Writes log entries to the console for use during development. Not intended
- * for production - swap in a real provider adapter via the Logger port when
- * deploying.
+ * Development logger that writes to the console.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -19,22 +15,18 @@ const LEVEL_ORDER: Readonly<Record<LogLevel, number>> = {
 };
 
 /**
- * A logger that writes to the console, dropping entries below a configured
- * minimum level.
+ * A logger that writes to the console, dropping entries below a minimum level.
  *
- * `console.log` and `console.debug` are disallowed by lint tooling, so both
- * `debug` and `info` write via `console.info`; `warn` and `error` write via
- * their matching console method.
+ * `debug` writes via `console.info` because `console.debug` is lint-banned.
  */
 export class ConsoleLogger implements Logger {
     /** The lowest level written to the console. */
     readonly #minimumLevel: LogLevel;
 
     /**
-     * Retain the lowest level to write; quieter entries are dropped.
+     * Create a logger that drops entries below `minimumLevel`.
      *
-     * @param minimumLevel - the lowest level written to the console (default
-     * 'debug')
+     * @param minimumLevel - the lowest level written (default 'debug')
      */
     constructor(minimumLevel: LogLevel = 'debug') {
         this.#minimumLevel = minimumLevel;
@@ -69,13 +61,9 @@ export class ConsoleLogger implements Logger {
     }
 
     /**
-     * Write an entry to the given console sink, dropping it when the level
-     * falls below the configured minimum.
+     * Write an entry to `sink` unless its level is below the minimum.
      *
-     * @param level - the level of this entry
      * @param sink - the console method to write through
-     * @param message - the human-readable message
-     * @param fields - structured key-value pairs to attach to the entry
      */
     #write(level: LogLevel, sink: (...args: unknown[]) => void, message: string, fields?: LogFields): void {
         if (LEVEL_ORDER[level] < LEVEL_ORDER[this.#minimumLevel]) {

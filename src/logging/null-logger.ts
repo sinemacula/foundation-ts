@@ -1,9 +1,5 @@
 /**
- * No-op logger adapter.
- *
- * Used as the default when no logging provider is configured. All methods are
- * intentionally empty so that calls are silently ignored rather than throwing
- * or writing to the console.
+ * No-op logger, the default when no provider is configured.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -16,28 +12,28 @@ import type { LogFields, Logger } from './logger';
  */
 export class NullLogger implements Logger {
     /**
-     * Discard the entry; the null logger writes nothing.
+     * Discard the entry.
      */
     debug(_message: string, _fields?: LogFields): void {
         // Intentionally empty: no provider is configured.
     }
 
     /**
-     * Discard the entry; the null logger writes nothing.
+     * Discard the entry.
      */
     info(_message: string, _fields?: LogFields): void {
         // Intentionally empty: no provider is configured.
     }
 
     /**
-     * Discard the entry; the null logger writes nothing.
+     * Discard the entry.
      */
     warn(_message: string, _fields?: LogFields): void {
         // Intentionally empty: no provider is configured.
     }
 
     /**
-     * Discard the entry; the null logger writes nothing.
+     * Discard the entry.
      */
     error(_message: string, _fields?: LogFields): void {
         // Intentionally empty: no provider is configured.

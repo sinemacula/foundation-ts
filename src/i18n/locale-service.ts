@@ -1,11 +1,6 @@
 /**
  * Locale detection and persistence.
  *
- * Resolution order: a stored preference wins, then the caller-provided
- * candidates (typically `navigator.languages`), then the configured default.
- * Matching is case-insensitive and falls back from exact region matches
- * (`fr-CA`) to language matches (`fr-FR`).
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -55,10 +50,11 @@ export class LocaleService {
     }
 
     /**
-     * Resolve the active locale.
+     * Resolve the active locale: the stored preference, then the first matching
+     * candidate, then the default.
      *
-     * @param candidates - preferred locales, most preferred first
-     * @returns the first enabled match, or the default locale
+     * @param candidates - preferred locales, most preferred first (typically
+     * `navigator.languages`)
      */
     detect(candidates: readonly string[] = []): string {
         const stored = this.#storage.get(this.#storageKey);
@@ -80,10 +76,10 @@ export class LocaleService {
     }
 
     /**
-     * Match a candidate against the enabled locales.
+     * Match a candidate case-insensitively against the enabled locales: an
+     * exact match first, then a language match (`fr-CA` matches `fr-FR`).
      *
-     * @param candidate - the locale code to match (e.g. `fr-CA`)
-     * @returns the enabled locale it resolves to, or null
+     * @returns the matching enabled locale, or null when none matches
      */
     match(candidate: string): string | null {
         const normalised = candidate.toLowerCase();
@@ -107,8 +103,6 @@ export class LocaleService {
 
     /**
      * Persist the user's locale choice.
-     *
-     * @param locale - the locale code to store
      */
     persist(locale: string): void {
         this.#storage.set(this.#storageKey, locale);
@@ -116,10 +110,7 @@ export class LocaleService {
 }
 
 /**
- * Extract the language subtag from a normalised locale code.
- *
- * @param locale - the lower-cased locale code (e.g. `fr-ca`)
- * @returns the language subtag (e.g. `fr`)
+ * Extract the language subtag from a lower-cased locale code.
  */
 function languageOf(locale: string): string {
     const separatorIndex = locale.indexOf('-');

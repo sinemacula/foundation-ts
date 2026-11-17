@@ -10,13 +10,13 @@ import { describe, expect, it } from 'vitest';
 import { I18nError } from './i18n-error';
 
 describe('I18nError', () => {
-    it('sets the name property to I18nError', () => {
+    it('is named I18nError', () => {
         const error = new I18nError('unknown locale');
 
         expect(error.name).toBe('I18nError');
     });
 
-    it('sets the message from the first argument', () => {
+    it('carries the message', () => {
         const error = new I18nError('unknown locale');
 
         expect(error.message).toBe('unknown locale');
@@ -34,7 +34,7 @@ describe('I18nError', () => {
         expect(error).toBeInstanceOf(I18nError);
     });
 
-    it('stores the cause when options are provided', () => {
+    it('carries the cause', () => {
         const cause = new Error('root cause');
         const error = new I18nError('wrapped', { cause });
 

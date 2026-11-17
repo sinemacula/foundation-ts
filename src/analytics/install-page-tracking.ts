@@ -1,10 +1,5 @@
 /**
- * Page tracking installer.
- *
- * Registers an after-navigation hook that fires a page-view event for every
- * completed navigation, and optionally records the navigation as a breadcrumb
- * on the session trail. The navigation source is a structural port, so any
- * router exposing a matching `afterEach` satisfies it (vue-router on web).
+ * Page-view tracking for any router exposing a vue-router style `afterEach`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,11 +50,10 @@ export interface PageTrackingOptions {
 }
 
 /**
- * Install an after-navigation hook that tracks page views and records
- * breadcrumbs.
+ * Track a page view, and a breadcrumb when a trail is given, after every
+ * navigation.
  *
- * @param options - the navigation source, tracker and optional breadcrumb trail
- * @returns a teardown that removes the hook; safe to call more than once
+ * @returns the router's teardown for the hook
  */
 export function installPageTracking(options: PageTrackingOptions): () => void {
     const { router, tracker, trail } = options;

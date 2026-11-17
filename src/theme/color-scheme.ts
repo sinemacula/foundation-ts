@@ -1,10 +1,5 @@
 /**
- * Colour-scheme types and storage contract.
- *
- * The framework-agnostic surface shared by every platform's colour-scheme
- * service: the preference and resolved types, the persisted storage key, and
- * the namespacing helper. The first-paint boot script is a web concern and
- * lives in foundation-web.
+ * Platform-agnostic colour-scheme types and storage key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,7 +24,6 @@ export const COLOR_SCHEME_STORAGE_KEY = 'theme';
  * Compose the storage key for a namespaced application.
  *
  * @param namespace - the application namespace, or null for none
- * @param key - the base storage key
  * @returns the namespaced key, or the base key when no namespace
  */
 export function composeColorSchemeStorageKey(namespace: string | null, key = COLOR_SCHEME_STORAGE_KEY): string {
