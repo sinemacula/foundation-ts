@@ -5,11 +5,11 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import type { HttpClient, HttpRequestOptions } from '../http/http-client';
 import { ApiQuery } from './api-query';
-import type { RawRecord } from './envelope';
+import type { ListResult, RawRecord } from './envelope';
 import { QueryError } from './query-error';
 import { ResourceClient } from './resource-client';
 
@@ -162,6 +162,18 @@ function createResource(path = 'widgets'): ResourceFixture {
     const resource = new ResourceClient({ client, path, map: mapWidget });
 
     return { client, resource };
+}
+
+/**
+ * Build the client calls that address one resource by `id`.
+ */
+function idCalls(id: string): ReadonlyArray<readonly [string, (resource: ResourceClient<Widget>) => Promise<unknown>]> {
+    return [
+        ['show', r => r.show(id)],
+        ['update', r => r.update(id, {})],
+        ['updateWithoutContent', r => r.updateWithoutContent(id, {})],
+        ['destroy', r => r.destroy(id)],
+    ];
 }
 
 describe('ResourceClient', () => {
@@ -489,6 +501,81 @@ describe('ResourceClient', () => {
             await resource.destroy('w1', { signal: controller.signal });
 
             expect(client.calls.at(0)?.options?.signal).toBe(controller.signal);
+        });
+    });
+
+    describe('request options', () => {
+        it.each([
+            ['list', (r: ResourceClient<Widget>, q: ApiQuery, o: HttpRequestOptions) => r.list(q, o)],
+            ['show', (r: ResourceClient<Widget>, q: ApiQuery, o: HttpRequestOptions) => r.show('w1', q, o)],
+            ['create', (r: ResourceClient<Widget>, q: ApiQuery, o: HttpRequestOptions) => r.create({}, q, o)],
+            ['update', (r: ResourceClient<Widget>, q: ApiQuery, o: HttpRequestOptions) => r.update('w1', {}, q, o)],
+        ])('%s keeps the signal and headers beside the merged query', async (method, call) => {
+            const { client, resource } = createResource();
+            const { signal } = new AbortController();
+            client.queueResponse(method === 'list' ? { data: [] } : widgetEnvelope('w1', 'Widget One'));
+
+            await call(resource, ApiQuery.create().page(2), {
+                signal,
+                headers: { 'X-Trace': 't' },
+                query: { limit: 5 },
+            });
+
+            expect(client.calls.at(0)?.options).toStrictEqual({
+                signal,
+                headers: { 'X-Trace': 't' },
+                query: { page: 2, limit: 5 },
+            });
+        });
+
+        it('lets an explicit undefined entry override the query parameter', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse({ data: [] });
+
+            await resource.list(ApiQuery.create().page(2), { query: { page: undefined } });
+
+            expect(client.calls.at(0)?.options).toStrictEqual({ query: { page: undefined } });
+        });
+    });
+
+    describe('ids', () => {
+        it.each(
+            ['', '/', '//', '.', '..', 'a/../b', 'w1/', 'a//b'].flatMap(id =>
+                idCalls(id).map(([method, call]) => [method, id, call] as const),
+            ),
+        )('%s rejects the id %j without a request', async (_method, id, call) => {
+            const { client, resource } = createResource();
+
+            await expect(call(resource)).rejects.toThrow(
+                new QueryError(`The resource id "${id}" is not a valid path.`),
+            );
+            expect(client.calls).toStrictEqual([]);
+        });
+
+        it.each([
+            ['a?b', 'widgets/a%3Fb'],
+            ['a#b', 'widgets/a%23b'],
+            ['50%', 'widgets/50%25'],
+            ['w1/notes x', 'widgets/w1/notes%20x'],
+            ['%2e%2e', 'widgets/%252e%252e'],
+        ])('encodes each segment of the id %j', async (id, path) => {
+            const { client, resource } = createResource();
+
+            await resource.destroy(id);
+
+            expect(client.calls.at(0)?.path).toBe(path);
+        });
+    });
+
+    describe('types', () => {
+        it('infers the value type from the mapper', () => {
+            const resource = new ResourceClient({ client: new FakeHttpClient(), path: 'widgets', map: mapWidget });
+
+            expectTypeOf(resource).toEqualTypeOf<ResourceClient<Widget>>();
+            expectTypeOf(resource.list).returns.toEqualTypeOf<Promise<ListResult<Widget>>>();
+            expectTypeOf(resource.show).returns.toEqualTypeOf<Promise<Widget>>();
+            expectTypeOf(resource.create).returns.toEqualTypeOf<Promise<Widget>>();
+            expectTypeOf(resource.update).returns.toEqualTypeOf<Promise<Widget>>();
         });
     });
 });

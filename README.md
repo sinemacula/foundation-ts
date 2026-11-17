@@ -99,15 +99,25 @@ const query = ApiQuery.create()
 //          &fields[user]=id,name,aggregates&aggregates[user]=posts_count
 ```
 
-- `andWhere` / `orWhere` take one builder per document; keys inside a document AND together, and repeated calls
-  append documents to the same group. An empty group or document throws a `QueryError`.
+- Filter calls AND together and never replace or widen an earlier condition: a different value for a field, a
+  colliding operator or a second `orWhere` group is ANDed beside the first under `$and`. Rebuild from a base query
+  to change a condition.
+- `andWhere` / `orWhere` take one builder per document; keys inside a document AND together. An empty group or
+  document throws a `QueryError`.
 - Repeated `whereRelation` calls on one relation merge into one document, as do repeated `whereHas` calls, so the
   same related row must match all of them. `whereHasNot` conditions never merge.
 - Free-text search is the `search` parameter (`search(term)`), never a filter operator.
 - Aggregates render under the record's `aggregates` field only when `aggregates` is in `fields[type]` or the
   resource's default fields.
 - `withTrashed()` / `onlyTrashed()` set `trashed=with` / `trashed=only`.
-- Changing the order drops any cursor token but keeps cursor pagination; random order under cursor pagination throws.
+- Changing the filters, search, soft-delete visibility or order drops any cursor token but keeps cursor pagination;
+  `limit` and `page` keep it. Random order under cursor pagination throws.
+- `fieldsFor(type, [])` requests only the fixed fields and `aggregatesFor(type, [])` suppresses the default
+  aggregates.
+- `$`-prefixed field or relation names, non-finite numbers, blank field or aggregate names, and a page or limit that
+  is not a positive integer throw a `QueryError`.
+- `ResourceClient` percent-encodes each `/`-separated id segment and rejects an id with an empty, `.` or `..` segment
+  before sending a request.
 - `ResourceClient.list` returns the mapped `items`, `meta` (`{ mode: 'length-aware', total, count, hasMore }`,
   `{ mode: 'cursor', hasMore }`, or `null`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
 

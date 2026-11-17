@@ -5,10 +5,12 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
 
 import { ApiQuery } from './api-query';
+import type { FilterScalar } from './filter-expression';
 import { filter } from './list-filter';
+import { QueryError } from './query-error';
 
 /**
  * Parse the `filters` parameter of a query back to an object.
@@ -72,6 +74,16 @@ describe('filter', () => {
             expect(parsedFilters(q)).toEqual({ posts: wire([['status', wire([['$in', ['draft', 'published']]])]]) });
         });
 
+        it('takes only a list of scalars', () => {
+            const anyOf = filter.anyOf('role');
+
+            expectTypeOf(anyOf.apply).parameter(1).toEqualTypeOf<readonly FilterScalar[]>();
+            expectTypeOf((query: ApiQuery) => {
+                // @ts-expect-error -- a single scalar is not a list
+                return anyOf.apply(query, 'x');
+            }).toBeFunction();
+        });
+
         it('applies no filter for an empty list', () => {
             const base = ApiQuery.create().where('status', 'active');
             const q = filter.anyOf('posts.status').apply(base, []);
@@ -105,6 +117,12 @@ describe('filter', () => {
             const q = filter.atLeast('order.total').apply(ApiQuery.create(), 50);
 
             expect(parsedFilters(q)).toEqual({ order: wire([['total', wire([['$ge', 50]])]]) });
+        });
+
+        it('refuses an infinite bound', () => {
+            expect(() => filter.atLeast('order.total').apply(ApiQuery.create(), Number.POSITIVE_INFINITY)).toThrow(
+                new QueryError('The "total" filter needs finite numbers.'),
+            );
         });
     });
 
