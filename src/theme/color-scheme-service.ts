@@ -7,6 +7,7 @@
 
 import { COLOR_SCHEME_STORAGE_KEY, type ColorSchemePreference, type ResolvedColorScheme } from './color-scheme';
 import type { KeyValueStorage } from '../storage/key-value-storage';
+import { SubscriberList } from '../support/subscriber-list';
 
 const DEFAULT_PREFERENCE: ColorSchemePreference = 'system';
 
@@ -43,6 +44,17 @@ export interface ColorSchemeApplier {
  * A listener notified when the resolved scheme changes.
  */
 export type ColorSchemeListener = (resolved: ResolvedColorScheme, preference: ColorSchemePreference) => void;
+
+/**
+ * One notified scheme: the resolved scheme and the preference it came from.
+ */
+interface ColorSchemeChange {
+    /** The resolved scheme. */
+    readonly resolved: ResolvedColorScheme;
+
+    /** The preference it was resolved from. */
+    readonly preference: ColorSchemePreference;
+}
 
 /**
  * Construction options for {@link ColorSchemeService}.
@@ -92,7 +104,7 @@ export class ColorSchemeService {
     readonly #defaultPreference: ColorSchemePreference;
 
     /** The registered resolved-scheme listeners. */
-    readonly #listeners = new Set<ColorSchemeListener>();
+    readonly #listeners: SubscriberList<ColorSchemeChange>;
 
     /** Receives a contained listener or storage-read failure. */
     readonly #onError: (error: unknown) => void;
@@ -113,6 +125,7 @@ export class ColorSchemeService {
         this.#storageKey = options.storageKey ?? COLOR_SCHEME_STORAGE_KEY;
         this.#defaultPreference = options.defaultPreference ?? DEFAULT_PREFERENCE;
         this.#onError = options.onError ?? (() => undefined);
+        this.#listeners = new SubscriberList(this.#onError);
         this.#preference = this.#readPreference();
         this.#resolved = this.#derive();
     }
@@ -168,16 +181,18 @@ export class ColorSchemeService {
     }
 
     /**
-     * Subscribe to resolved-scheme changes.
+     * Subscribe to resolved-scheme changes. Every call is its own registration,
+     * removed only by its own unsubscribe. A change reaches the listeners
+     * registered when it was made, skipping any removed meanwhile, with the
+     * scheme as it was then; a change made from inside a listener is delivered
+     * once the current delivery has finished.
      *
-     * @returns an unsubscribe function
+     * @returns a function that removes this registration
      */
     subscribe(listener: ColorSchemeListener): () => void {
-        this.#listeners.add(listener);
-
-        return () => {
-            this.#listeners.delete(listener);
-        };
+        return this.#listeners.add(({ resolved, preference }) => {
+            listener(resolved, preference);
+        });
     }
 
     /**
@@ -228,17 +243,11 @@ export class ColorSchemeService {
     }
 
     /**
-     * Notify every registered listener of the current scheme, passing a
-     * throwing listener's error to the `onError` sink.
+     * Notify the registered listeners of the current scheme, passing a throwing
+     * listener's error to the `onError` sink.
      */
     #notify(): void {
-        for (const listener of this.#listeners) {
-            try {
-                listener(this.#resolved, this.#preference);
-            } catch (error) {
-                this.#report(error);
-            }
-        }
+        this.#listeners.emit({ resolved: this.#resolved, preference: this.#preference });
     }
 
     /**

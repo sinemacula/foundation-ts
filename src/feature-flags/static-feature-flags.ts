@@ -5,6 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
+import { SubscriberList } from '../support/subscriber-list';
 import type { FeatureFlags, FlagEvaluationContext, FlagsChangeHandler, FlagValue } from './feature-flags';
 
 /**
@@ -26,14 +27,11 @@ export class StaticFeatureFlags implements FeatureFlags {
     #context: FlagEvaluationContext = {};
 
     /** The registered flag-change subscribers. */
-    readonly #handlers: Set<FlagsChangeHandler> = new Set();
-
-    /** Receives a contained change-handler failure. */
-    readonly #onError: (error: unknown) => void;
+    readonly #handlers: SubscriberList<void>;
 
     constructor(flags: Readonly<Record<string, FlagValue>> = {}, options: StaticFeatureFlagsOptions = {}) {
         this.#flags = flags;
-        this.#onError = options.onError ?? (() => undefined);
+        this.#handlers = new SubscriberList(options.onError ?? (() => undefined));
     }
 
     /**
@@ -93,30 +91,20 @@ export class StaticFeatureFlags implements FeatureFlags {
     /**
      * Subscribe to the flag-set swaps made by {@link replace}.
      *
-     * @returns an unsubscribe function
+     * @returns a function that removes this registration
      */
     onChange(handler: FlagsChangeHandler): () => void {
-        this.#handlers.add(handler);
-
-        return () => {
-            this.#handlers.delete(handler);
-        };
+        return this.#handlers.add(handler);
     }
 
     /**
-     * Swap the entire flag set and synchronously notify every change handler,
-     * passing a throwing handler's error to the `onError` sink.
+     * Swap the entire flag set and synchronously notify the change handlers
+     * registered now, passing a throwing handler's error to the `onError` sink.
+     * Called from inside a handler, the notification follows the current one.
      */
     replace(flags: Readonly<Record<string, FlagValue>>): void {
         this.#flags = flags;
-
-        for (const handler of this.#handlers) {
-            try {
-                handler();
-            } catch (error) {
-                this.#report(error);
-            }
-        }
+        this.#handlers.emit();
     }
 
     /**
@@ -125,17 +113,5 @@ export class StaticFeatureFlags implements FeatureFlags {
      */
     get context(): FlagEvaluationContext {
         return this.#context;
-    }
-
-    /**
-     * Pass a contained error to the `onError` sink, ignoring a throwing sink so
-     * one failure never starves the remaining handlers.
-     */
-    #report(error: unknown): void {
-        try {
-            this.#onError(error);
-        } catch {
-            // The sink is the last resort; nothing is left to report to.
-        }
     }
 }

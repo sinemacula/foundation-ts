@@ -991,15 +991,8 @@ export declare function runReconnect(steps: ReconnectSteps): Promise<void>;
 Exported as `@sinemacula/foundation/realtime/subscribers`.
 
 ```ts
-export type SubscriberDelivery<T> = (value: T, isLive?: () => boolean) => void;
-export declare class SubscriberList<T> {
-    #private;
-    constructor(report: (error: unknown) => void);
-    get size(): number;
-    add(handler: (value: T) => void): () => void;
-    snapshot(): SubscriberDelivery<T>;
-    emit(value: T): void;
-}
+import { type SubscriberDelivery, SubscriberList } from "../support/subscriber-list.js";
+export { type SubscriberDelivery, SubscriberList };
 export declare class EventSubscribers<T> {
     #private;
     constructor(report: (error: unknown) => void);
@@ -1599,6 +1592,22 @@ export interface ServiceHolder<T> {
     isInstalled(): boolean;
 }
 export declare function createServiceHolder<T>(name: string): ServiceHolder<T>;
+```
+
+## dist/support/subscriber-list.d.ts
+
+Exported as `@sinemacula/foundation/support/subscriber-list`.
+
+```ts
+export type SubscriberDelivery<T> = (value: T, isLive?: () => boolean) => void;
+export declare class SubscriberList<T> {
+    #private;
+    constructor(report: (error: unknown) => void);
+    get size(): number;
+    add(handler: (value: T) => void): () => void;
+    snapshot(): SubscriberDelivery<T>;
+    emit(value: T): void;
+}
 ```
 
 ## dist/support/support-error.d.ts

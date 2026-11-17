@@ -179,14 +179,16 @@ unless the socket is open. Each `on` / `onStateChange` call is its own registrat
 registered when it started, and state changes made from a handler are delivered in order after the current one.
 `onError` receives failures the connection contains (a throwing subscriber, `url()` builder or socket factory); the
 same failure inside `connect()` throws a `RealtimeError` with the original as its `cause`. `realtime/subscribers`
-exports the registries behind these rules for other transport adapters.
+exports the registries behind these rules for other transport adapters, and `support/subscriber-list` the list itself.
 
 ### Contained failures
 
 `StaticFeatureFlags`, `ColorSchemeService` and `installPageTracking` take an optional `onError` sink, as
 `WebSocketConnection` does: a synchronous throw from a change handler, listener, tracker or breadcrumb trail goes to the
-sink and never stops the others or reaches the caller. Page tracking records only completed navigations, by path: query
-strings and hashes never reach the tracker or the trail.
+sink and never stops the others or reaches the caller. Flag-change handlers and scheme listeners follow the realtime
+registration rules: each subscribe is its own registration, a change reaches the handlers registered when it was made,
+and a change made from a handler is delivered after the current one. Page tracking records only completed navigations,
+by path: query strings and hashes never reach the tracker or the trail.
 
 ### Adapter contracts
 
