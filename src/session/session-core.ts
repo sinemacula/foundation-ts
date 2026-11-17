@@ -2,6 +2,15 @@
  * Platform-agnostic session transitions over an explicit state; every token
  * write is awaited before a transition reports success.
  *
+ * The latest explicit action wins: a sign-in or hydration discards its result
+ * once a later sign-in, sign-out, clear or adoption has started, and a sign-out
+ * or clear removes whatever session is then held unless a sign-in has landed
+ * since. A refresh or user fetch applies only to the session it started on,
+ * which a rotation keeps. Persistence operations on one state run one at a
+ * time, each re-checking supersession before it writes. A stored snapshot
+ * replaces the state only at a higher revision, so a rotated pair that could
+ * not be persisted is never traded back for the spent pair still stored.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -30,10 +39,7 @@ export interface SessionCoreContext<U extends SessionUser = SessionUser, C = Pas
 }
 
 /**
- * The bookkeeping the transitions keep for one state. The latest explicit
- * action wins: a sign-in or hydration discards its result once the epoch moves
- * on, and a sign-out or clear removes whatever session is then held unless a
- * sign-in has landed since it started.
+ * The bookkeeping the transitions keep for one state.
  */
 interface Ledger {
     /** Started by every sign-in, sign-out and clear, and by adopting another context's session. */
