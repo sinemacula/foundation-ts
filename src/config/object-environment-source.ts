@@ -19,9 +19,10 @@ export class ObjectEnvironmentSource implements EnvironmentSource {
     }
 
     /**
-     * Read `key` from the backing record, or undefined when it is absent.
+     * Read `key` from the record's own properties, or undefined when it is
+     * absent or only inherited.
      */
     get(key: string): string | undefined {
-        return this.#values[key];
+        return Object.hasOwn(this.#values, key) ? this.#values[key] : undefined;
     }
 }

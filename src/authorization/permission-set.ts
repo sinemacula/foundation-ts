@@ -6,19 +6,18 @@
  */
 
 /**
- * A read-only set of granted permission strings.
+ * A read-only set of granted permission names, evaluated as the server does.
  *
- * Matching is exact and case-sensitive, except for wildcard grants:
- *
- * - `'*'` allows every permission.
- * - `'users.*'` allows `'users.view'` and `'users.edit.self'`, but not
- *   `'usersx.view'`; the `.` before `*` is part of the match.
- * - `'users:*'` allows `'users:view'` by the same rule with a `:` boundary.
+ * Each granted name is a glob in which every `*` matches any run of characters,
+ * `:` included; every other character is literal. Matching is anchored and
+ * case-sensitive, so `posts:*` allows `posts:create` and `posts:edit:own` but
+ * not `postsx:create`, `*:view` allows `posts:view`, and `*` allows everything.
+ * The permission being checked is never a pattern.
  *
  * An empty granted set allows nothing.
  */
 export class PermissionSet {
-    /** The granted permission strings backing this set. */
+    /** The granted permission names backing this set. */
     readonly #granted: readonly string[];
 
     constructor(granted: readonly string[]) {
@@ -29,29 +28,42 @@ export class PermissionSet {
      * Determine whether the set grants a permission.
      */
     allows(permission: string): boolean {
-        return this.#granted.some(entry => matchesGrant(entry, permission));
+        return this.#granted.some(grant => matchesGrant(grant, permission));
     }
 }
 
 /**
- * Determine whether a granted entry exactly matches or wildcard-covers a
- * permission.
+ * Determine whether a granted name matches a permission, treating every `*` in
+ * the grant as a wildcard.
  */
-function matchesGrant(entry: string, permission: string): boolean {
-    if (entry === '*' || entry === permission) {
-        return true;
+function matchesGrant(grant: string, permission: string): boolean {
+    const firstStar = grant.indexOf('*');
+
+    if (firstStar === -1) {
+        return grant === permission;
     }
 
-    const prefix = wildcardPrefix(entry);
+    const lastStar = grant.lastIndexOf('*');
+    const head = grant.slice(0, firstStar);
+    const tail = grant.slice(lastStar + 1);
 
-    return prefix !== null && permission.startsWith(prefix);
-}
+    if (!permission.startsWith(head) || !permission.endsWith(tail)) {
+        return false;
+    }
 
-/**
- * Extract the prefix, including its trailing `.` or `:`, from a wildcard grant.
- *
- * @returns the prefix, or null when `entry` is not a `.*` or `:*` grant
- */
-function wildcardPrefix(entry: string): string | null {
-    return entry.endsWith('.*') || entry.endsWith(':*') ? entry.slice(0, -1) : null;
+    const tailStart = permission.length - tail.length;
+    let cursor = head.length;
+
+    // Leftmost placement is exact for star-only globs.
+    for (const middle of grant.slice(firstStar + 1, lastStar).split('*')) {
+        const index = permission.indexOf(middle, cursor);
+
+        if (index === -1 || index + middle.length > tailStart) {
+            return false;
+        }
+
+        cursor = index + middle.length;
+    }
+
+    return true;
 }
