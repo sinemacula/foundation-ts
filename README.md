@@ -192,7 +192,8 @@ strings and hashes never reach the tracker or the trail.
 
 Each port a platform adapts ships a Vitest contract suite to run against its adapters, under the area's `test-support`:
 `describeFeatureFlagsContract`, `describeRealtimeContract`, `describeSessionPersistenceContract`,
-`describeSessionLockContract`, `describeKeyValueStorageContract` and `describeConnectivityMonitorContract`. An adapter
+`describeSessionRecordStoreContract`, `describeSessionLockContract`, `describeKeyValueStorageContract` and
+`describeConnectivityMonitorContract`. An adapter
 proves its behaviour by running the suite from its own tests:
 
 ```ts
@@ -216,6 +217,14 @@ Every subpath resolves under Metro and Jest through the `default` export conditi
 surface under Metro, Hermes and React Native's Jest preset. The package ships ES modules, so add it to Jest's
 `transformIgnorePatterns` allow-list. `KeyValueStorage` is synchronous, so back it with a synchronous store; an
 asynchronous secure store implements `SessionPersistence` directly.
+
+### Sharing a session across browser tabs
+
+Every context sharing the session must see each write before it next reads, or one tab presents a refresh token another
+has spent. Browser tabs sharing `localStorage` do not: a tab can be granted a lock before another tab's write reaches
+it. Persist the session through `RecordSessionPersistence` over a `SessionRecordStore` that reads and swaps one record
+atomically across tabs, such as one IndexedDB key in a readwrite transaction, and keep a shared `exchangeLock`.
+`KeyValueSessionPersistence` suits a single context, or contexts sharing a store that is visible to each at once.
 
 ## Requirements
 
