@@ -1,8 +1,9 @@
 /**
  * Session storage keys.
  *
- * The keys the session persists under in the application storage adapter,
- * shared by every platform's session module.
+ * The key the key-value session persistence adapter writes the session snapshot
+ * under, plus the device identifier key, shared by every platform's session
+ * module.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -11,22 +12,14 @@
 /**
  * The storage keys the session persists under.
  *
- * PUBLIC CONTRACT: live user sessions (and e2e suites) seed these exact
- * localStorage keys, so the defaults are load-bearing and versioned - renaming
- * any of them is a breaking change requiring an explicit migration. Keys are
- * matched RAW against cross-tab storage-event keys, so the storage adapter must
- * persist un-namespaced (namespaced wrapping is unsupported here; applications
- * wanting a prefix set it in these options so event keys still match).
+ * Existing persisted sessions and seeded test sessions are read under these
+ * exact keys, so renaming a default is a breaking change. Platforms that
+ * observe storage changes from other contexts match on these raw keys, so a
+ * prefix belongs in these options rather than in a namespacing storage wrapper.
  */
 export interface SessionStorageKeys {
-    /** Default 'auth.access_token'. */
-    readonly accessToken: string;
-
-    /** Default 'auth.refresh_token'. */
-    readonly refreshToken: string;
-
-    /** Default 'auth.expires_at'. */
-    readonly expiresAt: string;
+    /** The revisioned session snapshot. Default 'auth.session'. */
+    readonly session: string;
 
     /** Default 'auth.device_uuid'. */
     readonly deviceUuid: string;
@@ -37,8 +30,6 @@ export interface SessionStorageKeys {
  * from.
  */
 export const DEFAULT_SESSION_STORAGE_KEYS: SessionStorageKeys = {
-    accessToken: 'auth.access_token',
-    refreshToken: 'auth.refresh_token',
-    expiresAt: 'auth.expires_at',
+    session: 'auth.session',
     deviceUuid: 'auth.device_uuid',
 };

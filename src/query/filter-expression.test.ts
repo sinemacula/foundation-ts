@@ -12,7 +12,15 @@
 
 import { describe, expectTypeOf, it } from 'vitest';
 
-import type { FilterOperators, FilterScalar, FilterTree } from './filter-expression';
+import type { ApiQuery } from './api-query';
+import type {
+    FilterDocumentBuilder,
+    FilterOperators,
+    FilterScalar,
+    FilterTree,
+    ScalarOperator,
+    SortDirection,
+} from './filter-expression';
 
 describe('FilterScalar', () => {
     it('accepts strings, numbers and booleans, and rejects objects', () => {
@@ -26,10 +34,11 @@ describe('FilterScalar', () => {
 describe('FilterOperators', () => {
     it('accepts fully-populated and partial operator maps', () => {
         expectTypeOf<
-            Record<'$eq' | '$neq' | '$like' | '$contains', string> &
+            Record<'$eq' | '$neq', string> &
                 Record<'$gt' | '$lt' | '$ge' | '$le', number> &
                 Record<'$in', string[]> &
                 Record<'$between', [number, number]> &
+                Record<'$contains', string> &
                 Record<'$null' | '$notNull', true>
         >().toExtend<FilterOperators>();
         expectTypeOf<Record<'$ge', number>>().toExtend<FilterOperators>();
@@ -38,12 +47,37 @@ describe('FilterOperators', () => {
     it('rejects unknown operator keys', () => {
         expectTypeOf<Record<'$regex', string>>().not.toExtend<FilterOperators>();
     });
+
+    it('rejects the removed pattern-match operator', () => {
+        expectTypeOf<Record<'$like', string>>().not.toExtend<FilterOperators>();
+    });
 });
 
 describe('FilterTree', () => {
-    it('accepts field conditions, operator maps and group keys', () => {
+    it('accepts field conditions, operator maps and group lists', () => {
         expectTypeOf<
-            Record<'name', string> & Record<'age', Record<'$ge', number>> & Record<'$and', Record<'status', string>>
+            Record<'name', string> &
+                Record<'age', Record<'$ge', number>> &
+                Record<'$and', Array<Record<'status', string>>>
         >().toExtend<FilterTree>();
+    });
+});
+
+describe('ScalarOperator', () => {
+    it('accepts the comparison operators and rejects the list operators', () => {
+        expectTypeOf<'$eq' | '$neq' | '$gt' | '$lt' | '$ge' | '$le'>().toEqualTypeOf<ScalarOperator>();
+        expectTypeOf<'$in'>().not.toExtend<ScalarOperator>();
+    });
+});
+
+describe('FilterDocumentBuilder', () => {
+    it('maps a fresh query to the query carrying the document', () => {
+        expectTypeOf<FilterDocumentBuilder>().toEqualTypeOf<(query: ApiQuery) => ApiQuery>();
+    });
+});
+
+describe('SortDirection', () => {
+    it('accepts ascending and descending only', () => {
+        expectTypeOf<'asc' | 'desc'>().toEqualTypeOf<SortDirection>();
     });
 });

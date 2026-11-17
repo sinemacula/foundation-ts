@@ -17,6 +17,12 @@ export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
  */
 export type QueryParameters = Readonly<Record<string, string | number | boolean | undefined>>;
 
+/**
+ * Whether a request sends credentials such as cookies: never, to its own origin
+ * only, or to any origin.
+ */
+export type HttpCredentialsMode = 'omit' | 'same-origin' | 'include';
+
 /** Per-request options forwarded to every HTTP method. */
 export interface HttpRequestOptions {
     /** Query parameters appended to the request URL. */
@@ -27,6 +33,9 @@ export interface HttpRequestOptions {
 
     /** Abort signal that cancels the request when it fires. */
     readonly signal?: AbortSignal;
+
+    /** Whether credentials such as cookies are sent; omit for the platform default (same-origin in browsers). */
+    readonly credentials?: HttpCredentialsMode;
 
     /** Whether a 401 response may trigger the unauthorized handler (token refresh). Defaults to true. Set false on the refresh request itself so a failed refresh cannot recurse back into the handler. */
     readonly retryOnUnauthorized?: boolean;
@@ -50,6 +59,9 @@ export interface HttpRequest {
 
     /** The request body, before serialisation. */
     readonly body: unknown;
+
+    /** Whether credentials such as cookies are sent, or undefined for the platform default. */
+    readonly credentials?: HttpCredentialsMode;
 }
 
 /**
@@ -65,13 +77,12 @@ export type RequestInterceptor = (request: HttpRequest) => HttpRequest | Promise
 export type UnauthorizedHandler = () => Promise<boolean>;
 
 /**
- * Invoked whenever a request ultimately fails, whether with an
- * {@link HttpError} (non-2xx response) or a {@link NetworkError} (no response).
- * This is the global seam for surfacing unexpected failures, e.g. a toast
- * notification or an error-reporting call; per-request opt-out is via
- * {@link HttpRequestOptions.notifyOnError}. Filtering out expected failures
- * such as {@link HttpValidationError} is left to the handler, since it receives
- * every failure.
+ * Invoked once with the final failure of a request, after any retries: an
+ * {@link HttpError}, a {@link NetworkError} (including a {@link TimeoutError})
+ * or a {@link ResponseParseError}, but never a {@link CancelledError}, since a
+ * caller's own cancellation is not a failure to surface. Expected failures such
+ * as an {@link HttpValidationError} arrive too and are the handler's to filter;
+ * a request opts out with {@link HttpRequestOptions.notifyOnError}.
  */
 export type ResponseErrorHandler = (error: unknown, request: HttpRequest) => void;
 

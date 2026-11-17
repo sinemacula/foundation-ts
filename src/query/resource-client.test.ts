@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { HttpClient, HttpRequestOptions } from '../http/http-client';
 import { ApiQuery } from './api-query';
 import type { RawRecord } from './envelope';
+import { QueryError } from './query-error';
 import { ResourceClient } from './resource-client';
 
 /** A minimal domain type used to exercise the resource client. */
@@ -34,6 +35,15 @@ interface RecordedCall {
 
     /** The request options passed through. */
     readonly options: HttpRequestOptions | undefined;
+}
+
+/** The fake transport and the resource client bound to it. */
+interface ResourceFixture {
+    /** The recording fake transport. */
+    readonly client: FakeHttpClient;
+
+    /** The resource client under test. */
+    readonly resource: ResourceClient<Widget>;
 }
 
 /**
@@ -144,8 +154,7 @@ class FakeHttpClient implements HttpClient {
 /**
  * Build a `Record<string, unknown>` from an array of `[key, value]` pairs.
  *
- * Keeps snake_case wire-field names out of object-literal key positions so
- * Biome's naming-convention rule never sees them.
+ * Keeps snake_case wire-field names out of object-literal key positions.
  *
  * @param entries - key-value pairs for the record
  * @returns a plain `Record<string, unknown>`
@@ -154,7 +163,13 @@ function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string
     return Object.fromEntries(entries);
 }
 
-/** Build a raw widget wire record. */
+/**
+ * Build a raw widget wire record.
+ *
+ * @param id - the widget id
+ * @param name - the widget name
+ * @returns the wire record
+ */
 function widgetRecord(id: string, name: string): Record<string, unknown> {
     return wire([
         ['id', id],
@@ -162,7 +177,13 @@ function widgetRecord(id: string, name: string): Record<string, unknown> {
     ]);
 }
 
-/** Build a valid single-widget envelope. */
+/**
+ * Build a valid single-widget envelope.
+ *
+ * @param id - the widget id
+ * @param name - the widget name
+ * @returns the envelope payload
+ */
 function widgetEnvelope(id: string, name: string): Record<string, unknown> {
     return { data: widgetRecord(id, name) };
 }
@@ -182,16 +203,12 @@ function mapWidget(raw: RawRecord): Widget {
     return { id: raw['id'], name: raw['name'] };
 }
 
-/** The fake transport and the resource client bound to it. */
-interface ResourceFixture {
-    /** The recording fake transport. */
-    readonly client: FakeHttpClient;
-
-    /** The resource client under test. */
-    readonly resource: ResourceClient<Widget>;
-}
-
-/** Build a `ResourceClient<Widget>` wired against a fresh `FakeHttpClient`. */
+/**
+ * Build a `ResourceClient<Widget>` wired against a fresh `FakeHttpClient`.
+ *
+ * @param path - the resource collection path
+ * @returns the fake client and the resource bound to it
+ */
 function createResource(path = 'widgets'): ResourceFixture {
     const client = new FakeHttpClient();
     const resource = new ResourceClient({ client, path, map: mapWidget });
@@ -205,18 +222,13 @@ describe('ResourceClient', () => {
             const { client, resource } = createResource();
             client.queueResponse({
                 data: [widgetRecord('w1', 'Widget One')],
-                meta: wire([
-                    ['current_page', 1],
-                    ['last_page', 1],
-                    ['per_page', 10],
-                    ['total', 1],
-                ]),
+                meta: { total: 1, count: 1, continue: false },
             });
 
             const result = await resource.list();
 
             expect(result.items).toEqual([{ id: 'w1', name: 'Widget One' }]);
-            expect(result.meta).toEqual({ currentPage: 1, lastPage: 1, perPage: 10, total: 1 });
+            expect(result.meta).toEqual({ mode: 'length-aware', total: 1, count: 1, hasMore: false });
         });
 
         it('sends a GET request to the resource path', async () => {
@@ -337,9 +349,9 @@ describe('ResourceClient', () => {
             const { client, resource } = createResource();
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
 
-            await resource.show('w1', ApiQuery.create().fields(['id']));
+            await resource.show('w1', ApiQuery.create().fieldsFor('widget', ['id']).withTrashed());
 
-            expect(client.calls.at(0)?.options?.query).toEqual({ fields: 'id' });
+            expect(client.calls.at(0)?.options?.query).toEqual({ 'fields[widget]': 'id', trashed: 'with' });
         });
 
         it('propagates malformed-envelope errors', async () => {
@@ -379,9 +391,33 @@ describe('ResourceClient', () => {
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
             const controller = new AbortController();
 
-            await resource.create({ name: 'Widget One' }, { signal: controller.signal });
+            await resource.create({ name: 'Widget One' }, undefined, { signal: controller.signal });
 
-            expect(client.calls.at(0)?.options?.signal).toBe(controller.signal);
+            expect(client.calls.at(0)?.options).toEqual({ signal: controller.signal });
+        });
+
+        it('shapes the returned record with an ApiQuery, explicit options.query winning on collision', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await resource.create(
+                { name: 'Widget One' },
+                ApiQuery.create().fieldsFor('widget', ['id', 'name']).limit(1),
+                {
+                    query: { limit: 2 },
+                },
+            );
+
+            expect(client.calls.at(0)?.options?.query).toEqual({ 'fields[widget]': 'id,name', limit: 2 });
+        });
+
+        it('sends no options when neither a query nor options are given', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await resource.create({ name: 'Widget One' });
+
+            expect(client.calls.at(0)?.options).toBeUndefined();
         });
 
         it('propagates malformed-envelope errors', async () => {
@@ -391,6 +427,13 @@ describe('ResourceClient', () => {
             await expect(resource.create({ name: 'Widget One' })).rejects.toThrow(
                 'The response did not match the expected envelope shape.',
             );
+        });
+
+        it('rejects a missing body with a QueryError', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(undefined);
+
+            await expect(resource.create({ name: 'Widget One' })).rejects.toBeInstanceOf(QueryError);
         });
     });
 
@@ -406,7 +449,23 @@ describe('ResourceClient', () => {
             expect(call?.method).toBe('PATCH');
             expect(call?.path).toBe('widgets/w1');
             expect(call?.body).toEqual({ name: 'Widget One (renamed)' });
-            expect(updated.name).toBe('Widget One (renamed)');
+            expect(updated).toEqual({ id: 'w1', name: 'Widget One (renamed)' });
+        });
+
+        it('shapes the returned record with an ApiQuery', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await resource.update('w1', { name: 'Widget One' }, ApiQuery.create().fieldsFor('widget', ['id', 'name']));
+
+            expect(client.calls.at(0)?.options?.query).toEqual({ 'fields[widget]': 'id,name' });
+        });
+
+        it('rejects a missing body with a QueryError', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(undefined);
+
+            await expect(resource.update('w1', { name: 'Widget One' })).rejects.toBeInstanceOf(QueryError);
         });
 
         it('passes through request options', async () => {
@@ -414,9 +473,9 @@ describe('ResourceClient', () => {
             client.queueResponse(widgetEnvelope('w1', 'Widget One'));
             const controller = new AbortController();
 
-            await resource.update('w1', { name: 'Widget One' }, { signal: controller.signal });
+            await resource.update('w1', { name: 'Widget One' }, undefined, { signal: controller.signal });
 
-            expect(client.calls.at(0)?.options?.signal).toBe(controller.signal);
+            expect(client.calls.at(0)?.options).toEqual({ signal: controller.signal });
         });
 
         it('propagates malformed-envelope errors', async () => {
@@ -426,6 +485,34 @@ describe('ResourceClient', () => {
             await expect(resource.update('w1', { name: 'x' })).rejects.toThrow(
                 'The response did not match the expected envelope shape.',
             );
+        });
+    });
+
+    describe('updateWithoutContent', () => {
+        it('patches the joined resource path with the body', async () => {
+            const { client, resource } = createResource();
+
+            await resource.updateWithoutContent('w1', { archived: true });
+
+            expect(client.calls).toEqual([
+                { method: 'PATCH', path: 'widgets/w1', body: { archived: true }, options: undefined },
+            ]);
+        });
+
+        it('resolves with no value whatever the server answers', async () => {
+            const { client, resource } = createResource();
+            client.queueResponse(widgetEnvelope('w1', 'Widget One'));
+
+            await expect(resource.updateWithoutContent('w1', { archived: true })).resolves.toBeUndefined();
+        });
+
+        it('passes through request options', async () => {
+            const { client, resource } = createResource();
+            const controller = new AbortController();
+
+            await resource.updateWithoutContent('w1', { archived: true }, { signal: controller.signal });
+
+            expect(client.calls.at(0)?.options).toEqual({ signal: controller.signal });
         });
     });
 
