@@ -327,6 +327,8 @@
         "smells": "qlty smells",
         "deadcode": "knip",
         "smoke:react-native": "npm ci --prefix smoke/react-native && node smoke/react-native/run.mjs",
+        "api:report": "npm run build && node scripts/api-report.mjs",
+        "api:check": "npm run build && node scripts/api-report.mjs --check",
         "check:pkg": "rm -rf .pack && mkdir -p .pack && npm pack --pack-destination .pack --silent && publint .pack/*.tgz && attw .pack/*.tgz --profile esm-only",
         "prepare": "node scripts/build.mjs"
     },
