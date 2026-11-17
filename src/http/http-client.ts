@@ -1,15 +1,11 @@
 /**
- * HTTP client port.
- *
- * Modules depend on this contract, never on a concrete transport. The
- * production adapter is {@link FetchHttpClient}; tests substitute an in-memory
- * fake.
+ * The HTTP client port modules depend on instead of a concrete transport.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 
-/** The set of HTTP methods supported by the client. */
+/** The HTTP methods the client sends. */
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 
 /**
@@ -37,10 +33,10 @@ export interface HttpRequestOptions {
     /** Whether credentials such as cookies are sent; omit for the platform default (same-origin in browsers). */
     readonly credentials?: HttpCredentialsMode;
 
-    /** Whether a 401 response may trigger the unauthorized handler (token refresh). Defaults to true. Set false on the refresh request itself so a failed refresh cannot recurse back into the handler. */
+    /** Whether a 401 may trigger the unauthorized handler. Defaults to true; set false on the refresh request itself so a failed refresh cannot recurse. */
     readonly retryOnUnauthorized?: boolean;
 
-    /** Whether this request's failures are reported to the global response-error handler. Defaults to true. Set false for requests that handle their own errors, such as forms surfacing 422s inline or background polls that fail silently. */
+    /** Whether this request's failures reach the response-error handler. Defaults to true; set false for requests that handle their own errors. */
     readonly notifyOnError?: boolean;
 }
 
@@ -79,10 +75,10 @@ export type UnauthorizedHandler = () => Promise<boolean>;
 /**
  * Invoked once with the final failure of a request, after any retries: an
  * {@link HttpError}, a {@link NetworkError} (including a {@link TimeoutError})
- * or a {@link ResponseParseError}, but never a {@link CancelledError}, since a
- * caller's own cancellation is not a failure to surface. Expected failures such
- * as an {@link HttpValidationError} arrive too and are the handler's to filter;
- * a request opts out with {@link HttpRequestOptions.notifyOnError}.
+ * or a {@link ResponseParseError}, never a {@link CancelledError}. Expected
+ * failures such as an {@link HttpValidationError} arrive too and are the
+ * handler's to filter; a request opts out with
+ * {@link HttpRequestOptions.notifyOnError}.
  */
 export type ResponseErrorHandler = (error: unknown, request: HttpRequest) => void;
 
@@ -94,7 +90,6 @@ export interface HttpClient {
      * Send a GET request.
      *
      * @param path - the API path, relative to the client's base URL
-     * @param options - optional query parameters, headers, and abort signal
      * @returns the parsed response body
      * @throws {@link HttpError} when the server returns a non-2xx status
      * @throws {@link NetworkError} when the request cannot reach the server
@@ -107,7 +102,6 @@ export interface HttpClient {
      * @param path - the API path, relative to the client's base URL
      * @param body - the request body; a FormData or Blob instance is sent
      * unchanged for uploads, any other value is serialised to JSON
-     * @param options - optional query parameters, headers, and abort signal
      * @returns the parsed response body
      * @throws {@link HttpError} when the server returns a non-2xx status
      * @throws {@link NetworkError} when the request cannot reach the server
@@ -120,7 +114,6 @@ export interface HttpClient {
      * @param path - the API path, relative to the client's base URL
      * @param body - the request body; a FormData or Blob instance is sent
      * unchanged for uploads, any other value is serialised to JSON
-     * @param options - optional query parameters, headers, and abort signal
      * @returns the parsed response body
      * @throws {@link HttpError} when the server returns a non-2xx status
      * @throws {@link NetworkError} when the request cannot reach the server
@@ -133,7 +126,6 @@ export interface HttpClient {
      * @param path - the API path, relative to the client's base URL
      * @param body - the request body; a FormData or Blob instance is sent
      * unchanged for uploads, any other value is serialised to JSON
-     * @param options - optional query parameters, headers, and abort signal
      * @returns the parsed response body
      * @throws {@link HttpError} when the server returns a non-2xx status
      * @throws {@link NetworkError} when the request cannot reach the server
@@ -144,7 +136,6 @@ export interface HttpClient {
      * Send a DELETE request.
      *
      * @param path - the API path, relative to the client's base URL
-     * @param options - optional query parameters, headers, and abort signal
      * @returns the parsed response body
      * @throws {@link HttpError} when the server returns a non-2xx status
      * @throws {@link NetworkError} when the request cannot reach the server
@@ -155,7 +146,6 @@ export interface HttpClient {
      * Download a response body as a Blob, for binary or file responses.
      *
      * @param path - the API path, relative to the client's base URL
-     * @param options - optional query parameters, headers, and abort signal
      * @returns the response body as a Blob
      * @throws {@link HttpError} when the server returns a non-2xx status
      * @throws {@link NetworkError} when the request cannot reach the server

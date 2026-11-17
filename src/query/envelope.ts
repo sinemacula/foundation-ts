@@ -1,12 +1,6 @@
 /**
  * Response-envelope unwrapping for the laravel-api-toolkit wire protocol.
  *
- * Every endpoint wraps its payload in a `{ data: ... }` envelope, with list
- * endpoints additionally carrying `meta` and `links` blocks for pagination.
- * This module is the single place that peels the envelope away and hands
- * callers a typed domain value (or list of values) via a caller-supplied
- * {@link ResourceMapper}.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -121,9 +115,6 @@ const CURSOR_PARAMETER = /^[^#]*?[?&]cursor=([^&#]+)/u;
  * Unwrap a `{ data: {...} }` single-resource envelope and map it onto a domain
  * value.
  *
- * @param payload - the raw response payload
- * @param map - validates and maps the raw record onto the domain value
- * @returns the mapped domain value
  * @throws {@link QueryError} when the envelope is absent or malformed
  */
 export function unwrapItem<Value>(payload: unknown, map: ResourceMapper<Value>): Value {
@@ -138,10 +129,6 @@ export function unwrapItem<Value>(payload: unknown, map: ResourceMapper<Value>):
  * Unwrap a `{ data: [...], meta?: {...}, links?: {...} }` list envelope and map
  * each entry onto a domain value.
  *
- * @param payload - the raw response payload
- * @param map - validates and maps each raw record onto the domain value
- * @returns the mapped items, pagination metadata and links (null when absent
- * or malformed), and the cursors parsed from the links
  * @throws {@link QueryError} when the envelope is absent or malformed
  */
 export function unwrapList<Value>(payload: unknown, map: ResourceMapper<Value>): ListResult<Value> {
@@ -164,8 +151,6 @@ export function unwrapList<Value>(payload: unknown, map: ResourceMapper<Value>):
 /**
  * Check a wire value is a record whose reserved toolkit keys are well formed.
  *
- * @param value - the wire value
- * @returns the value as a {@link RawRecord}
  * @throws {@link QueryError} when the value is not a record or a reserved key
  * has the wrong shape
  */
@@ -184,10 +169,6 @@ function toRawRecord(value: unknown): RawRecord {
 
 /**
  * Determine whether a value is absent or passes `check`.
- *
- * @param value - the value to inspect
- * @param check - the guard a present value must pass
- * @returns true when the value is undefined or passes the guard
  */
 function isOptional(value: unknown, check: (v: unknown) => boolean): boolean {
     return value === undefined || check(value);
@@ -195,9 +176,6 @@ function isOptional(value: unknown, check: (v: unknown) => boolean): boolean {
 
 /**
  * Determine whether a value is a list of strings.
- *
- * @param value - the value to inspect
- * @returns true when every entry of the list is a string
  */
 function isStringList(value: unknown): boolean {
     return Array.isArray(value) && value.every(entry => typeof entry === 'string');
@@ -209,7 +187,6 @@ function isStringList(value: unknown): boolean {
  * A block with numeric `total` and `count` is length-aware; one carrying
  * neither is a cursor list.
  *
- * @param raw - the raw `meta` value from the envelope
  * @returns the mapped pagination metadata, or null when the block is absent,
  * non-record, or malformed
  */
@@ -235,7 +212,6 @@ function mapPaginationMeta(raw: unknown): PaginationMeta | null {
 /**
  * Map a raw `links` block onto {@link PaginationLinks}.
  *
- * @param raw - the raw `links` value from the envelope
  * @returns the mapped links, or null when the block is absent or non-record
  */
 function mapPaginationLinks(raw: unknown): PaginationLinks | null {
@@ -253,10 +229,7 @@ function mapPaginationLinks(raw: unknown): PaginationLinks | null {
 }
 
 /**
- * Read one link, treating anything but a non-empty string as absent.
- *
- * @param value - the raw link value
- * @returns the link URL, or null
+ * Read one link, treating anything but a non-empty string as null.
  */
 function readLink(value: unknown): string | null {
     return typeof value === 'string' && value !== '' ? value : null;
@@ -268,7 +241,6 @@ function readLink(value: unknown): string | null {
  * Parsed by hand: a link may be relative, and some runtimes ship only a partial
  * `URL`.
  *
- * @param link - the link URL, or null
  * @returns the decoded cursor, or null when the link carries none
  */
 function readCursor(link: string | null | undefined): string | null {
@@ -280,8 +252,6 @@ function readCursor(link: string | null | undefined): string | null {
 /**
  * Decode one form-encoded query component.
  *
- * @param component - the raw component
- * @returns the decoded text
  * @throws {@link QueryError} when the component carries a malformed escape
  */
 function decodeComponent(component: string): string {

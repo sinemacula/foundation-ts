@@ -1,12 +1,5 @@
 /**
- * Shared RealtimeConnection lifecycle contract.
- *
- * The EventSource and WebSocket adapters implement the same
- * {@link RealtimeConnection} port and must exhibit identical lifecycle
- * behaviour. That shared behaviour is asserted once here and driven by each
- * suite through a small transport harness, so the two adapters cannot drift.
- * Transport-specific behaviour (SSE data coercion, the WebSocket envelope and
- * send, the default-factory branches) stays in each adapter's own suite.
+ * RealtimeConnection lifecycle contract, run by every transport adapter suite.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -189,7 +182,6 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
                 connection.connect();
                 transports.at(0)?.fail();
 
-                // Default backoff: first attempt delay is 1 000 ms.
                 vi.advanceTimersByTime(999);
                 expect(transports).toHaveLength(1);
 
@@ -264,12 +256,10 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
                 connection.connect();
                 transports.at(0)?.fail();
 
-                // Reconnect is pending; disconnect before the timer fires.
                 connection.disconnect();
 
                 vi.advanceTimersByTime(1_000);
 
-                // Still only the original transport - reconnect was cancelled.
                 expect(transports).toHaveLength(1);
             });
 
@@ -314,13 +304,11 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
                 connection.connect();
                 transports.at(0)?.fail();
 
-                // attempt=0 -> 100 ms
                 vi.advanceTimersByTime(100);
                 expect(transports).toHaveLength(2);
 
                 transports.at(1)?.fail();
 
-                // attempt=1 -> 200 ms
                 vi.advanceTimersByTime(199);
                 expect(transports).toHaveLength(2);
 
@@ -335,19 +323,15 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
                 });
 
                 connection.connect();
-                // Fail twice to advance the attempt counter.
                 transports.at(0)?.fail();
                 vi.advanceTimersByTime(100);
 
                 transports.at(1)?.fail();
                 vi.advanceTimersByTime(200);
 
-                // Now open successfully -> attempt resets.
                 transports.at(2)?.open();
-
                 transports.at(2)?.fail();
 
-                // Next delay should be 100 ms again (attempt 0).
                 vi.advanceTimersByTime(99);
                 expect(transports).toHaveLength(3);
 
@@ -470,7 +454,6 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
 
                 await vi.advanceTimersByTimeAsync(100);
 
-                // Hook is pending: no second transport yet.
                 expect(transports).toHaveLength(1);
 
                 gate.resolve();
@@ -494,14 +477,11 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
 
                 await vi.advanceTimersByTimeAsync(100);
 
-                // First hook call rejected: attempt abandoned, no transport
-                // created.
                 expect(transports).toHaveLength(1);
                 expect(connection.state).toBe('connecting');
 
                 await vi.advanceTimersByTimeAsync(100);
 
-                // Next backoff attempt: hook resolves, transport is created.
                 expect(transports).toHaveLength(2);
                 expect(beforeReconnect).toHaveBeenCalledTimes(2);
             });
@@ -549,7 +529,6 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
                 expect(transports).toHaveLength(1);
                 expect(connection.state).toBe('closed');
 
-                // No further reconnect is ever scheduled.
                 await vi.advanceTimersByTimeAsync(10_000);
 
                 expect(transports).toHaveLength(1);
@@ -572,8 +551,7 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
                 connection.disconnect();
                 gate.reject(new Error('token refresh failed'));
                 await gate.promise.catch(() => {
-                    // Rejection is expected here; the abandonment is asserted
-                    // below.
+                    // The rejection is expected.
                 });
 
                 expect(transports).toHaveLength(1);
@@ -766,8 +744,6 @@ export function describeRealtimeContract(harness: RealtimeContractHarness): void
 
                 connection.onStateChange(s => states.push(s));
                 connection.connect();
-                // Failure -> connecting again should not re-emit 'connecting'
-                // when already connecting.
                 transports.at(0)?.fail();
 
                 expect(states).toEqual(['connecting']);

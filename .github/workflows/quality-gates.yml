@@ -18,8 +18,7 @@ on:
 # ==============================================================================
 # CONCURRENCY
 # ==============================================================================
-# The event name keeps scheduled and manual runs out of the push group, so a
-# merge to master cannot cancel one part way through.
+# The event name stops a merge to master cancelling a scheduled or manual run.
 concurrency:
     group: quality-gates-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
     cancel-in-progress: true
@@ -42,9 +41,8 @@ jobs:
     # ==========================================================================
     # JOB: GATES
     # ==========================================================================
-    # Knip and mutation (scoped on PRs, full on schedule) from the shared
-    # reusable workflow. This package ships no bundle, so the size budget is
-    # off.
+    # Knip and mutation (scoped on PRs, full on schedule); no bundle ships, so
+    # the size budget is off.
     gates:
         uses: sinemacula/.github/.github/workflows/node-quality-gates.yml@v3.0.2
         # The shared jobs inherit only what this job grants.

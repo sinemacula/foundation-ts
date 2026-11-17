@@ -1,5 +1,5 @@
 /**
- * Unit tests for ApiQuery - the laravel-api-toolkit 2.x query builder.
+ * Unit tests for ApiQuery.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -13,7 +13,6 @@ import { QueryError } from './query-error';
 /**
  * Parse the `filters` parameter of a query back to an object.
  *
- * @param query - the query to read
  * @returns the decoded filter tree, or an empty object when none is set
  */
 function parsedFilters(query: ApiQuery): unknown {
@@ -28,9 +27,6 @@ function parsedFilters(query: ApiQuery): unknown {
 
 /**
  * Read the raw `filters` parameter of a query, exactly as sent on the wire.
- *
- * @param query - the query to read
- * @returns the JSON-encoded filter tree
  */
 function filtersParam(query: ApiQuery): unknown {
     return query.toQueryParameters()['filters'];
@@ -39,9 +35,6 @@ function filtersParam(query: ApiQuery): unknown {
 /**
  * Build a wire-style object from entry tuples, keeping `$`-prefixed keys out of
  * object-literal key positions.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain record
  */
 function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string, unknown> {
     return Object.fromEntries(entries);
@@ -56,26 +49,13 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Filtering - equality
-    // -------------------------------------------------------------------------
     describe('where (equality)', () => {
-        it('emits a string equality filter', () => {
-            const result = parsedFilters(ApiQuery.create().where('name', 'Alice'));
-
-            expect(result).toEqual({ name: 'Alice' });
-        });
-
-        it('emits a number equality filter', () => {
-            const result = parsedFilters(ApiQuery.create().where('age', 30));
-
-            expect(result).toEqual({ age: 30 });
-        });
-
-        it('emits a boolean equality filter', () => {
-            const result = parsedFilters(ApiQuery.create().where('active', true));
-
-            expect(result).toEqual({ active: true });
+        it.each([
+            ['string', 'name', 'Alice'],
+            ['number', 'age', 30],
+            ['boolean', 'active', true],
+        ])('emits a %s equality filter', (_type, field, value) => {
+            expect(parsedFilters(ApiQuery.create().where(field, value))).toEqual({ [field]: value });
         });
 
         it('replaces an existing operator map with a scalar equality value', () => {
@@ -98,50 +78,21 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Filtering - operator overload
-    // -------------------------------------------------------------------------
     describe('where (operator overload)', () => {
-        it('emits $eq operator', () => {
-            const result = parsedFilters(ApiQuery.create().where('name', '$eq', 'Alice'));
+        it.each([
+            ['$eq', 'name', 'Alice'],
+            ['$neq', 'name', 'Bob'],
+            ['$gt', 'age', 18],
+            ['$lt', 'age', 65],
+            ['$ge', 'age', 18],
+            ['$le', 'age', 65],
+        ] as const)('emits the %s operator', (operator, field, value) => {
+            const result = parsedFilters(ApiQuery.create().where(field, operator, value));
 
-            expect(result).toEqual(wire([['name', wire([['$eq', 'Alice']])]]));
-        });
-
-        it('emits $neq operator', () => {
-            const result = parsedFilters(ApiQuery.create().where('name', '$neq', 'Bob'));
-
-            expect(result).toEqual(wire([['name', wire([['$neq', 'Bob']])]]));
-        });
-
-        it('emits $gt operator', () => {
-            const result = parsedFilters(ApiQuery.create().where('age', '$gt', 18));
-
-            expect(result).toEqual(wire([['age', wire([['$gt', 18]])]]));
-        });
-
-        it('emits $lt operator', () => {
-            const result = parsedFilters(ApiQuery.create().where('age', '$lt', 65));
-
-            expect(result).toEqual(wire([['age', wire([['$lt', 65]])]]));
-        });
-
-        it('emits $ge operator', () => {
-            const result = parsedFilters(ApiQuery.create().where('age', '$ge', 18));
-
-            expect(result).toEqual(wire([['age', wire([['$ge', 18]])]]));
-        });
-
-        it('emits $le operator', () => {
-            const result = parsedFilters(ApiQuery.create().where('age', '$le', 65));
-
-            expect(result).toEqual(wire([['age', wire([['$le', 65]])]]));
+            expect(result).toEqual(wire([[field, wire([[operator, value]])]]));
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Operator merge on one field
-    // -------------------------------------------------------------------------
     describe('operator merge', () => {
         it('merges $ge and $le into a single object for the same field', () => {
             const result = parsedFilters(ApiQuery.create().where('age', '$ge', 18).where('age', '$le', 65));
@@ -186,9 +137,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // whereIn
-    // -------------------------------------------------------------------------
     describe('whereIn', () => {
         it('emits a $in filter', () => {
             const result = parsedFilters(ApiQuery.create().whereIn('status', ['active', 'pending']));
@@ -221,9 +169,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // whereBetween
-    // -------------------------------------------------------------------------
     describe('whereBetween', () => {
         it('emits a $between filter with a numeric pair', () => {
             const result = parsedFilters(ApiQuery.create().whereBetween('age', [18, 65]));
@@ -238,9 +183,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // whereContains
-    // -------------------------------------------------------------------------
     describe('whereContains', () => {
         it('emits a $contains filter with a scalar value', () => {
             const result = parsedFilters(ApiQuery.create().whereContains('tags', 'news'));
@@ -255,9 +197,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // whereNull / whereNotNull
-    // -------------------------------------------------------------------------
     describe('whereNull', () => {
         it('emits a $null: true filter', () => {
             const result = parsedFilters(ApiQuery.create().whereNull('deletedAt'));
@@ -274,9 +213,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Immutability
-    // -------------------------------------------------------------------------
     describe('immutability', () => {
         it('does not mutate the parent instance when deriving a new query', () => {
             const base = ApiQuery.create().where('name', 'Alice');
@@ -302,9 +238,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Relation filters
-    // -------------------------------------------------------------------------
     describe('whereRelation', () => {
         it('nests a sub-query document under the relation key', () => {
             const query = ApiQuery.create().whereRelation('posts', q => q.where('title', 'News'));
@@ -320,7 +253,7 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"posts":{"published":true,"views":{"$gt":100}}}');
         });
 
-        it('merges repeated calls into one document so the same related row must match', () => {
+        it('merges repeated calls into one relation document', () => {
             const query = ApiQuery.create()
                 .whereRelation('author', q => q.where('first_name', 'Ada'))
                 .whereRelation('author', q => q.where('last_name', 'Lovelace'));
@@ -328,7 +261,7 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"author":{"first_name":"Ada","last_name":"Lovelace"}}');
         });
 
-        it('replaces a scalar collision on the relation key rather than merging into it', () => {
+        it('replaces a scalar stored under the relation key', () => {
             const query = ApiQuery.create()
                 .where('author', 'stray')
                 .whereRelation('author', q => q.where('name', 'Alice'));
@@ -336,7 +269,7 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"author":{"name":"Alice"}}');
         });
 
-        it('merges repeated calls that target the same nested relation at any depth', () => {
+        it('merges repeated calls on a nested relation', () => {
             const query = ApiQuery.create()
                 .whereRelation('posts', p => p.whereRelation('author', a => a.where('first_name', 'x')))
                 .whereRelation('posts', p => p.whereRelation('author', a => a.where('last_name', 'y')));
@@ -360,7 +293,7 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"author":{"bio":"exact"}}');
         });
 
-        it('replaces an array operand on a relation field rather than concatenating it', () => {
+        it('replaces an array operand on a relation field', () => {
             const query = ApiQuery.create()
                 .whereRelation('author', a => a.whereIn('role', ['admin']))
                 .whereRelation('author', a => a.whereIn('role', ['editor']));
@@ -376,7 +309,7 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"posts":{"$or":[{"title":"test"},{"id":1}],"id":7}}');
         });
 
-        it('ANDs a second $or on the same relation beside the first instead of merging the groups', () => {
+        it('ANDs a second $or on the relation beside the first', () => {
             const query = ApiQuery.create()
                 .whereRelation('posts', p => p.orWhere([q => q.where('a', 1), q => q.where('b', 2)]))
                 .whereRelation('posts', p => p.orWhere([q => q.where('c', 3), q => q.where('d', 4)]));
@@ -404,7 +337,7 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"posts":{"$and":[{"a":1},{"b":2}]}}');
         });
 
-        it('takes an incoming $and when the relation key holds a non-list value', () => {
+        it('replaces a non-list $and on the relation with the incoming documents', () => {
             const query = ApiQuery.create()
                 .whereRelation('posts', p => p.where('$and', 'stray'))
                 .whereRelation('posts', p => p.andWhere([q => q.where('b', 2)]));
@@ -412,7 +345,7 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"posts":{"$and":[{"b":2}]}}');
         });
 
-        it('keeps a second relation $or as its own group when the first was stored as a non-list', () => {
+        it('replaces a non-list $or on the relation with the incoming group', () => {
             const query = ApiQuery.create()
                 .whereRelation('posts', p => p.where('$or', 'stray'))
                 .whereRelation('posts', p => p.orWhere([q => q.where('c', 3)]));
@@ -474,9 +407,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // $has / $hasnt
-    // -------------------------------------------------------------------------
     describe('whereHas', () => {
         it('emits the bare list form with a single relation', () => {
             expect(filtersParam(ApiQuery.create().whereHas('posts'))).toBe('{"$has":["posts"]}');
@@ -582,7 +512,7 @@ describe('ApiQuery', () => {
             expect(filtersParam(query)).toBe('{"$hasnt":["posts"]}');
         });
 
-        it('ANDs a second conditioned document on one relation beside the first instead of merging', () => {
+        it('ANDs a second conditioned document on one relation beside the first', () => {
             const query = ApiQuery.create()
                 .whereHasNot('posts', q => q.where('spam', true))
                 .whereHasNot('posts', q => q.where('flagged', true));
@@ -666,7 +596,7 @@ describe('ApiQuery', () => {
             );
         });
 
-        it('leaves a malformed $and value alone when a merge has nothing to change in it', () => {
+        it('leaves a malformed $and alone when the merge changes nothing', () => {
             const query = ApiQuery.create().where('$and', 'stray').whereHasNot('posts');
 
             expect(filtersParam(query)).toBe('{"$and":"stray","$hasnt":["posts"]}');
@@ -697,9 +627,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // $and / $or groups
-    // -------------------------------------------------------------------------
     describe('andWhere', () => {
         it('emits an $and group with one document per builder', () => {
             const query = ApiQuery.create().andWhere([
@@ -810,9 +737,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Search
-    // -------------------------------------------------------------------------
     describe('search', () => {
         it('emits a top-level search parameter', () => {
             expect(ApiQuery.create().search('smith').toQueryString()).toBe('search=smith');
@@ -836,16 +760,13 @@ describe('ApiQuery', () => {
             expect(ApiQuery.create().search('ada').search(' \t ').toQueryParameters()).toEqual({});
         });
 
-        it('emits search beside the filters rather than inside them', () => {
+        it('emits search as its own parameter beside the filters', () => {
             const query = ApiQuery.create().where('status', 'active').search('smith');
 
             expect(query.toQueryParameters()).toEqual({ filters: '{"status":"active"}', search: 'smith' });
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filterTree()
-    // -------------------------------------------------------------------------
     describe('filterTree', () => {
         it('returns an empty object for a fresh query', () => {
             expect(ApiQuery.create().filterTree()).toEqual({});
@@ -858,9 +779,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Order serialisation
-    // -------------------------------------------------------------------------
     describe('orderBy', () => {
         it('emits a single column with implicit asc direction', () => {
             const params = ApiQuery.create().orderBy('name').toQueryParameters();
@@ -899,13 +817,13 @@ describe('ApiQuery', () => {
             expect(params['order']).toBe('age:desc,name:desc');
         });
 
-        it('clears the cursor, which only seeks within the order it was issued for', () => {
+        it('drops the cursor token but stays cursor-paginated', () => {
             const query = ApiQuery.create().useCursorPagination().cursor('tok').orderBy('name');
 
             expect(query.toQueryParameters()).toEqual({ order: 'name', pagination: 'cursor' });
         });
 
-        it('keeps a query paginated by a cursor token alone in cursor mode', () => {
+        it('keeps a query paginated by a cursor token alone cursor-paginated', () => {
             const query = ApiQuery.create().cursor('tok').orderBy('name');
 
             expect(query.toQueryParameters()).toEqual({ order: 'name', pagination: 'cursor' });
@@ -950,9 +868,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Pagination
-    // -------------------------------------------------------------------------
     describe('page', () => {
         it('emits the page number', () => {
             const params = ApiQuery.create().page(3).toQueryParameters();
@@ -1020,9 +935,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Sparse fields and aggregates
-    // -------------------------------------------------------------------------
     describe('fieldsFor', () => {
         it('emits a per-resource bracket key', () => {
             const params = ApiQuery.create().fieldsFor('users', ['name', 'email']).toQueryParameters();
@@ -1059,7 +971,7 @@ describe('ApiQuery', () => {
             expect(params).toEqual({ 'aggregates[user]': 'posts_exists' });
         });
 
-        it('emits the shape the toolkit renders, with aggregates in the field list', () => {
+        it('emits aggregates beside a field list that requests them', () => {
             const query = ApiQuery.create()
                 .fieldsFor('user', ['name', 'aggregates'])
                 .aggregatesFor('user', ['posts_count', 'orders_sum_total', 'last_order_at'])
@@ -1075,9 +987,6 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // Soft deletes
-    // -------------------------------------------------------------------------
     describe('withTrashed', () => {
         it('emits trashed=with', () => {
             expect(ApiQuery.create().withTrashed().toQueryString()).toBe('trashed=with');
@@ -1093,9 +1002,7 @@ describe('ApiQuery', () => {
             expect(ApiQuery.create().withTrashed().onlyTrashed().toQueryString()).toBe('trashed=only');
         });
     });
-    // -------------------------------------------------------------------------
-    // Empty query → {} parameters
-    // -------------------------------------------------------------------------
+
     describe('empty query', () => {
         it('produces an empty QueryParameters object', () => {
             expect(ApiQuery.create().toQueryParameters()).toEqual({});
@@ -1114,15 +1021,12 @@ describe('ApiQuery', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // toQueryString
-    // -------------------------------------------------------------------------
     describe('toQueryString', () => {
         it('returns an empty string for an empty query', () => {
             expect(ApiQuery.create().toQueryString()).toBe('');
         });
 
-        it('encodes a simple equality filter and survives a URLSearchParams round-trip', () => {
+        it('round-trips an equality filter through URLSearchParams', () => {
             const query = ApiQuery.create().where('name', 'Alice');
             const qs = query.toQueryString();
             const parsed = new URLSearchParams(qs);
@@ -1130,7 +1034,7 @@ describe('ApiQuery', () => {
             expect(JSON.parse(parsed.get('filters') ?? '')).toEqual({ name: 'Alice' });
         });
 
-        it('encodes bracket keys correctly so they survive a URLSearchParams round-trip', () => {
+        it('round-trips bracket keys through URLSearchParams', () => {
             const query = ApiQuery.create().fieldsFor('users', ['name', 'email']);
             const qs = query.toQueryString();
             const parsed = new URLSearchParams(qs);
@@ -1138,7 +1042,7 @@ describe('ApiQuery', () => {
             expect(parsed.get('fields[users]')).toBe('name,email');
         });
 
-        it('encodes a complex JSON filter string that survives a URLSearchParams round-trip', () => {
+        it('round-trips an operator map through URLSearchParams', () => {
             const query = ApiQuery.create().where('age', '$ge', 18).where('age', '$le', 65);
             const qs = query.toQueryString();
             const parsed = new URLSearchParams(qs);
@@ -1157,7 +1061,7 @@ describe('ApiQuery', () => {
             );
         });
 
-        it('encodes page and limit as strings in the query string', () => {
+        it('encodes page and limit as strings', () => {
             const qs = ApiQuery.create().page(2).limit(25).toQueryString();
             const parsed = new URLSearchParams(qs);
 

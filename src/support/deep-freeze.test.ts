@@ -10,24 +10,8 @@ import { describe, expect, it } from 'vitest';
 import { deepFreeze } from './deep-freeze';
 
 describe('deepFreeze', () => {
-    it('returns a primitive number unchanged', () => {
-        expect(deepFreeze(42)).toBe(42);
-    });
-
-    it('returns a primitive string unchanged', () => {
-        expect(deepFreeze('hello')).toBe('hello');
-    });
-
-    it('returns a primitive boolean unchanged', () => {
-        expect(deepFreeze(true)).toBe(true);
-    });
-
-    it('returns null unchanged', () => {
-        expect(deepFreeze(null)).toBeNull();
-    });
-
-    it('returns undefined unchanged', () => {
-        expect(deepFreeze(undefined)).toBeUndefined();
+    it.each([42, 'hello', true, null, undefined])('returns %s unchanged', value => {
+        expect(deepFreeze(value)).toBe(value);
     });
 
     it('freezes a flat object', () => {
@@ -65,7 +49,7 @@ describe('deepFreeze', () => {
         expect(Object.isFrozen(item)).toBe(true);
     });
 
-    it('skips an already-frozen branch without re-freezing', () => {
+    it('freezes a parent whose child is already frozen', () => {
         const child = Object.freeze({ y: 99 });
         const parent = { child };
 
@@ -75,7 +59,7 @@ describe('deepFreeze', () => {
         expect(Object.isFrozen(child)).toBe(true);
     });
 
-    it('freezes deeply nested structures three levels deep', () => {
+    it('freezes structures three levels deep', () => {
         const level3 = { deep: true };
         const level2 = { level3 };
         const level1 = { level2 };
@@ -87,7 +71,7 @@ describe('deepFreeze', () => {
         expect(Object.isFrozen(level3)).toBe(true);
     });
 
-    it('skips already-frozen branches without descending into them', () => {
+    it('does not descend into an already-frozen branch', () => {
         const child = { a: 1 };
         const root = Object.freeze({ child });
 

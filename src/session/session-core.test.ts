@@ -31,9 +31,6 @@ type Queued<T> = T | Error | Promise<T>;
 
 /**
  * Consume the next queued outcome.
- *
- * @param queue - the outcome queue
- * @returns a promise settling with the next outcome
  */
 function take<T>(queue: Array<Queued<T>>): Promise<T> {
     const outcome = queue.shift();
@@ -59,8 +56,6 @@ interface Deferred<T> {
 
 /**
  * Create a promise settled from outside.
- *
- * @returns the deferred promise
  */
 function deferred<T>(): Deferred<T> {
     let resolve!: (value: T) => void;
@@ -122,10 +117,6 @@ class FakeSessionApi<C = PasswordCredentials> implements SessionApi<SessionUser,
 
     /**
      * Record a login.
-     *
-     * @param credentials - the credentials
-     * @param device - the device fingerprint
-     * @returns the next queued login outcome
      */
     login(credentials: C, device: SessionDevice): Promise<LoginResult> {
         this.calls.push('login');
@@ -136,9 +127,6 @@ class FakeSessionApi<C = PasswordCredentials> implements SessionApi<SessionUser,
 
     /**
      * Record a refresh.
-     *
-     * @param refreshToken - the presented refresh token
-     * @returns the next queued refresh outcome
      */
     refresh(refreshToken: string | null): Promise<RefreshResult> {
         this.calls.push('refresh');
@@ -149,9 +137,6 @@ class FakeSessionApi<C = PasswordCredentials> implements SessionApi<SessionUser,
 
     /**
      * Record a logout, resolving when nothing is queued.
-     *
-     * @param refreshToken - the presented refresh token
-     * @returns the next queued logout outcome
      */
     async logout(refreshToken: string | null): Promise<void> {
         this.calls.push('logout');
@@ -164,8 +149,6 @@ class FakeSessionApi<C = PasswordCredentials> implements SessionApi<SessionUser,
 
     /**
      * Record a user fetch.
-     *
-     * @returns the next queued user outcome
      */
     currentUser(): Promise<SessionUser> {
         this.calls.push('currentUser');
@@ -206,8 +189,6 @@ class FakePersistence implements SessionPersistence {
 
     /**
      * Read the snapshot.
-     *
-     * @returns the snapshot
      */
     async load(): Promise<SessionSnapshot> {
         this.operations.push('load');
@@ -219,10 +200,6 @@ class FakePersistence implements SessionPersistence {
 
     /**
      * Persist the tokens when the snapshot is at the expected revision.
-     *
-     * @param expectedRevision - the revision the caller expects
-     * @param tokens - the tokens to persist
-     * @returns the write's result
      */
     async saveIf(expectedRevision: number, tokens: SessionTokens): Promise<SessionSaveResult> {
         this.operations.push(`save@${expectedRevision}:${tokens.accessToken}`);
@@ -238,9 +215,6 @@ class FakePersistence implements SessionPersistence {
 
     /**
      * Clear the snapshot when it is at the expected revision.
-     *
-     * @param expectedRevision - the revision the caller expects
-     * @returns the write's result
      */
     async clearIf(expectedRevision: number): Promise<SessionClearResult> {
         this.operations.push(`clear@${expectedRevision}`);
@@ -258,7 +232,6 @@ class FakePersistence implements SessionPersistence {
      * Write a snapshot at the next revision, as another context would.
      *
      * @param tokens - the tokens to write, or null to clear
-     * @returns the new revision
      */
     write(tokens: SessionTokens | null): number {
         this.snapshot = { revision: this.snapshot.revision + 1, tokens };
@@ -268,8 +241,6 @@ class FakePersistence implements SessionPersistence {
 
     /**
      * Wait on the gate stored under the given field, once.
-     *
-     * @param field - the gate field
      */
     async #pass(field: 'loadGate' | 'saveGate' | 'clearGate'): Promise<void> {
         const gate = this[field];
@@ -283,8 +254,6 @@ class FakePersistence implements SessionPersistence {
 
     /**
      * Throw, once, the failure stored under the given field.
-     *
-     * @param field - the failure field
      */
     #fail(field: 'loadFailure' | 'saveFailure' | 'clearFailure'): void {
         const failure = this[field];
@@ -308,8 +277,6 @@ const PENDING = { credential: 'pending', requires: ['mfa'] };
  * Build a token set.
  *
  * @param suffix - distinguishes the tokens of one pair from another
- * @param overrides - fields replacing the defaults
- * @returns the tokens
  */
 function tokens(suffix: string, overrides: Partial<SessionTokens> = {}): SessionTokens {
     return { accessToken: `access-${suffix}`, refreshToken: `refresh-${suffix}`, expiresAtEpochMs: 1000, ...overrides };
@@ -332,8 +299,6 @@ interface Fixture<C = PasswordCredentials> {
 
 /**
  * Build a signed-out fixture over an empty store.
- *
- * @returns the fixture
  */
 function fixture(): Fixture {
     const state = createInitialSessionState();
@@ -346,10 +311,6 @@ function fixture(): Fixture {
 /**
  * Build a fixture hydrated from a store holding the given tokens at the given
  * revision, with Alice loaded and the operation log emptied.
- *
- * @param signedIn - the persisted tokens
- * @param revision - the revision they are persisted at
- * @returns the fixture
  */
 async function signedIn(signedIn: SessionTokens, revision = 1): Promise<Fixture> {
     const built = fixture();
@@ -364,9 +325,6 @@ async function signedIn(signedIn: SessionTokens, revision = 1): Promise<Fixture>
 
 /**
  * Read the token fields of the state.
- *
- * @param state - the session state
- * @returns the state's tokens
  */
 function tokensOf(state: SessionState): Record<string, unknown> {
     return {

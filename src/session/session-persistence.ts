@@ -1,13 +1,6 @@
 /**
- * Session persistence port.
- *
- * The asynchronous store the session core keeps its one token snapshot in, kept
- * apart from the synchronous key-value storage that holds preferences so a
- * platform can back credentials with an asynchronous secure store. Every write
- * is conditional on the revision the writer last saw, so contexts sharing the
- * store (browser tabs) can tell a session another context wrote from their own,
- * and every write is awaited before the session core reports a sign-in or
- * refresh as successful.
+ * Revisioned session snapshot port, kept apart from key-value storage so a
+ * platform can back credentials with an asynchronous secure store.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -70,8 +63,8 @@ export interface SessionPersistence {
     /**
      * Read the persisted snapshot.
      *
-     * @returns the snapshot, at revision 0 with no tokens when nothing was
-     * ever written
+     * @returns the snapshot, at revision 0 with no tokens when nothing was ever
+     * written
      */
     load(): Promise<SessionSnapshot>;
 
@@ -79,7 +72,6 @@ export interface SessionPersistence {
      * Persist the tokens when the snapshot is still at the expected revision.
      *
      * @param expectedRevision - the revision the caller last saw
-     * @param tokens - the tokens to persist
      * @returns the new revision, or the snapshot that changed meanwhile
      */
     saveIf(expectedRevision: number, tokens: SessionTokens): Promise<SessionSaveResult>;

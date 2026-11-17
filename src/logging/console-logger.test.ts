@@ -27,39 +27,18 @@ describe('ConsoleLogger', () => {
     });
 
     describe('console targets', () => {
-        it('writes debug via console.info', () => {
-            const logger = new ConsoleLogger();
+        it.each([
+            ['debug', 'info'],
+            ['info', 'info'],
+            ['warn', 'warn'],
+            ['error', 'error'],
+        ] as const)('writes %s via console.%s', (level, sink) => {
+            new ConsoleLogger()[level](`${level} message`);
 
-            logger.debug('debug message');
-
-            expect(infoSpy).toHaveBeenCalledWith('[Logger:debug]', 'debug message');
+            expect(console[sink]).toHaveBeenCalledWith(`[Logger:${level}]`, `${level} message`);
         });
 
-        it('writes info via console.info', () => {
-            const logger = new ConsoleLogger();
-
-            logger.info('info message');
-
-            expect(infoSpy).toHaveBeenCalledWith('[Logger:info]', 'info message');
-        });
-
-        it('writes warn via console.warn', () => {
-            const logger = new ConsoleLogger();
-
-            logger.warn('warn message');
-
-            expect(warnSpy).toHaveBeenCalledWith('[Logger:warn]', 'warn message');
-        });
-
-        it('writes error via console.error', () => {
-            const logger = new ConsoleLogger();
-
-            logger.error('error message');
-
-            expect(errorSpy).toHaveBeenCalledWith('[Logger:error]', 'error message');
-        });
-
-        it('does not cross-write debug to console.warn or console.error', () => {
+        it('does not write debug to console.warn or console.error', () => {
             const logger = new ConsoleLogger();
 
             logger.debug('debug message');
@@ -70,7 +49,7 @@ describe('ConsoleLogger', () => {
     });
 
     describe('fields arity', () => {
-        it('passes fields as a second console argument when provided', () => {
+        it('logs the fields when given', () => {
             const logger = new ConsoleLogger();
             const fields = { userId: '42' };
 
@@ -79,7 +58,7 @@ describe('ConsoleLogger', () => {
             expect(infoSpy).toHaveBeenCalledWith('[Logger:info]', 'with fields', fields);
         });
 
-        it('omits the fields argument when not provided', () => {
+        it('omits absent fields', () => {
             const logger = new ConsoleLogger();
 
             logger.info('no fields');

@@ -1,10 +1,6 @@
 /**
  * Abort scope for one request-and-body exchange.
  *
- * Composes the caller's signal with the configured timeout and records which of
- * them aborted the exchange, so a failure is classified by its actual source
- * rather than by the name of the error it surfaced as.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -13,10 +9,11 @@
 export type AbortSource = 'caller' | 'timeout' | 'none';
 
 /**
- * The abort signal governing one exchange, and the record of what aborted it.
+ * The abort signal governing one exchange, and the record of what aborted it,
+ * so a failure is classified by its source rather than by its error name.
  */
 export interface AbortScope {
-    /** The signal to hand to fetch, or null when neither a timeout nor a caller signal applies. */
+    /** The signal to hand to fetch, or null without a timeout or caller signal. */
     readonly signal: AbortSignal | null;
 
     /**
@@ -33,12 +30,11 @@ export interface AbortScope {
 }
 
 /**
- * Open the abort scope for one exchange. The timeout uses a plain controller
- * and timer rather than `AbortSignal.timeout`/`AbortSignal.any`, which some
- * runtimes (React Native, older Safari) lack.
+ * Open the abort scope for one exchange, timing out with a plain controller and
+ * timer since some runtimes (React Native, older Safari) lack
+ * `AbortSignal.timeout` and `AbortSignal.any`.
  *
- * @param timeout - the configured timeout in milliseconds, or null for none
- * @param callerSignal - the caller's signal, if any
+ * @param timeout - the timeout in milliseconds, or null for none
  * @returns the scope; dispose it once the body has been read
  */
 export function openAbortScope(timeout: number | null, callerSignal: AbortSignal | undefined): AbortScope {
@@ -56,7 +52,6 @@ export function openAbortScope(timeout: number | null, callerSignal: AbortSignal
     /**
      * Abort the exchange on behalf of the first source to fire.
      *
-     * @param by - the source aborting the exchange
      * @param reason - the abort reason, or undefined for the default
      */
     const abort = (by: Exclude<AbortSource, 'none'>, reason?: unknown): void => {
@@ -88,7 +83,6 @@ export function openAbortScope(timeout: number | null, callerSignal: AbortSignal
  * Run a listener when a signal aborts: at once when it already has, otherwise
  * on its abort event.
  *
- * @param signal - the signal to watch, if any
  * @param listener - receives the signal's abort reason
  * @returns a function that stops watching the signal
  */

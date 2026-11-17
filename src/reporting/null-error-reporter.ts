@@ -1,9 +1,5 @@
 /**
- * No-op error reporter adapter.
- *
- * Used as the default when no error-reporting provider is configured. All
- * methods are intentionally empty so that calls are silently ignored rather
- * than throwing or logging.
+ * No-op error reporter, the default when no provider is configured.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -16,21 +12,21 @@ import type { ErrorReporter, ReportedUser } from './error-reporter';
  */
 export class NullErrorReporter implements ErrorReporter {
     /**
-     * Discard the error; the null reporter records nothing.
+     * Discard the error.
      */
     captureError(_error: unknown, _context?: Readonly<Record<string, unknown>>): void {
         // Intentionally empty: no provider is configured.
     }
 
     /**
-     * Discard the message; the null reporter records nothing.
+     * Discard the message.
      */
     captureMessage(_message: string, _context?: Readonly<Record<string, unknown>>): void {
         // Intentionally empty: no provider is configured.
     }
 
     /**
-     * Discard the user; the null reporter records nothing.
+     * Discard the user.
      */
     setUser(_user: ReportedUser | null): void {
         // Intentionally empty: no provider is configured.

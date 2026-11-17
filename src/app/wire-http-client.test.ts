@@ -26,8 +26,6 @@ interface OkBody {
 
 /**
  * Build a minimal contract-satisfying configuration fixture.
- *
- * @returns the configuration fixture
  */
 function createConfig(): FoundationConfig {
     return {
@@ -44,9 +42,6 @@ function createConfig(): FoundationConfig {
 
 /**
  * Build empty module HTTP contributions with optional overrides.
- *
- * @param overrides - fields to replace on the empty contribution set
- * @returns the contributions fixture
  */
 function createContributions(overrides: Partial<ModuleHttpContributions> = {}): ModuleHttpContributions {
     return { requestInterceptors: [], onUnauthorized: null, responseErrorHandlers: [], ...overrides };
@@ -54,9 +49,6 @@ function createContributions(overrides: Partial<ModuleHttpContributions> = {}): 
 
 /**
  * Build a resolved request fixture with optional overrides.
- *
- * @param overrides - fields to replace on the base request
- * @returns the request fixture
  */
 function createRequest(overrides: Partial<HttpRequest> = {}): HttpRequest {
     return { method: 'GET', url: 'https://api.example.com/items', headers: {}, body: undefined, ...overrides };
@@ -66,8 +58,6 @@ function createRequest(overrides: Partial<HttpRequest> = {}): HttpRequest {
 function createHttpClientStub(): HttpClient {
     /**
      * Reject every call, since the stub must never be used.
-     *
-     * @returns a rejected promise
      */
     const fail = (): Promise<never> => Promise.reject(new Error('not implemented'));
 
@@ -122,7 +112,6 @@ interface FetchStub {
  *
  * @param responses - response factories consumed in call order; exhausted calls
  * fall back to an empty 200
- * @returns the recording fetch stub
  */
 function createFetchStub(...responses: ReadonlyArray<() => Response>): FetchStub {
     const urls: string[] = [];
@@ -130,10 +119,6 @@ function createFetchStub(...responses: ReadonlyArray<() => Response>): FetchStub
 
     /**
      * Record the call and replay the next queued response.
-     *
-     * @param input - the request URL
-     * @param init - the request init
-     * @returns the queued response, or an empty 200 once exhausted
      */
     const fetchFn: typeof fetch = (input, init) => {
         urls.push(String(input));
@@ -165,9 +150,6 @@ type CaptureOverrides = Partial<
 
 /**
  * Wire a client through a capturing factory override and return the tools.
- *
- * @param overrides - wiring inputs to replace on the minimal base options
- * @returns the construction inputs handed to the factory
  */
 function captureTools(overrides: CaptureOverrides = {}): WireHttpClientTools<FoundationConfig> {
     let captured: WireHttpClientTools<FoundationConfig> | null = null;
@@ -210,7 +192,7 @@ interface RecordingToaster extends Toaster {
     readonly recorded: RecordedToast[];
 }
 
-/** A Toaster that records raised toasts for assertion. */
+/** Build a Toaster that records raised toasts. */
 function createRecordingToaster(): RecordingToaster {
     const recorded: RecordedToast[] = [];
 
@@ -246,7 +228,7 @@ describe('wireHttpClient', () => {
             expect(api()).toBe(client);
         });
 
-        it('sends requests to the configured base URL through the fetch seam, with a timeout signal', async () => {
+        it('sends requests to the base URL through the fetch seam with a timeout signal', async () => {
             const stub = createFetchStub(() => jsonOk());
             const client = wireHttpClient({
                 config: createConfig(),
@@ -266,9 +248,6 @@ describe('wireHttpClient', () => {
 
             /**
              * Tag the request as seen by the preset.
-             *
-             * @param request - the outgoing request
-             * @returns the tagged request
              */
             const preset: RequestInterceptor = request => {
                 log.push('preset');
@@ -278,9 +257,6 @@ describe('wireHttpClient', () => {
 
             /**
              * Append the module tag to the preset tag.
-             *
-             * @param request - the outgoing request
-             * @returns the tagged request
              */
             const moduleInterceptor: RequestInterceptor = request => {
                 log.push('module');
@@ -729,7 +705,7 @@ describe('wireHttpClient', () => {
             ]);
         });
 
-        it('still captures the failure when the toast service throws, and captures the toast failure too', () => {
+        it('captures both the failure and a throwing toast', () => {
             const reporter = createRecordingReporter();
             const toastFailure = new Error('toaster exploded');
 

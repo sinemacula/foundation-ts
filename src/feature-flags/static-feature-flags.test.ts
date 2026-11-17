@@ -11,7 +11,7 @@ import { StaticFeatureFlags } from './static-feature-flags';
 
 describe('StaticFeatureFlags', () => {
     describe('constructor', () => {
-        it('accepts no arguments and defaults to an empty flag set', () => {
+        it('defaults to an empty flag set', () => {
             const flags = new StaticFeatureFlags();
 
             expect(flags.isEnabled('missing')).toBe(false);
@@ -25,37 +25,29 @@ describe('StaticFeatureFlags', () => {
     });
 
     describe('isEnabled', () => {
-        it('returns the stored boolean when the flag is true', () => {
-            const flags = new StaticFeatureFlags({ 'feat-a': true });
-
-            expect(flags.isEnabled('feat-a')).toBe(true);
+        it.each([true, false])('returns a stored %s', stored => {
+            expect(new StaticFeatureFlags({ 'feat-a': stored }).isEnabled('feat-a')).toBe(stored);
         });
 
-        it('returns the stored boolean when the flag is false', () => {
-            const flags = new StaticFeatureFlags({ 'feat-a': false });
-
-            expect(flags.isEnabled('feat-a')).toBe(false);
-        });
-
-        it('returns the default fallback (false) when the flag is absent', () => {
+        it('returns false for an absent flag', () => {
             const flags = new StaticFeatureFlags();
 
             expect(flags.isEnabled('missing')).toBe(false);
         });
 
-        it('returns a custom fallback when the flag is absent', () => {
+        it('returns a custom fallback for an absent flag', () => {
             const flags = new StaticFeatureFlags();
 
             expect(flags.isEnabled('missing', true)).toBe(true);
         });
 
-        it('returns the fallback when the stored value is a string, not a boolean', () => {
+        it('returns the fallback for a string value', () => {
             const flags = new StaticFeatureFlags({ 'variant-flag': 'blue' });
 
             expect(flags.isEnabled('variant-flag')).toBe(false);
         });
 
-        it('returns the fallback when the stored value is a number, not a boolean', () => {
+        it('returns the fallback for a number value', () => {
             const flags = new StaticFeatureFlags({ 'numeric-flag': 42 });
 
             expect(flags.isEnabled('numeric-flag', true)).toBe(true);
@@ -63,51 +55,31 @@ describe('StaticFeatureFlags', () => {
     });
 
     describe('variant', () => {
-        it('returns the stored string value when the type matches the fallback', () => {
-            const flags = new StaticFeatureFlags({ flow: 'checkout-v2' });
-
-            expect(flags.variant('flow', 'checkout-v1')).toBe('checkout-v2');
+        it.each([
+            ['string', 'checkout-v2', 'checkout-v1'],
+            ['number', 100, 0],
+            ['boolean', true, false],
+        ])('returns a stored %s matching the fallback type', (_, stored, fallback) => {
+            expect(new StaticFeatureFlags({ flag: stored }).variant('flag', fallback)).toBe(stored);
         });
 
-        it('returns the stored number value when the type matches the fallback', () => {
-            const flags = new StaticFeatureFlags({ limit: 100 });
-
-            expect(flags.variant('limit', 0)).toBe(100);
-        });
-
-        it('returns the stored boolean value when the type matches the fallback', () => {
-            const flags = new StaticFeatureFlags({ enabled: true });
-
-            expect(flags.variant('enabled', false)).toBe(true);
-        });
-
-        it('returns the fallback when the key is absent', () => {
+        it('returns the fallback for an absent key', () => {
             const flags = new StaticFeatureFlags();
 
             expect(flags.variant('missing', 'default')).toBe('default');
         });
 
-        it('returns the fallback when the stored type is string but fallback is number', () => {
-            const flags = new StaticFeatureFlags({ limit: 'many' });
-
-            expect(flags.variant('limit', 0)).toBe(0);
-        });
-
-        it('returns the fallback when the stored type is number but fallback is string', () => {
-            const flags = new StaticFeatureFlags({ flow: 42 });
-
-            expect(flags.variant('flow', 'default')).toBe('default');
-        });
-
-        it('returns the fallback when the stored type is boolean but fallback is string', () => {
-            const flags = new StaticFeatureFlags({ flow: true });
-
-            expect(flags.variant('flow', 'default')).toBe('default');
+        it.each([
+            ['string', 'number', 'many', 0],
+            ['number', 'string', 42, 'default'],
+            ['boolean', 'string', true, 'default'],
+        ])('returns the fallback for a stored %s against a %s fallback', (_, _type, stored, fallback) => {
+            expect(new StaticFeatureFlags({ flag: stored }).variant('flag', fallback)).toBe(fallback);
         });
     });
 
     describe('setContext', () => {
-        it('stores the context and exposes it via the context getter', () => {
+        it('exposes the stored context', () => {
             const flags = new StaticFeatureFlags();
             const ctx = { userId: 'u1', plan: 'pro', beta: true };
 
@@ -116,7 +88,7 @@ describe('StaticFeatureFlags', () => {
             expect(flags.context).toEqual(ctx);
         });
 
-        it('replaces a previously stored context', () => {
+        it('replaces a stored context', () => {
             const flags = new StaticFeatureFlags();
 
             flags.setContext({ userId: 'u1' });
@@ -127,7 +99,7 @@ describe('StaticFeatureFlags', () => {
     });
 
     describe('onChange', () => {
-        it('calls the handler when replace() is invoked', () => {
+        it('notifies a handler on replace', () => {
             const flags = new StaticFeatureFlags();
             const handler = vi.fn();
 
@@ -137,7 +109,7 @@ describe('StaticFeatureFlags', () => {
             expect(handler).toHaveBeenCalledOnce();
         });
 
-        it('calls multiple handlers when replace() is invoked', () => {
+        it('notifies every handler on replace', () => {
             const flags = new StaticFeatureFlags();
             const handlerA = vi.fn();
             const handlerB = vi.fn();
@@ -150,7 +122,7 @@ describe('StaticFeatureFlags', () => {
             expect(handlerB).toHaveBeenCalledOnce();
         });
 
-        it('stops delivering events after the returned unsubscribe is called', () => {
+        it('stops notifying after unsubscribe', () => {
             const flags = new StaticFeatureFlags();
             const handler = vi.fn();
 
@@ -179,7 +151,7 @@ describe('StaticFeatureFlags', () => {
     });
 
     describe('replace', () => {
-        it('updates the flag set so subsequent reads see the new values', () => {
+        it('swaps the flag set', () => {
             const flags = new StaticFeatureFlags({ feat: false });
 
             flags.replace({ feat: true });
@@ -187,7 +159,7 @@ describe('StaticFeatureFlags', () => {
             expect(flags.isEnabled('feat')).toBe(true);
         });
 
-        it('notifies all handlers synchronously', () => {
+        it('notifies handlers synchronously in subscription order', () => {
             const flags = new StaticFeatureFlags();
             const calls: string[] = [];
 

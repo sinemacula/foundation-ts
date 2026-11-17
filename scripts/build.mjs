@@ -1,15 +1,6 @@
 /**
- * Package build.
- *
- * Transforms the kernel source tree file-by-file into the published `dist/`:
- * every module keeps its path so a subpath import resolves to a single file
- * with no barrel and no bundler chunks. Runtime files and their declarations
- * both carry explicit relative extensions so the output resolves cleanly under
- * every module-resolution mode, not only a bundler's.
- *
- * mkdist extensions `from` specifiers but leaves bare side-effect imports
- * (`import './x'`, used here for module augmentation) untouched, which strict
- * ESM resolvers reject. The post-pass closes that gap.
+ * Compile `src/` file-by-file into `dist/`, then add the `.js` extension mkdist
+ * leaves off bare side-effect imports, which strict ESM resolvers reject.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,9 +17,7 @@ const { writtenFiles } = await mkdist({
     cleanDist: true,
     format: 'esm',
     ext: 'js',
-    // Unlike the web kernel, test-support is NOT excluded here: the realtime
-    // connection contract is a published dev-support entry, and it is the only
-    // test-support content in this package.
+    // test-support ships: it holds the published realtime connection contract.
     pattern: ['**/*.ts', '!**/*.test.ts'],
     declaration: true,
     addRelativeDeclarationExtensions: true,

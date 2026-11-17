@@ -1,9 +1,5 @@
 /**
- * Session API port.
- *
- * The session module depends on this contract, never on a concrete gateway.
- * Each platform ships a default gateway over its HTTP client; applications with
- * diverging wire conventions substitute their own implementation.
+ * Session API port; applications with other wire conventions supply their own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,8 +37,6 @@ export interface SessionApi<U extends SessionUser = SessionUser, C = PasswordCre
     /**
      * Exchange credentials and a device fingerprint for a session.
      *
-     * @param credentials - the credentials submitted by the user
-     * @param device - the device fingerprint
      * @returns the issued tokens, or the pending session awaiting a further
      * step
      */
@@ -54,7 +48,6 @@ export interface SessionApi<U extends SessionUser = SessionUser, C = PasswordCre
      *
      * @param refreshToken - the refresh token from the current session, or null
      * when none is held (as when the refresh credential travels in a cookie)
-     * @returns the refresh result
      */
     refresh(refreshToken: string | null): Promise<RefreshResult>;
 
@@ -68,8 +61,6 @@ export interface SessionApi<U extends SessionUser = SessionUser, C = PasswordCre
 
     /**
      * Fetch the authenticated user record.
-     *
-     * @returns the mapped user
      */
     currentUser(): Promise<U>;
 }

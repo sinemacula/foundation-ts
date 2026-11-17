@@ -1,9 +1,5 @@
 /**
- * Session user shape.
- *
- * The minimal user record the kernel session machinery needs; applications
- * extend it through the U generic on {@link SessionApi} and supply their own
- * mapping for any richer shape.
+ * Minimal session user record; applications extend it through the U generic.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

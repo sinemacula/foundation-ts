@@ -13,13 +13,7 @@ import { RuntimeEnvironmentError } from './runtime-environment-error';
 const URL = '/runtime-env.json';
 
 /**
- * Build a `Record<string, T>` from an array of `[key, value]` pairs.
- *
- * Keeps non-camelCase environment keys out of object-literal key positions so
- * naming-convention lint rules never see them.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain `Record<string, T>`
+ * Build a record from pairs, keeping env-style keys out of object literals.
  */
 function wire<T>(entries: ReadonlyArray<readonly [string, T]>): Record<string, T> {
     return Object.fromEntries(entries);
@@ -27,10 +21,6 @@ function wire<T>(entries: ReadonlyArray<readonly [string, T]>): Record<string, T
 
 /**
  * Build a JSON response.
- *
- * @param payload - the body to serialise
- * @param status - the HTTP status code
- * @returns the response
  */
 function jsonResponse(payload: unknown, status = 200): Response {
     return new Response(JSON.stringify(payload), {
@@ -41,9 +31,6 @@ function jsonResponse(payload: unknown, status = 200): Response {
 
 /**
  * Build a fetch stub resolving the given response.
- *
- * @param response - the response to resolve
- * @returns the stub
  */
 function respondWith(response: Response): typeof fetch {
     return vi.fn().mockResolvedValue(response) as unknown as typeof fetch;
@@ -51,18 +38,13 @@ function respondWith(response: Response): typeof fetch {
 
 /**
  * Build a fetch stub that never settles.
- *
- * @returns the stub
  */
 function hangingFetch(): typeof fetch {
     return vi.fn(() => new Promise<Response>(() => undefined)) as unknown as typeof fetch;
 }
 
 /**
- * Capture the rejection of a load.
- *
- * @param load - the pending load
- * @returns the rejection reason
+ * Resolve with the rejection reason of a load, failing if it resolves.
  */
 function rejectionOf(load: Promise<unknown>): Promise<unknown> {
     return load.then(
@@ -95,7 +77,7 @@ describe('fetchRuntimeEnvironment', () => {
         );
     });
 
-    it('returns an empty record when the document does not exist, even when its body parses', async () => {
+    it('returns an empty record for a 404, even when its body parses', async () => {
         const fetchFn = respondWith(jsonResponse(wire([['API_URL', 'https://stale.example.com']]), 404));
 
         await expect(fetchRuntimeEnvironment({ url: URL }, fetchFn)).resolves.toStrictEqual({});
@@ -119,7 +101,7 @@ describe('fetchRuntimeEnvironment', () => {
         await expect(fetchRuntimeEnvironment({ url: URL })).resolves.toStrictEqual(wire([['RUNTIME', 'yes']]));
     });
 
-    it('rejects with the transport failure as the cause when the request fails', async () => {
+    it('rejects with the transport failure as the cause', async () => {
         const failure = new TypeError('network error');
         const fetchFn = vi.fn().mockRejectedValue(failure) as unknown as typeof fetch;
 
@@ -161,7 +143,7 @@ describe('fetchRuntimeEnvironment', () => {
         );
     });
 
-    it('rejects and aborts the request once the default five-second deadline passes', async () => {
+    it('rejects and aborts the request at the default five-second deadline', async () => {
         vi.useFakeTimers();
 
         const fetchFn = vi.fn(() => new Promise<Response>(() => undefined));

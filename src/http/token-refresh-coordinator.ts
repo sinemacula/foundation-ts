@@ -1,11 +1,6 @@
 /**
  * Single-flight coordination for token refreshes.
  *
- * When several requests fail with 401 at once, only one refresh may run; every
- * caller awaits the same in-flight attempt. The coordination is per instance,
- * so it deduplicates within one JavaScript context only; separate contexts
- * sharing a session (browser tabs) can still refresh concurrently.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -19,14 +14,15 @@
 export interface TokenRefresher<T = boolean> {
     /**
      * Attempt to refresh the session.
-     *
-     * @returns the refresh result
      */
     refresh(): Promise<T>;
 }
 
 /**
- * Deduplicates concurrent refresh attempts into a single in-flight call.
+ * Deduplicates concurrent refresh attempts into a single in-flight call, so
+ * requests failing with 401 together share one refresh. The deduplication is
+ * per instance: separate JavaScript contexts sharing a session, such as browser
+ * tabs, can still refresh concurrently.
  *
  * @typeParam T - what a refresh resolves with
  */
@@ -43,8 +39,6 @@ export class TokenRefreshCoordinator<T = boolean> {
 
     /**
      * Refresh the session, joining any refresh already in flight.
-     *
-     * @returns the shared refresh result
      */
     refresh(): Promise<T> {
         this.#inFlight ??= this.#refresher.refresh().finally(() => {

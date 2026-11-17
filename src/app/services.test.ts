@@ -49,8 +49,6 @@ import type { ColorSchemeService } from '../theme/color-scheme-service';
 function createHttpClientStub(): HttpClient {
     /**
      * Reject every call, since the stub must never be used.
-     *
-     * @returns a rejected promise
      */
     const fail = (): Promise<never> => Promise.reject(new Error('not implemented'));
 

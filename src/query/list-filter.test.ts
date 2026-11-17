@@ -13,7 +13,6 @@ import { filter } from './list-filter';
 /**
  * Parse the `filters` parameter of a query back to an object.
  *
- * @param query - the query to read
  * @returns the decoded filter tree, or an empty object when none is set
  */
 function parsedFilters(query: ApiQuery): unknown {
@@ -29,41 +28,22 @@ function parsedFilters(query: ApiQuery): unknown {
 /**
  * Build a wire-style object from entry tuples, keeping `$`-prefixed keys out of
  * object-literal key positions.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain record
  */
 function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string, unknown> {
     return Object.fromEntries(entries);
 }
 
 describe('filter', () => {
-    // -------------------------------------------------------------------------
-    // filter.equals
-    // -------------------------------------------------------------------------
     describe('equals', () => {
-        it('applies a string equality filter', () => {
-            const q = filter.equals('status').apply(ApiQuery.create(), 'active');
+        it.each([
+            ['a string', 'status', 'active'],
+            ['a numeric', 'age', 30],
+            ['a true', 'active', true],
+            ['a false', 'active', false],
+        ])('applies %s equality filter', (_label, field, value) => {
+            const q = filter.equals(field).apply(ApiQuery.create(), value);
 
-            expect(parsedFilters(q)).toEqual({ status: 'active' });
-        });
-
-        it('applies a numeric equality filter', () => {
-            const q = filter.equals('age').apply(ApiQuery.create(), 30);
-
-            expect(parsedFilters(q)).toEqual({ age: 30 });
-        });
-
-        it('applies a boolean equality filter (true)', () => {
-            const q = filter.equals('active').apply(ApiQuery.create(), true);
-
-            expect(parsedFilters(q)).toEqual({ active: true });
-        });
-
-        it('applies a boolean equality filter (false)', () => {
-            const q = filter.equals('active').apply(ApiQuery.create(), false);
-
-            expect(parsedFilters(q)).toEqual({ active: false });
+            expect(parsedFilters(q)).toEqual({ [field]: value });
         });
 
         it('nests a single-segment dot path', () => {
@@ -72,16 +52,13 @@ describe('filter', () => {
             expect(parsedFilters(q)).toEqual({ posts: { published: true } });
         });
 
-        it('nests a two-segment dot path (posts.author.name)', () => {
+        it('nests a two-segment dot path', () => {
             const q = filter.equals('posts.author.name').apply(ApiQuery.create(), 'Alice');
 
             expect(parsedFilters(q)).toEqual({ posts: { author: { name: 'Alice' } } });
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter.anyOf
-    // -------------------------------------------------------------------------
     describe('anyOf', () => {
         it('applies a $in filter', () => {
             const q = filter.anyOf('status').apply(ApiQuery.create(), ['active', 'pending']);
@@ -95,7 +72,7 @@ describe('filter', () => {
             expect(parsedFilters(q)).toEqual({ posts: wire([['status', wire([['$in', ['draft', 'published']]])]]) });
         });
 
-        it('applies no filter for an empty list rather than an empty $in', () => {
+        it('applies no filter for an empty list', () => {
             const base = ApiQuery.create().where('status', 'active');
             const q = filter.anyOf('posts.status').apply(base, []);
 
@@ -103,9 +80,6 @@ describe('filter', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter.between
-    // -------------------------------------------------------------------------
     describe('between', () => {
         it('applies a $between filter with numeric bounds', () => {
             const q = filter.between('age').apply(ApiQuery.create(), [18, 65]);
@@ -120,9 +94,6 @@ describe('filter', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter.atLeast
-    // -------------------------------------------------------------------------
     describe('atLeast', () => {
         it('applies a $ge filter', () => {
             const q = filter.atLeast('age').apply(ApiQuery.create(), 18);
@@ -137,9 +108,6 @@ describe('filter', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter.atMost
-    // -------------------------------------------------------------------------
     describe('atMost', () => {
         it('applies a $le filter', () => {
             const q = filter.atMost('age').apply(ApiQuery.create(), 65);
@@ -154,40 +122,34 @@ describe('filter', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter.boolean
-    // -------------------------------------------------------------------------
     describe('boolean', () => {
-        it('applies a boolean true filter', () => {
+        it('applies a true filter', () => {
             const q = filter.boolean('verified').apply(ApiQuery.create(), true);
 
             expect(parsedFilters(q)).toEqual({ verified: true });
         });
 
-        it('applies a boolean false filter (false is a real value, not a clear)', () => {
+        it('applies a false filter', () => {
             const q = filter.boolean('verified').apply(ApiQuery.create(), false);
 
             expect(parsedFilters(q)).toEqual({ verified: false });
         });
 
-        it('applies boolean false via a dot path', () => {
+        it('applies a false filter via a dot path', () => {
             const q = filter.boolean('user.active').apply(ApiQuery.create(), false);
 
             expect(parsedFilters(q)).toEqual({ user: { active: false } });
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter.present
-    // -------------------------------------------------------------------------
     describe('present', () => {
-        it('applies $notNull when value is true', () => {
+        it('applies $notNull for true', () => {
             const q = filter.present('deletedAt').apply(ApiQuery.create(), true);
 
             expect(parsedFilters(q)).toEqual(wire([['deletedAt', wire([['$notNull', true]])]]));
         });
 
-        it('applies $null when value is false', () => {
+        it('applies $null for false', () => {
             const q = filter.present('deletedAt').apply(ApiQuery.create(), false);
 
             expect(parsedFilters(q)).toEqual(wire([['deletedAt', wire([['$null', true]])]]));
@@ -206,9 +168,6 @@ describe('filter', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter.contains
-    // -------------------------------------------------------------------------
     describe('contains', () => {
         it('applies a $contains filter with a scalar value', () => {
             const q = filter.contains('tags').apply(ApiQuery.create(), 'news');
@@ -229,11 +188,8 @@ describe('filter', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter.search
-    // -------------------------------------------------------------------------
     describe('search', () => {
-        it('sets the top-level search parameter, not a filter', () => {
+        it('sets the top-level search parameter', () => {
             const q = filter.search().apply(ApiQuery.create(), 'alice');
 
             expect(q.toQueryString()).toBe('search=alice');
@@ -246,9 +202,6 @@ describe('filter', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter.custom
-    // -------------------------------------------------------------------------
     describe('custom', () => {
         it('delegates to the provided apply function', () => {
             const myFilter = filter.custom<number>((query, value) => query.where('priority', '$ge', value));
@@ -266,11 +219,8 @@ describe('filter', () => {
         });
     });
 
-    // -------------------------------------------------------------------------
-    // filter object is frozen
-    // -------------------------------------------------------------------------
     describe('filter namespace', () => {
-        it('is frozen (prevents accidental mutation)', () => {
+        it('is frozen', () => {
             expect(Object.isFrozen(filter)).toBe(true);
         });
     });

@@ -17,20 +17,16 @@ describe('BreadcrumbTrail', () => {
             expect(trail.list()).toStrictEqual([]);
         });
 
-        it('records a breadcrumb with the timestamp from the injected clock', () => {
-            /** A clock frozen at one instant. */
-            const clock = () => 1_000;
-            const trail = new BreadcrumbTrail(50, clock);
+        it('stamps a breadcrumb with the clock time', () => {
+            const trail = new BreadcrumbTrail(50, () => 1_000);
 
             trail.add({ category: 'ui', message: 'button clicked' });
 
             expect(trail.list()).toStrictEqual([{ category: 'ui', message: 'button clicked', timestamp: 1_000 }]);
         });
 
-        it('records the optional data field when provided', () => {
-            /** A clock frozen at one instant. */
-            const clock = () => 2_000;
-            const trail = new BreadcrumbTrail(50, clock);
+        it('records optional data', () => {
+            const trail = new BreadcrumbTrail(50, () => 2_000);
 
             trail.add({ category: 'http', message: 'GET /api', data: { status: 200 } });
 
@@ -42,12 +38,9 @@ describe('BreadcrumbTrail', () => {
             });
         });
 
-        it('preserves insertion order across multiple adds', () => {
+        it('preserves insertion order', () => {
             let t = 0;
-
-            /** A clock advancing one tick per read. */
-            const clock = () => ++t;
-            const trail = new BreadcrumbTrail(50, clock);
+            const trail = new BreadcrumbTrail(50, () => ++t);
 
             trail.add({ category: 'a', message: 'first' });
             trail.add({ category: 'b', message: 'second' });
@@ -58,7 +51,7 @@ describe('BreadcrumbTrail', () => {
             expect(messages).toStrictEqual(['first', 'second', 'third']);
         });
 
-        it('uses Date.now when no clock is injected', () => {
+        it('defaults to Date.now', () => {
             const before = Date.now();
             const trail = new BreadcrumbTrail();
 
@@ -108,7 +101,7 @@ describe('BreadcrumbTrail', () => {
             expect(messages).toStrictEqual(['4', '5']);
         });
 
-        it('uses default capacity of 50 when none is supplied', () => {
+        it('defaults to a capacity of 50', () => {
             const trail = new BreadcrumbTrail(undefined, () => 0);
 
             for (let i = 0; i < 51; i++) {
@@ -130,7 +123,7 @@ describe('BreadcrumbTrail', () => {
             expect(trail.list()).toStrictEqual([]);
         });
 
-        it('allows new entries to be added after clear', () => {
+        it('accepts new entries after clear', () => {
             const trail = new BreadcrumbTrail(50, () => 0);
 
             trail.add({ category: 'a', message: 'old' });
@@ -142,8 +135,8 @@ describe('BreadcrumbTrail', () => {
         });
     });
 
-    describe('list immutability', () => {
-        it('returns a snapshot that does not change when further entries are added', () => {
+    describe('list', () => {
+        it('returns a snapshot unaffected by later adds', () => {
             const trail = new BreadcrumbTrail(50, () => 0);
 
             trail.add({ category: 'a', message: 'first' });

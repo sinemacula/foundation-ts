@@ -1,8 +1,5 @@
 /**
- * Vitest test-runner configuration.
- *
- * The base package is framework- and DOM-free, so tests run under the Node
- * environment. Coverage spans the whole TypeScript surface at 100%.
+ * Vitest configuration: Node environment, 100% coverage of the source.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

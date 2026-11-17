@@ -17,16 +17,10 @@ interface Widget {
 }
 
 describe('createServiceHolder', () => {
-    it('throws with the interpolated name when resolved before install', () => {
-        const holder = createServiceHolder<Widget>('http client');
+    it.each(['http client', 'toast service'])('names the %s when resolved before install', name => {
+        const holder = createServiceHolder<Widget>(name);
 
-        expect(() => holder.resolve()).toThrow('http client accessed before initialisation');
-    });
-
-    it('interpolates a different name into the resolve error', () => {
-        const holder = createServiceHolder<Widget>('toast service');
-
-        expect(() => holder.resolve()).toThrow('toast service accessed before initialisation');
+        expect(() => holder.resolve()).toThrow(`${name} accessed before initialisation`);
     });
 
     it('throws a SupportError when resolved before install', () => {

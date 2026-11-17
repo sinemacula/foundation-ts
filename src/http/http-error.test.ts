@@ -1,5 +1,5 @@
 /**
- * Unit tests for http-error.
+ * Tests for the HTTP error hierarchy.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -1,15 +1,6 @@
 /**
  * Fetch-backed adapter for the {@link HttpClient} port.
  *
- * JSON-first: requests ask for JSON, request bodies are serialised to JSON,
- * JSON responses are parsed, and non-success responses are mapped onto the
- * {@link HttpError} hierarchy. FormData and Blob bodies are passed to fetch
- * unchanged for uploads, and {@link FetchHttpClient.download} reads a response
- * as a raw Blob. An optional unauthorized handler supports refresh-and-retry
- * token flows without coupling this adapter to any auth implementation, an
- * optional response-error handler is told of each final failure, and an opt-in
- * retry policy re-attempts transient failures on idempotent requests.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -53,18 +44,17 @@ export interface RetryBackoff {
 }
 
 /**
- * Opt-in transient-retry policy for idempotent requests:
- * {@link FetchHttpClient.get} and {@link FetchHttpClient.download}. POST, PUT,
- * PATCH, and DELETE never retry regardless of this policy. A
- * {@link NetworkError} (including a {@link TimeoutError}) or a 502, 503 or 504
- * response is retried; a {@link CancelledError} never is, and nor is a
- * {@link MaintenanceError}, since a maintenance window outlasts any backoff.
+ * Opt-in transient-retry policy, applied only to {@link FetchHttpClient.get}
+ * and {@link FetchHttpClient.download}. A {@link NetworkError} (including a
+ * {@link TimeoutError}) or a 502, 503 or 504 response is retried; a
+ * {@link CancelledError} never is, and nor is a {@link MaintenanceError}, since
+ * a maintenance window outlasts any backoff.
  */
 export interface FetchHttpClientRetryOptions {
     /** Number of retries attempted after the first try. Defaults to 2. */
     readonly attempts?: number;
 
-    /** Delay strategy between attempts. Defaults to a new {@link ExponentialBackoff}, shared with the realtime reconnect scheduling. */
+    /** Delay strategy between attempts. Defaults to a new {@link ExponentialBackoff}. */
     readonly backoff?: RetryBackoff;
 }
 
@@ -91,7 +81,7 @@ export interface FetchHttpClientOptions {
     /** Told of each final request failure; see {@link ResponseErrorHandler}. */
     readonly onResponseError?: ResponseErrorHandler;
 
-    /** Opt-in retry policy for transient failures. Omit entirely for a single attempt on every request; see {@link FetchHttpClientRetryOptions}. */
+    /** Opt-in retry policy for transient failures; omit for a single attempt on every request. */
     readonly retry?: FetchHttpClientRetryOptions;
 }
 
@@ -108,8 +98,7 @@ const DEFAULT_ACCEPT: Readonly<Record<BodyParseMode, string>> = {
 };
 
 /**
- * Descriptor passed to the private {@link FetchHttpClient.#sendAttempt}
- * dispatch method.
+ * A request as described by the public method, before interceptors resolve it.
  */
 interface SendRequest {
     /** The HTTP method to dispatch. */
@@ -176,9 +165,6 @@ export class FetchHttpClient implements HttpClient {
 
     /**
      * Construct a new HTTP client.
-     *
-     * @param options - base URL, optional fetch override, timeout, default
-     * headers, interceptors, and retry policy
      */
     constructor(options: FetchHttpClientOptions) {
         this.#baseUrl = trimTrailingSlashes(options.baseUrl);
@@ -279,13 +265,10 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Run one attempt of a request, retrying transient failures on idempotent
-     * requests (with a backoff delay) until the retry budget is exhausted, then
-     * notify the response-error handler with the final outcome only.
+     * Run a request, retrying transient failures on idempotent requests until
+     * the retry budget runs out, and report only the final failure.
      *
-     * @param sendRequest - the request descriptor
      * @param attempt - zero-based attempt counter for this call
-     * @returns the parsed response body once an attempt succeeds
      */
     async #sendAttempt<T>(sendRequest: SendRequest, attempt: number): Promise<T> {
         const context: AttemptContext = { request: null };
@@ -312,7 +295,6 @@ export class FetchHttpClient implements HttpClient {
      * with a {@link CancelledError} when the caller's signal aborts.
      *
      * @param attempt - zero-based attempt counter
-     * @param sendRequest - the request descriptor, carrying the caller signal
      * @param request - the failed attempt's resolved request, or null when an
      * interceptor failed before one existed
      */
@@ -335,15 +317,12 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Resolve the request through interceptors, exchange it, and run the
-     * 401-refresh-and-retry-once flow. Never notifies the response-error
-     * handler - {@link FetchHttpClient.#sendAttempt} does that once, for the
-     * final outcome only.
+     * Resolve the request through the interceptors and exchange it, retrying
+     * once after a successful 401 refresh. Never notifies the response-error
+     * handler; the caller does that for the final outcome.
      *
-     * @param sendRequest - the request descriptor
      * @param context - records the resolved request for the caller's error
      * notification
-     * @returns the parsed response body on success
      */
     async #dispatchOnce<T>(sendRequest: SendRequest, context: AttemptContext): Promise<T> {
         const { method, path, body, options, parse } = sendRequest;
@@ -372,11 +351,6 @@ export class FetchHttpClient implements HttpClient {
     /**
      * Send the request and read its body under one abort scope, so the
      * configured timeout covers the body as well as the headers.
-     *
-     * @param request - the fully-resolved request to send
-     * @param sendRequest - the request descriptor, carrying the caller signal
-     * and parse mode
-     * @returns the parsed response body, typed as the caller declared it
      */
     async #exchange<T>(request: HttpRequest, sendRequest: SendRequest): Promise<T> {
         const scope = openAbortScope(this.#timeout, sendRequest.options?.signal);
@@ -400,8 +374,6 @@ export class FetchHttpClient implements HttpClient {
      * Run the unauthorized handler when a failure is an eligible 401. A
      * rejecting handler counts as a failed refresh, so the original 401 stands.
      *
-     * @param error - the failure of the exchange
-     * @param sendRequest - the request descriptor that produced it
      * @returns true when a refresh succeeded and the request should be retried
      */
     async #refreshedAfter(error: unknown, sendRequest: SendRequest): Promise<boolean> {
@@ -424,12 +396,8 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Report a request failure to the configured response-error handler.
-     *
-     * @param error - the error about to be thrown
-     * @param request - the fully-resolved request that failed
-     * @param options - the per-request options, checked for a notifyOnError
-     * opt-out
+     * Report a failure to the response-error handler unless the request opted
+     * out.
      */
     #notifyResponseError(error: unknown, request: HttpRequest, options: HttpRequestOptions | undefined): void {
         if (this.#onResponseError === null || options?.notifyOnError === false) {
@@ -444,11 +412,7 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Thread the request through every registered interceptor, in registration
-     * order, so each sees the previous interceptor's output.
-     *
-     * @param initial - the request before any interceptor runs
-     * @returns the request after the final interceptor
+     * Thread the request through every interceptor in registration order.
      */
     async #applyInterceptors(initial: HttpRequest): Promise<HttpRequest> {
         let request = initial;
@@ -462,10 +426,6 @@ export class FetchHttpClient implements HttpClient {
 
     /**
      * Perform the fetch, mapping a rejection onto the typed transport errors.
-     *
-     * @param request - the fully-resolved request to send
-     * @param scope - the abort scope governing the exchange
-     * @returns the raw fetch response
      */
     async #dispatch(request: HttpRequest, scope: AbortScope): Promise<Response> {
         try {
@@ -478,12 +438,6 @@ export class FetchHttpClient implements HttpClient {
     /**
      * Read a response body, mapping a read failure (a dropped connection, a
      * timeout, or a caller abort mid-body) onto the typed transport errors.
-     *
-     * @param response - the fetch response
-     * @param request - the request that produced it
-     * @param scope - the abort scope governing the exchange
-     * @param read - reads the body in the wanted form
-     * @returns the body as read
      */
     async #readBody<R>(
         response: Response,
@@ -499,14 +453,9 @@ export class FetchHttpClient implements HttpClient {
     }
 
     /**
-     * Parse a successful response body.
-     *
-     * @param response - the fetch response
-     * @param request - the request that produced it
-     * @param scope - the abort scope governing the exchange
-     * @param parse - 'blob' reads the raw response body; 'json' parses JSON,
-     * falls back to raw text, or undefined for an empty body
-     * @returns the parsed payload, matching the requested parse mode
+     * Parse a successful response body: a Blob in blob mode, otherwise the
+     * parsed JSON, the raw text of a non-JSON response, or undefined when
+     * empty.
      */
     async #parseResponseBody(
         response: Response,
@@ -545,11 +494,7 @@ export class FetchHttpClient implements HttpClient {
      * and nothing a {@link NetworkError}, even when the rejection is an
      * `AbortError`, since only a recorded source proves a deliberate abort.
      *
-     * @param error - the rejection
-     * @param request - the request being exchanged
-     * @param scope - the abort scope governing the exchange
      * @param failure - how the request failed, for the network-error message
-     * @returns the typed error to throw
      */
     #toTransportError(error: unknown, request: HttpRequest, scope: AbortScope, failure: string): Error {
         const target = describeRequest(request);
@@ -569,8 +514,6 @@ export class FetchHttpClient implements HttpClient {
      * parameters, dropping undefined values.
      *
      * @param path - the request path, whose leading slashes are trimmed
-     * @param query - the query parameters to encode, if any
-     * @returns the absolute request URL, with a query string when present
      */
     #buildUrl(path: string, query: QueryParameters | undefined): string {
         const url = `${this.#baseUrl}/${path.replace(/^\/+/u, '')}`;
@@ -578,8 +521,7 @@ export class FetchHttpClient implements HttpClient {
 
         for (const [key, value] of Object.entries(query ?? {})) {
             if (value !== undefined) {
-                // append, not set: keys are unique by construction, and some
-                // minimal URLSearchParams implementations ship append only.
+                // Minimal URLSearchParams implementations may ship append only.
                 parameters.append(key, String(value));
             }
         }
@@ -594,9 +536,7 @@ export class FetchHttpClient implements HttpClient {
  * Build the fetch `RequestInit`, passing FormData and Blob bodies through
  * unchanged and JSON-serialising any other body with a default content-type.
  *
- * @param request - the resolved request to translate
  * @param signal - the effective abort signal, or null when none applies
- * @returns the RequestInit to hand to fetch
  */
 function buildRequestInit(request: HttpRequest, signal: AbortSignal | null): RequestInit {
     const headers = { ...request.headers };
@@ -612,8 +552,7 @@ function buildRequestInit(request: HttpRequest, signal: AbortSignal | null): Req
     }
 
     if (isUploadBody(request.body)) {
-        // The fetch implementation sets the multipart boundary or Blob
-        // content-type itself; overriding it here would strip that information.
+        // fetch sets the multipart boundary or Blob content-type itself.
         init.body = request.body;
     } else if (request.body !== undefined) {
         if (!hasHeader(headers, 'content-type')) {
@@ -629,10 +568,6 @@ function buildRequestInit(request: HttpRequest, signal: AbortSignal | null): Req
 /**
  * Add the default `accept` header unless one is already present, so the API
  * renders errors as JSON rather than an HTML page or a redirect.
- *
- * @param headers - the merged default and per-request headers
- * @param parse - the parse mode, selecting the default
- * @returns the headers with an `accept` header
  */
 function withDefaultAccept(headers: Record<string, string>, parse: BodyParseMode): Record<string, string> {
     return hasHeader(headers, 'accept') ? headers : { accept: DEFAULT_ACCEPT[parse], ...headers };
@@ -641,9 +576,6 @@ function withDefaultAccept(headers: Record<string, string>, parse: BodyParseMode
 /**
  * Describe a request for an error message, without its query string or
  * fragment.
- *
- * @param request - the request to describe
- * @returns the method and stripped URL
  */
 function describeRequest(request: Pick<HttpRequest, 'method' | 'url'>): string {
     return `${request.method} ${stripQueryAndFragment(request.url)}`;
@@ -652,32 +584,21 @@ function describeRequest(request: Pick<HttpRequest, 'method' | 'url'>): string {
 /**
  * Determine whether a header is present, case-insensitively.
  *
- * @param headers - the header record to inspect
  * @param name - the lower-case header name to look for
- * @returns true when the header is present
  */
 function hasHeader(headers: Record<string, string>, name: string): boolean {
     return Object.keys(headers).some(key => key.toLowerCase() === name);
 }
 
 /**
- * Determine whether a request body should be handed to fetch unchanged.
- *
- * @param body - the request body
- * @returns true when the body is a FormData or Blob instance
+ * Determine whether a body is a FormData or Blob, handed to fetch unchanged.
  */
 function isUploadBody(body: unknown): body is FormData | Blob {
     return body instanceof FormData || body instanceof Blob;
 }
 
 /**
- * Trim trailing slashes with a linear scan.
- *
- * A `+`-then-anchor regex backtracks polynomially on slash runs, so the trim
- * walks the string instead.
- *
- * @param value - the string to trim
- * @returns the value without trailing slashes
+ * Trim trailing slashes by scanning; a `/+$` regex backtracks polynomially.
  */
 function trimTrailingSlashes(value: string): string {
     let end = value.length;
@@ -691,9 +612,6 @@ function trimTrailingSlashes(value: string): string {
 
 /**
  * Determine whether a failed attempt is eligible for a transient retry.
- *
- * @param error - the error thrown by the failed attempt
- * @returns true when the retry policy covers the failure
  */
 function isTransientError(error: unknown): boolean {
     if (error instanceof NetworkError) {
@@ -704,10 +622,7 @@ function isTransientError(error: unknown): boolean {
 }
 
 /**
- * Determine whether a response declares a JSON body.
- *
- * @param response - the fetch response
- * @returns true when the content type is JSON
+ * Determine whether a response declares a JSON content type.
  */
 function isJsonResponse(response: Response): boolean {
     return (response.headers.get('content-type') ?? '').includes('json');

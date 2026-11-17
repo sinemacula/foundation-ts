@@ -25,9 +25,7 @@ jobs:
     # ==========================================================================
     # JOB: TESTS
     # ==========================================================================
-    # Typecheck, unit tests at 100% coverage across the Node matrix, and the
-    # build - all from the shared reusable workflow. This package has no
-    # browser surface, so the e2e job is off.
+    # No browser surface, so the e2e job is off.
     tests:
         uses: sinemacula/.github/.github/workflows/node-tests.yml@v3.0.2
         # The shared jobs inherit only what this job grants; the coverage upload

@@ -24,12 +24,8 @@ interface Widget {
 }
 
 /**
- * Build a `Record<string, unknown>` from an array of `[key, value]` pairs.
- *
- * Keeps snake_case wire-field names out of object-literal key positions.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain `Record<string, unknown>`
+ * Build a record from `[key, value]` pairs, keeping snake_case wire-field names
+ * out of object-literal key positions.
  */
 function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string, unknown> {
     return Object.fromEntries(entries);
@@ -39,8 +35,6 @@ function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string
  * Validate and map a raw record onto a `Widget`, mirroring a real resource
  * mapper.
  *
- * @param raw - the raw wire record
- * @returns the mapped widget
  * @throws Error when required fields are missing or of the wrong type
  */
 function mapWidget(raw: RawRecord): Widget {
@@ -63,20 +57,12 @@ describe('unwrapItem', () => {
         expect(unwrapItem(payload, mapWidget)).toEqual({ id: 'w1', name: 'Widget One' });
     });
 
-    it('throws when the payload is not a record', () => {
-        expect(() => unwrapItem('not-a-record', mapWidget)).toThrow(
-            'The response did not match the expected envelope shape.',
-        );
-    });
-
-    it('throws when data is missing', () => {
-        expect(() => unwrapItem({}, mapWidget)).toThrow('The response did not match the expected envelope shape.');
-    });
-
-    it('throws when data is not a record', () => {
-        expect(() => unwrapItem({ data: [1, 2] }, mapWidget)).toThrow(
-            'The response did not match the expected envelope shape.',
-        );
+    it.each([
+        ['the payload is not a record', 'not-a-record'],
+        ['data is missing', {}],
+        ['data is not a record', { data: [1, 2] }],
+    ])('throws when %s', (_label, payload) => {
+        expect(() => unwrapItem(payload, mapWidget)).toThrow(MALFORMED);
     });
 
     it('propagates errors thrown by the mapper', () => {
@@ -132,24 +118,13 @@ describe('unwrapList', () => {
         ]);
     });
 
-    it('throws when the payload is not a record', () => {
-        expect(() => unwrapList(null, mapWidget)).toThrow('The response did not match the expected envelope shape.');
-    });
-
-    it('throws when data is missing', () => {
-        expect(() => unwrapList({}, mapWidget)).toThrow('The response did not match the expected envelope shape.');
-    });
-
-    it('throws when data is not an array', () => {
-        expect(() => unwrapList({ data: {} }, mapWidget)).toThrow(
-            'The response did not match the expected envelope shape.',
-        );
-    });
-
-    it('throws when an entry in the data array is not a record', () => {
-        expect(() => unwrapList({ data: ['not-a-record'] }, mapWidget)).toThrow(
-            'The response did not match the expected envelope shape.',
-        );
+    it.each([
+        ['the payload is not a record', null],
+        ['data is missing', {}],
+        ['data is not an array', { data: {} }],
+        ['an entry in the data array is not a record', { data: ['not-a-record'] }],
+    ])('throws when %s', (_label, payload) => {
+        expect(() => unwrapList(payload, mapWidget)).toThrow(MALFORMED);
     });
 
     it('propagates errors thrown by the mapper', () => {
@@ -180,34 +155,16 @@ describe('unwrapList', () => {
             expect(unwrapList({ data: [] }, mapWidget).meta).toBeNull();
         });
 
-        it('is null when meta is not a record', () => {
-            expect(unwrapList({ data: [], meta: 'not-a-record' }, mapWidget).meta).toBeNull();
-        });
-
-        it('is null when continue is missing', () => {
-            expect(unwrapList({ data: [], meta: { total: 1, count: 1 } }, mapWidget).meta).toBeNull();
-        });
-
-        it('is null when continue is not a boolean', () => {
-            expect(unwrapList({ data: [], meta: { continue: 1 } }, mapWidget).meta).toBeNull();
-        });
-
-        it('is null when total is present but count is not', () => {
-            expect(unwrapList({ data: [], meta: { total: 4, continue: true } }, mapWidget).meta).toBeNull();
-        });
-
-        it('is null when count is present but total is not', () => {
-            expect(unwrapList({ data: [], meta: { count: 4, continue: true } }, mapWidget).meta).toBeNull();
-        });
-
-        it('is null when total is not a number', () => {
-            expect(unwrapList({ data: [], meta: { total: '4', count: 4, continue: true } }, mapWidget).meta).toBeNull();
-        });
-
-        it('is null when count is not a number', () => {
-            expect(
-                unwrapList({ data: [], meta: { total: 4, count: null, continue: true } }, mapWidget).meta,
-            ).toBeNull();
+        it.each([
+            ['meta is not a record', 'not-a-record'],
+            ['continue is missing', { total: 1, count: 1 }],
+            ['continue is not a boolean', { continue: 1 }],
+            ['total is present but count is not', { total: 4, continue: true }],
+            ['count is present but total is not', { count: 4, continue: true }],
+            ['total is not a number', { total: '4', count: 4, continue: true }],
+            ['count is not a number', { total: 4, count: null, continue: true }],
+        ])('is null when %s', (_label, meta) => {
+            expect(unwrapList({ data: [], meta }, mapWidget).meta).toBeNull();
         });
     });
 

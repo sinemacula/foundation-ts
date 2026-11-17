@@ -1,9 +1,5 @@
 /**
- * Bounded session breadcrumb trail.
- *
- * Records a finite sequence of events that led up to an error so that reporters
- * can attach them as context. The trail evicts the oldest entry whenever it
- * would exceed its capacity.
+ * Bounded trail of the events leading up to an error, for reporter context.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,11 +43,10 @@ export class BreadcrumbTrail {
     #entries: RecordedBreadcrumb[] = [];
 
     /**
-     * Start an empty trail bounded to a fixed capacity, timestamped by `clock`.
+     * Start an empty trail.
      *
      * @param capacity - maximum number of breadcrumbs to retain (default 50)
-     * @param clock - timestamp source, injected for testability (default
-     * Date.now)
+     * @param clock - epoch-millisecond timestamp source (default Date.now)
      */
     constructor(capacity: number = DEFAULT_CAPACITY, clock: () => number = () => Date.now()) {
         this.#capacity = capacity;
@@ -60,8 +55,6 @@ export class BreadcrumbTrail {
 
     /**
      * Append a breadcrumb to the trail, evicting the oldest when at capacity.
-     *
-     * @param breadcrumb - the event to record
      */
     add(breadcrumb: Breadcrumb): void {
         if (this.#entries.length >= this.#capacity) {
@@ -72,9 +65,7 @@ export class BreadcrumbTrail {
     }
 
     /**
-     * Return a read-only snapshot of the current trail, oldest entry first.
-     *
-     * @returns the recorded breadcrumbs
+     * Return a snapshot of the current trail, oldest entry first.
      */
     list(): readonly RecordedBreadcrumb[] {
         return [...this.#entries];

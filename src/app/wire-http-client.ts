@@ -1,18 +1,5 @@
 /**
- * HTTP client wiring unit for the bootstrap preset.
- *
- * Builds the application HTTP client from the frozen configuration, the
- * resolved fetch seam, preset-level interceptors, and the module registry's
- * register-phase contributions, then installs it into the base http holder. The
- * response-error handler resolves in precedence order: an explicit override
- * wins; otherwise a configured toast key arms the default handler, which skips
- * validation failures and 401s, raises the application's toast, and captures
- * the error with request context; otherwise unexpected failures are captured
- * only. Module response-error handlers always run after the resolved handler,
- * in registry order, and the toast and reporting services are read lazily on
- * every invocation. Every handler runs in isolation, as does the default
- * handler's toast, so a throwing step is captured and never skips the rest.
- * Reported URLs are stripped of their query string and fragment.
+ * HTTP client wiring for the bootstrap preset.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,7 +58,7 @@ export interface WireHttpClientOptions<T extends FoundationConfig> {
     /** Full replacement of the preset response-error handler. */
     readonly onResponseError?: ResponseErrorHandler;
 
-    /** Arms the default handler's toast; the kernel ships no translation keys. */
+    /** Arms the default handler's toast; the kernel ships no translations. */
     readonly unexpectedErrorToastKey?: string;
 
     /** Full adapter override; receives the resolved construction inputs. */
@@ -81,8 +68,11 @@ export interface WireHttpClientOptions<T extends FoundationConfig> {
 /**
  * Build and install the application HTTP client.
  *
- * @param options - configuration, seams, module contributions, and overrides
- * @returns the installed HTTP client
+ * `onResponseError` replaces the default handler, which ignores validation
+ * failures and 401s and otherwise toasts (when a key is set) and reports the
+ * error. Module handlers run after it in registry order; each step is isolated,
+ * so a throw is reported and never skips the rest. Reported URLs drop their
+ * query string and fragment.
  */
 export function wireHttpClient<T extends FoundationConfig>(options: WireHttpClientOptions<T>): HttpClient {
     const tools: WireHttpClientTools<T> = {
@@ -102,9 +92,6 @@ export function wireHttpClient<T extends FoundationConfig>(options: WireHttpClie
 
 /**
  * Construct the default fetch-backed client from the resolved inputs.
- *
- * @param tools - the resolved construction inputs
- * @returns the configured client
  */
 function buildDefaultClient<T extends FoundationConfig>(tools: WireHttpClientTools<T>): HttpClient {
     return new FetchHttpClient({
@@ -120,9 +107,6 @@ function buildDefaultClient<T extends FoundationConfig>(tools: WireHttpClientToo
 /**
  * Compose the resolved preset handler with the module contributions, which
  * always run after it in registry order.
- *
- * @param options - the wiring inputs carrying the override, key, and handlers
- * @returns the composed response-error handler
  */
 function composeResponseErrorHandler<T extends FoundationConfig>(
     options: WireHttpClientOptions<T>,
@@ -140,15 +124,11 @@ function composeResponseErrorHandler<T extends FoundationConfig>(
 }
 
 /**
- * Build the default handler for unexpected request failures.
- *
- * Validation failures stay silent (forms render their field errors) and 401s
- * belong to the refresh flow; everything else raises the application's toast
- * when a key is configured and is captured with request context. The toast and
- * reporting services are resolved lazily on every invocation.
+ * Build the default handler for unexpected request failures. Validation
+ * failures are left to the form and 401s to the refresh flow; the toast and
+ * reporting services are resolved on every call.
  *
  * @param toastKey - the application's toast key, or undefined to capture only
- * @returns the default response-error handler
  */
 function createDefaultResponseErrorHandler(toastKey: string | undefined): ResponseErrorHandler {
     return (error, request) => {
@@ -170,9 +150,6 @@ function createDefaultResponseErrorHandler(toastKey: string | undefined): Respon
  * Run one response-error step, capturing a failure instead of letting it skip
  * the remaining steps. A failure to capture is dropped, since the reporter is
  * the only place left to send it.
- *
- * @param request - the failed request, for the failure's context
- * @param step - the step to run
  */
 function runIsolated(request: HttpRequest, step: () => void): void {
     try {
@@ -191,8 +168,6 @@ function runIsolated(request: HttpRequest, step: () => void): void {
  * string and fragment.
  *
  * @param source - what reported the failure
- * @param request - the failed request
- * @returns the report context
  */
 function reportContext(source: string, request: HttpRequest): Readonly<Record<string, string>> {
     return { source, method: request.method, url: stripQueryAndFragment(request.url) };

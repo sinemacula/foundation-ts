@@ -29,8 +29,6 @@ interface StubTracker extends AnalyticsTracker {
 
 /**
  * Build a tracker that records page calls.
- *
- * @returns the stub tracker
  */
 function makeTracker(): StubTracker {
     const pageCalls: PageCall[] = [];
@@ -60,8 +58,6 @@ interface HooksFixture {
 
 /**
  * Build navigation hooks the test drives by hand.
- *
- * @returns the hooks and their controls
  */
 function makeHooks(): HooksFixture {
     let handler: ((to: RouteTarget, from: RouteTarget) => void) | null = null;
@@ -87,7 +83,7 @@ const about: RouteTarget = { name: 'about', path: '/about', fullPath: '/about' }
 
 describe('installPageTracking', () => {
     describe('page calls', () => {
-        it('calls tracker.page with the route name and fullPath after navigation', () => {
+        it('tracks the route name and full path', () => {
             const { hooks, navigate } = makeHooks();
             const tracker = makeTracker();
 
@@ -97,7 +93,7 @@ describe('installPageTracking', () => {
             expect(tracker.pageCalls[0]).toStrictEqual({ name: 'about', properties: { path: '/about' } });
         });
 
-        it('falls back to to.path when the route has no name', () => {
+        it('falls back to the path when the route has no name', () => {
             const { hooks, navigate } = makeHooks();
             const tracker = makeTracker();
 
@@ -107,7 +103,7 @@ describe('installPageTracking', () => {
             expect(tracker.pageCalls[0]?.name).toBe('/no-name');
         });
 
-        it('calls tracker.page on every navigation', () => {
+        it('tracks every navigation', () => {
             const { hooks, navigate } = makeHooks();
             const tracker = makeTracker();
 
@@ -118,7 +114,7 @@ describe('installPageTracking', () => {
             expect(tracker.pageCalls).toHaveLength(2);
         });
 
-        it('does not record a breadcrumb when no trail is provided', () => {
+        it('tracks without a trail', () => {
             const { hooks, navigate } = makeHooks();
             const tracker = makeTracker();
 
@@ -129,8 +125,8 @@ describe('installPageTracking', () => {
         });
     });
 
-    describe('breadcrumb trail (trail provided)', () => {
-        it('records a navigation breadcrumb when a trail is provided', () => {
+    describe('breadcrumbs', () => {
+        it('records a navigation breadcrumb', () => {
             const { hooks, navigate } = makeHooks();
             const tracker = makeTracker();
             const trail = new BreadcrumbTrail(50, () => 0);
@@ -142,7 +138,7 @@ describe('installPageTracking', () => {
             expect(trail.list()[0]?.category).toBe('navigation');
         });
 
-        it('breadcrumb message contains from and to fullPath', () => {
+        it('describes the move from one full path to the other', () => {
             const { hooks, navigate } = makeHooks();
             const tracker = makeTracker();
             const trail = new BreadcrumbTrail(50, () => 0);

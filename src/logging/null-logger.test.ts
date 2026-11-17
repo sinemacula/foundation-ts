@@ -10,51 +10,10 @@ import { describe, expect, it } from 'vitest';
 import { NullLogger } from './null-logger';
 
 describe('NullLogger', () => {
-    it('does not throw when debug is called', () => {
+    it.each(['debug', 'info', 'warn', 'error'] as const)('ignores %s', level => {
         const logger = new NullLogger();
 
-        expect(() => logger.debug('message')).not.toThrow();
-    });
-
-    it('does not throw when debug is called with fields', () => {
-        const logger = new NullLogger();
-
-        expect(() => logger.debug('message', { key: 'value' })).not.toThrow();
-    });
-
-    it('does not throw when info is called', () => {
-        const logger = new NullLogger();
-
-        expect(() => logger.info('message')).not.toThrow();
-    });
-
-    it('does not throw when info is called with fields', () => {
-        const logger = new NullLogger();
-
-        expect(() => logger.info('message', { key: 'value' })).not.toThrow();
-    });
-
-    it('does not throw when warn is called', () => {
-        const logger = new NullLogger();
-
-        expect(() => logger.warn('message')).not.toThrow();
-    });
-
-    it('does not throw when warn is called with fields', () => {
-        const logger = new NullLogger();
-
-        expect(() => logger.warn('message', { key: 'value' })).not.toThrow();
-    });
-
-    it('does not throw when error is called', () => {
-        const logger = new NullLogger();
-
-        expect(() => logger.error('message')).not.toThrow();
-    });
-
-    it('does not throw when error is called with fields', () => {
-        const logger = new NullLogger();
-
-        expect(() => logger.error('message', { key: 'value' })).not.toThrow();
+        expect(() => logger[level]('message')).not.toThrow();
+        expect(() => logger[level]('message', { key: 'value' })).not.toThrow();
     });
 });

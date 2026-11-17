@@ -1,9 +1,5 @@
 /**
- * Console error reporter adapter.
- *
- * Writes errors and messages to the console for use during development. Not
- * intended for production - swap in a real provider adapter via the
- * ErrorReporter port when deploying.
+ * Development error reporter that writes to the console.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -12,21 +8,19 @@
 import type { ErrorReporter, ReportedUser } from './error-reporter';
 
 /**
- * An error reporter that writes to the console.
- *
- * `captureError` uses `console.error`, `captureMessage` uses `console.warn`,
- * and `setUser` is a no-op (user identity is not relevant in the console).
+ * An error reporter that writes errors via `console.error` and messages via
+ * `console.warn`.
  */
 export class ConsoleErrorReporter implements ErrorReporter {
     /**
-     * Write the error and its context to the console via `console.error`.
+     * Log the error and its context.
      */
     captureError(error: unknown, context?: Readonly<Record<string, unknown>>): void {
         console.error('[ErrorReporter]', error, ...(context !== undefined ? [context] : []));
     }
 
     /**
-     * Write the message and its context to the console via `console.warn`.
+     * Log the message and its context.
      */
     captureMessage(message: string, context?: Readonly<Record<string, unknown>>): void {
         console.warn('[ErrorReporter]', message, ...(context !== undefined ? [context] : []));

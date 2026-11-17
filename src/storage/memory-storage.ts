@@ -1,8 +1,5 @@
 /**
- * In-memory key-value storage adapter.
- *
- * Used in tests and as a runtime fallback when no platform storage is
- * available.
+ * In-memory key-value storage, for tests and when no platform storage exists.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

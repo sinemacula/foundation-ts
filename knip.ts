@@ -1,10 +1,5 @@
 /**
- * Knip dead-code detection configuration.
- *
- * A single-package repository: production entries are the sources behind the
- * manifest's `exports` map, which points at the compiled `dist` output, and the
- * test, tooling and config files are listed statically. The staged qlty sources
- * are external tooling, not project code.
+ * Knip configuration; production entries are the sources behind `exports`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

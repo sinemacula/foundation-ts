@@ -1,11 +1,6 @@
 /**
  * Compile-time contract tests for the filter-expression types.
  *
- * The exported types are pure structural declarations, so their contract is
- * assignability - enforced here through type-level assertions the typecheck
- * gate fails on drift. Runtime behaviour over these shapes is covered in
- * api-query.test.ts.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -48,7 +43,7 @@ describe('FilterOperators', () => {
         expectTypeOf<Record<'$regex', string>>().not.toExtend<FilterOperators>();
     });
 
-    it('rejects the removed pattern-match operator', () => {
+    it('rejects the $like operator', () => {
         expectTypeOf<Record<'$like', string>>().not.toExtend<FilterOperators>();
     });
 });

@@ -1,9 +1,6 @@
 /**
  * Decoding of non-success response bodies onto the {@link HttpError} hierarchy.
  *
- * Reads the API error envelope (`{error: {status, code, title, detail, meta}}`)
- * when present and the plain `{message, errors}` shape otherwise.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -19,11 +16,9 @@ const QUERY_COST_STRING_FIELDS = ['parameter', 'pointer', 'reason'] as const;
 const QUERY_COST_NUMBER_FIELDS = ['limit', 'actual'] as const;
 
 /**
- * Map a non-success response onto the error hierarchy.
- *
- * @param status - the response status code
- * @param text - the response body text
- * @returns the mapped error, ready to throw
+ * Map a non-success response onto the error hierarchy, reading the API error
+ * envelope (`{error: {status, code, title, detail, meta}}`) when present and
+ * the plain `{message, errors}` shape otherwise.
  */
 export function toResponseError(status: number, text: string): HttpError {
     const payload = parseJsonOrNull(text);
@@ -40,11 +35,8 @@ export function toResponseError(status: number, text: string): HttpError {
  * Map an API error envelope onto the error hierarchy, narrowing the codes
  * callers branch on.
  *
- * @param status - the response status code
  * @param payload - the whole parsed body
  * @param envelope - the body's `error` object
- * @param code - the envelope's internal error code
- * @returns the mapped error
  */
 function toEnvelopeError(status: number, payload: unknown, envelope: Record<string, unknown>, code: number): HttpError {
     const title = nonEmptyString(envelope['title']);
@@ -71,9 +63,7 @@ function toEnvelopeError(status: number, payload: unknown, envelope: Record<stri
  * Map a plain `{message, errors}` error body, as sent by endpoints outside the
  * API error envelope, onto the error hierarchy.
  *
- * @param status - the response status code
- * @param payload - the parsed body, or null
- * @returns the mapped error
+ * @param payload - the parsed body, or null when it is not JSON
  */
 function toPlainError(status: number, payload: unknown): HttpError {
     const message = isRecord(payload) ? nonEmptyString(payload['message']) : null;
@@ -89,7 +79,6 @@ function toPlainError(status: number, payload: unknown): HttpError {
 /**
  * Normalise a per-field error map, keeping only string messages.
  *
- * @param value - the candidate map of field keys to message lists
  * @returns the normalised map, or null when the value is not a record
  */
 function toFieldErrors(value: unknown): Record<string, readonly string[]> | null {
@@ -109,9 +98,8 @@ function toFieldErrors(value: unknown): Record<string, readonly string[]> | null
 }
 
 /**
- * Read the cap details of a query-too-expensive error.
+ * Read the cap details from a query-too-expensive envelope's `meta`.
  *
- * @param value - the envelope's `meta`
  * @returns the typed details, or null when any field is missing or mistyped
  */
 function toQueryCostMeta(value: unknown): QueryTooExpensiveMeta | null {
@@ -126,9 +114,6 @@ function toQueryCostMeta(value: unknown): QueryTooExpensiveMeta | null {
 
 /**
  * Determine whether a value carries every query-cost field with its type.
- *
- * @param value - the candidate meta
- * @returns true when the string and number fields are all present
  */
 function isQueryCostMeta(value: unknown): value is QueryTooExpensiveMeta {
     return (
@@ -139,10 +124,7 @@ function isQueryCostMeta(value: unknown): value is QueryTooExpensiveMeta {
 }
 
 /**
- * Best-effort parse of an error response body.
- *
- * @param text - the body text
- * @returns the parsed JSON payload, or null when the body is not JSON
+ * Best-effort parse of an error response body, or null when it is not JSON.
  */
 function parseJsonOrNull(text: string): unknown {
     try {
@@ -153,10 +135,7 @@ function parseJsonOrNull(text: string): unknown {
 }
 
 /**
- * Narrow a value to a non-empty string.
- *
- * @param value - the candidate value
- * @returns the string, or null when it is not a non-empty string
+ * Narrow a value to a non-empty string, or null.
  */
 function nonEmptyString(value: unknown): string | null {
     return typeof value === 'string' && value !== '' ? value : null;
@@ -164,9 +143,6 @@ function nonEmptyString(value: unknown): string | null {
 
 /**
  * Build the generic message for a status without a usable body message.
- *
- * @param status - the response status code
- * @returns the generic message
  */
 function statusMessage(status: number): string {
     return `Request failed with status ${status}.`;

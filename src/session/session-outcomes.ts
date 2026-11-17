@@ -1,11 +1,5 @@
 /**
- * Session outcomes.
- *
- * The results a {@link SessionApi} gateway returns for sign-in and refresh, the
- * outcomes the session core reports to its callers, and the default policy
- * classifying a failed refresh. Callers branch on `kind` rather than on raw
- * transport errors, so a proactive refresh timer can tell a dead session from a
- * transient failure worth retrying.
+ * Sign-in and refresh results, core outcomes, and the refresh-failure policy.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -106,17 +100,17 @@ export type LoginOutcome =
 /**
  * What a refresh through the session core did.
  *
- * `refreshed` means the state holds a usable session, either newly issued and
- * persisted or adopted from a session another context persisted. `rejected`
- * means the session was cleared. `retryable` keeps the tokens. `failed` keeps
- * the tokens when the refresh failed, or when the server rotated the pair and
- * it could not be persisted, in which case the next transition retries
- * persisting it; it discards them when the server refused the session and it
- * could not be cleared from persistence. `interactionRequired` clears the
- * session, since the server no longer accepts it, and hands back the pending
- * session to continue with. `superseded` means the session the refresh started
- * with was replaced or signed out meanwhile, and the refresh's result was
- * discarded.
+ * - `refreshed`: the state holds a usable session, newly issued and persisted
+ *   or adopted from another context
+ * - `rejected`: the session was cleared
+ * - `retryable`: the tokens are kept
+ * - `failed`: the tokens are kept when the refresh failed or a rotated pair
+ *   could not be persisted (the next transition retries persisting it), and
+ *   discarded when a refused session could not be cleared from persistence
+ * - `interactionRequired`: the session was cleared and the pending session is
+ *   handed back
+ * - `superseded`: the session the refresh started with was replaced or signed
+ *   out meanwhile, and the result discarded
  */
 export type RefreshOutcome =
     | {
@@ -152,7 +146,6 @@ export type RefreshOutcome =
  * place.
  *
  * @param error - the failure thrown by the refresh request
- * @returns how the failure is treated
  */
 export function classifyRefreshError(error: unknown): RefreshFailureKind {
     if (error instanceof NetworkError || error instanceof CancelledError) {

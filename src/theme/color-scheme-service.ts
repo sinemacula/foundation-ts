@@ -1,11 +1,5 @@
 /**
- * Colour-scheme state machine.
- *
- * Resolves the active scheme from a stored preference (or the OS when
- * `system`), applies it through the platform applier, and tracks OS changes
- * while the preference is `system`. The OS source and the applier are injected
- * ports, so the state machine is framework- and DOM-free (matchMedia + DOM
- * stamping on web, Appearance + a native applier on mobile).
+ * Colour-scheme state machine over injected OS-source and applier ports.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,7 +23,6 @@ export interface SystemColorSchemeSource {
     /**
      * Subscribe to OS-scheme changes.
      *
-     * @param cb - invoked when the OS scheme changes
      * @returns an unsubscribe function
      */
     subscribe(cb: () => void): () => void;
@@ -41,10 +34,7 @@ export interface SystemColorSchemeSource {
 export interface ColorSchemeApplier {
     /**
      * Apply the resolved scheme. `preference` distinguishes an explicit choice
-     * from `system` (which platforms may surface differently).
-     *
-     * @param resolved - the concrete scheme to apply
-     * @param preference - the raw preference behind it
+     * from `system`, which platforms may surface differently.
      */
     apply(resolved: ResolvedColorScheme, preference: ColorSchemePreference): void;
 }
@@ -149,9 +139,7 @@ export class ColorSchemeService {
     }
 
     /**
-     * Set the user's preference, persisting or clearing it.
-     *
-     * @param pref - the new preference
+     * Set the user's preference, persisting it, or clearing it for `system`.
      */
     setPreference(pref: ColorSchemePreference): void {
         this.#preference = pref;
@@ -170,7 +158,6 @@ export class ColorSchemeService {
     /**
      * Subscribe to resolved-scheme changes.
      *
-     * @param listener - the listener to notify
      * @returns an unsubscribe function
      */
     subscribe(listener: ColorSchemeListener): () => void {
@@ -190,9 +177,7 @@ export class ColorSchemeService {
     }
 
     /**
-     * Read the stored preference, falling back to the default.
-     *
-     * @returns the stored preference, or the default when absent or invalid
+     * Read the stored preference, or the default when absent or invalid.
      */
     #readPreference(): ColorSchemePreference {
         const stored = this.#storage.get(this.#storageKey);
@@ -206,8 +191,6 @@ export class ColorSchemeService {
 
     /**
      * Resolve the preference against the OS scheme.
-     *
-     * @returns the concrete scheme to apply
      */
     #derive(): ResolvedColorScheme {
         if (this.#preference !== 'system') {

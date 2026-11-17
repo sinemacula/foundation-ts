@@ -1,12 +1,5 @@
 /**
- * Foundation boot core.
- *
- * Runs the platform-agnostic boot phases - runtime environment, configuration,
- * storage, feature flags, notifications, observability, and the HTTP client -
- * installing each service into the base registry, and bridges the platform's
- * module-registration step through `collectHttpContributions` so the client is
- * built with every module's interceptors and handlers. Each kernel (web,
- * mobile) wraps this core with its own platform phases.
+ * Platform-agnostic boot phases that each kernel wraps with its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,8 +27,7 @@ import type { WiredObservability } from './wire-observability';
 import { wireObservability } from './wire-observability';
 
 /**
- * The resolved platform seams the core reads. Each kernel supplies its own
- * resolution (web resolves against the window, mobile against the RN runtime).
+ * The resolved platform seams the core reads.
  */
 export interface PlatformCore {
     /** The resolved fetch seam. */
@@ -43,8 +35,7 @@ export interface PlatformCore {
 }
 
 /**
- * The core boot phases, in execution order. The platform's own phases (module
- * registration, UI framework, routing) are the kernel's vocabulary, not ours.
+ * The core boot phases, in execution order.
  */
 export type FoundationCorePhase =
     | 'runtime-environment'
@@ -70,10 +61,10 @@ export interface FoundationCoreRegistration<T extends FoundationConfig> {
  * Construction options for {@link bootFoundationCore}.
  */
 export interface FoundationCoreOptions<T extends FoundationConfig> {
-    /** The runtime environment document to fetch at boot; omitted, nothing is fetched and the environment is built over no runtime values. */
+    /** Runtime document fetched at boot; omitted, runtime values are empty. */
     readonly runtime?: RuntimeEnvironmentSource;
 
-    /** Caller-owned environment construction over the fetched runtime values. */
+    /** Builds the environment over the fetched runtime values. */
     readonly createEnvironment: (runtime: Readonly<Record<string, string>>) => Environment;
 
     /** Configuration definition over the environment; the result is frozen. */
@@ -118,7 +109,7 @@ export interface FoundationCoreOptions<T extends FoundationConfig> {
         readonly client?: (tools: WireHttpClientTools<T>) => HttpClient;
     };
 
-    /** The platform's module-registration step. Invoked once, after every core service above is installed and before the HTTP client is built, so module register hooks may read the core accessors and contribute interceptors. */
+    /** Module registration; runs once, after the core installs, before the HTTP client. */
     readonly collectHttpContributions: (registration: FoundationCoreRegistration<T>) => ModuleHttpContributions;
 
     /** Phase observer; the kernel threads its own boot recorder through. */
@@ -141,7 +132,7 @@ export interface FoundationCore<T extends FoundationConfig> {
     /** The installed feature-flag adapter. */
     readonly flags: FeatureFlags;
 
-    /** The installed observability trio. */
+    /** The installed observability services and breadcrumb trail. */
     readonly observability: WiredObservability;
 
     /** The installed HTTP client. */
@@ -151,9 +142,6 @@ export interface FoundationCore<T extends FoundationConfig> {
 /**
  * Run the platform-agnostic boot phases and install the core services.
  *
- * @param options - the core construction options and platform bridges
- * @param platform - the resolved platform seams
- * @returns everything the core boot produced
  * @throws {RuntimeEnvironmentError} when a configured runtime document cannot
  * be loaded
  */

@@ -1,11 +1,6 @@
 /**
  * Definition schema for the list-query layer.
  *
- * Module authors call {@link defineListQuery} once per resource list to declare
- * what filters, search, sort columns, and base shaping that list supports.
- * Screen developers receive the definition and interact with it only through
- * their platform's list-query binding - they never read these fields directly.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -15,12 +10,8 @@ import type { SortDirection } from './filter-expression';
 import type { ListFilter } from './list-filter';
 
 /**
- * Extracts the value type `V` from a {@link ListFilter}<V>.
- *
- * Used by the platform list-query bindings to enforce that `setFilter` is
- * called with the correct value type for each named filter key.
- *
- * @typeParam Filter - a concrete {@link ListFilter} type
+ * Extracts the value type `V` from a {@link ListFilter}<V>, which the platform
+ * list-query bindings use to type `setFilter` per filter key.
  */
 export type FilterValueOf<Filter> = Filter extends ListFilter<infer V> ? V : never;
 
@@ -36,11 +27,8 @@ export interface SortDefault {
 }
 
 /**
- * The frozen declaration of a resource list's query capabilities.
- *
- * Created by {@link defineListQuery} and consumed by the platform list-query
- * bindings. Every field is optional so simple lists need only declare what they
- * use.
+ * The frozen declaration of a resource list's query capabilities, created by
+ * {@link defineListQuery} and consumed by the platform list-query bindings.
  *
  * @typeParam Filters - a record mapping screen-vocabulary filter names to their
  * typed {@link ListFilter} implementations
@@ -49,7 +37,7 @@ export interface ListQueryDefinition<Filters extends Record<string, ListFilter<n
     /** Named filters the screen may set, keyed by the screen's vocabulary. */
     readonly filters?: Filters;
 
-    /** Free-text search mapping, usually `filter.search()`; `search(term)` applies it with the term as its value. */
+    /** Free-text search mapping, usually `filter.search()`, applied with the term `search(term)` receives. */
     readonly search?: ListFilter<string>;
 
     /** The columns the screen may sort by; `sortBy` throws on any other. Omit to accept every column. */
@@ -66,16 +54,11 @@ export interface ListQueryDefinition<Filters extends Record<string, ListFilter<n
 }
 
 /**
- * Declare and freeze a list-query definition.
+ * Declare a list-query definition for the platform's list-query binding.
  *
- * Returns the definition unchanged but frozen so that accidental mutation at
- * runtime is caught immediately. Pass the return value to the platform's
- * list-query binding.
- *
- * @param definition - the list configuration
- * @returns the same definition, frozen
- * @typeParam Filters - inferred from the `filters` record; flows through to
- * the list-query binding so that `setFilter` is key- and value-typed
+ * @returns the same definition, frozen so accidental mutation fails fast
+ * @typeParam Filters - inferred from the `filters` record; flows through to the
+ * list-query binding so that `setFilter` is key- and value-typed
  */
 export function defineListQuery<Filters extends Record<string, ListFilter<never>>>(
     definition: ListQueryDefinition<Filters>,

@@ -24,7 +24,7 @@ describe('ConsoleErrorReporter', () => {
     });
 
     describe('captureError', () => {
-        it('calls console.error with the prefix and error', () => {
+        it('logs the error via console.error', () => {
             const reporter = new ConsoleErrorReporter();
             const error = new Error('boom');
 
@@ -33,7 +33,7 @@ describe('ConsoleErrorReporter', () => {
             expect(errorSpy).toHaveBeenCalledWith('[ErrorReporter]', error);
         });
 
-        it('calls console.error with context when provided', () => {
+        it('logs the context when given', () => {
             const reporter = new ConsoleErrorReporter();
             const error = new Error('oops');
             const context = { userId: '42' };
@@ -43,7 +43,7 @@ describe('ConsoleErrorReporter', () => {
             expect(errorSpy).toHaveBeenCalledWith('[ErrorReporter]', error, context);
         });
 
-        it('calls console.error without context argument when context is omitted', () => {
+        it('omits absent context', () => {
             const reporter = new ConsoleErrorReporter();
 
             reporter.captureError('raw string');
@@ -62,7 +62,7 @@ describe('ConsoleErrorReporter', () => {
     });
 
     describe('captureMessage', () => {
-        it('calls console.warn with the prefix and message', () => {
+        it('logs the message via console.warn', () => {
             const reporter = new ConsoleErrorReporter();
 
             reporter.captureMessage('test message');
@@ -70,7 +70,7 @@ describe('ConsoleErrorReporter', () => {
             expect(warnSpy).toHaveBeenCalledWith('[ErrorReporter]', 'test message');
         });
 
-        it('calls console.warn with context when provided', () => {
+        it('logs the context when given', () => {
             const reporter = new ConsoleErrorReporter();
             const context = { page: '/home' };
 
@@ -79,7 +79,7 @@ describe('ConsoleErrorReporter', () => {
             expect(warnSpy).toHaveBeenCalledWith('[ErrorReporter]', 'navigation error', context);
         });
 
-        it('calls console.warn without context argument when context is omitted', () => {
+        it('omits absent context', () => {
             const reporter = new ConsoleErrorReporter();
 
             reporter.captureMessage('bare message');
@@ -98,7 +98,7 @@ describe('ConsoleErrorReporter', () => {
     });
 
     describe('setUser', () => {
-        it('does not call console.error or console.warn when user is provided', () => {
+        it('writes nothing for a user', () => {
             const reporter = new ConsoleErrorReporter();
 
             reporter.setUser({ id: '1', email: 'a@b.com', name: 'Alice' });
@@ -107,7 +107,7 @@ describe('ConsoleErrorReporter', () => {
             expect(warnSpy).not.toHaveBeenCalled();
         });
 
-        it('does not call console.error or console.warn when user is null', () => {
+        it('writes nothing when clearing the user', () => {
             const reporter = new ConsoleErrorReporter();
 
             reporter.setUser(null);

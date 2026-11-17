@@ -10,13 +10,13 @@ import { describe, expect, it } from 'vitest';
 import { QueryError } from './query-error';
 
 describe('QueryError', () => {
-    it('sets the name property to QueryError', () => {
+    it('is named QueryError', () => {
         const error = new QueryError('malformed envelope');
 
         expect(error.name).toBe('QueryError');
     });
 
-    it('sets the message from the first argument', () => {
+    it('carries the message', () => {
         const error = new QueryError('malformed envelope');
 
         expect(error.message).toBe('malformed envelope');
@@ -34,7 +34,7 @@ describe('QueryError', () => {
         expect(error).toBeInstanceOf(QueryError);
     });
 
-    it('stores the cause when options are provided', () => {
+    it('carries the cause from the options', () => {
         const cause = new Error('root cause');
         const error = new QueryError('wrapped', { cause });
 

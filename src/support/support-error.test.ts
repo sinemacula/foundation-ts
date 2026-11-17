@@ -10,13 +10,13 @@ import { describe, expect, it } from 'vitest';
 import { SupportError } from './support-error';
 
 describe('SupportError', () => {
-    it('sets the name property to SupportError', () => {
+    it('is named SupportError', () => {
         const error = new SupportError('resolved before install');
 
         expect(error.name).toBe('SupportError');
     });
 
-    it('sets the message from the first argument', () => {
+    it('carries its message', () => {
         const error = new SupportError('resolved before install');
 
         expect(error.message).toBe('resolved before install');
@@ -34,7 +34,7 @@ describe('SupportError', () => {
         expect(error).toBeInstanceOf(SupportError);
     });
 
-    it('stores the cause when options are provided', () => {
+    it('carries the cause from its options', () => {
         const cause = new Error('root cause');
         const error = new SupportError('wrapped', { cause });
 

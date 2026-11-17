@@ -1,11 +1,6 @@
 /**
  * Structural configuration contract read by the bootstrap preset.
  *
- * The preset reads only this slice of the application's configuration tree;
- * applications define richer trees and satisfy the contract structurally. Flag
- * values reuse the feature-flag port's `FlagValue` so a config-delivered flag
- * set feeds the default static adapter without conversion.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -43,7 +38,7 @@ export interface FoundationConfig {
         readonly flags: Readonly<Record<string, FlagValue>>;
     };
 
-    /** Locale identity: default, enabled list, and per-locale metadata. */
+    /** Locale configuration. */
     readonly locales: {
         /** The default locale applied before any preference resolves. */
         readonly default: string;

@@ -1,10 +1,5 @@
 /**
- * Typed access to environment values.
- *
- * `EnvironmentSource` is the port every concrete source implements (runtime
- * JSON, Vite build variables, plain objects in tests). `Environment` wraps a
- * source with typed, fallback-aware accessors so configuration definitions
- * never hand-roll string coercion.
+ * Environment source port and a typed, fallback-aware reader over it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,7 +36,6 @@ export class Environment {
      *
      * @param key - the environment variable name
      * @param fallback - the value returned when the variable is not defined
-     * @returns the resolved value, or the fallback
      */
     string(key: string): string | undefined;
     string(key: string, fallback: string): string;
@@ -55,7 +49,6 @@ export class Environment {
      *
      * @param key - the environment variable name
      * @param fallback - the value returned when the variable is not defined
-     * @returns the resolved value, or the fallback
      */
     boolean(key: string): boolean | undefined;
     boolean(key: string, fallback: boolean): boolean;
@@ -76,7 +69,6 @@ export class Environment {
      * @param key - the environment variable name
      * @param fallback - the value returned when the variable is missing or
      * invalid
-     * @returns the resolved value, or the fallback
      */
     integer(key: string): number | undefined;
     integer(key: string, fallback: number): number;
@@ -99,7 +91,6 @@ export class Environment {
      * @param key - the environment variable name
      * @param fallback - the value returned when the variable is missing or
      * invalid
-     * @returns the parsed value, or the fallback
      */
     json<T>(key: string): T | undefined;
     json<T>(key: string, fallback: T): T;
@@ -111,8 +102,7 @@ export class Environment {
         }
 
         try {
-            // T is caller-declared over operator-controlled runtime values;
-            // invalid JSON already falls back via the catch.
+            // T is caller-declared; the parsed value is not validated.
             return JSON.parse(value) as T;
         } catch {
             return fallback;

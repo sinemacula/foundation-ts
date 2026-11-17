@@ -31,9 +31,6 @@ interface StubSource extends SystemColorSchemeSource {
 
 /**
  * Build a stub system colour-scheme source.
- *
- * @param dark - whether the system starts out preferring dark
- * @returns the stub source
  */
 function makeSource(dark = false): StubSource {
     let cb: (() => void) | null = null;
@@ -77,8 +74,6 @@ interface StubApplier extends ColorSchemeApplier {
 
 /**
  * Build a recording colour-scheme applier.
- *
- * @returns the stub applier
  */
 function makeApplier(): StubApplier {
     const calls: StubApplier['calls'] = [];
@@ -123,9 +118,6 @@ interface ServiceFixture {
 
 /**
  * Build a colour-scheme service over stub collaborators.
- *
- * @param options - options overriding the defaults
- * @returns the service and its collaborators
  */
 function makeService(options?: ServiceOptions): ServiceFixture {
     const storage = new MemoryStorage();
@@ -154,16 +146,8 @@ describe('ColorSchemeService', () => {
             expect(makeService().service.preference()).toBe('system');
         });
 
-        it('returns a stored light preference verbatim', () => {
-            expect(makeService({ initialStored: 'light' }).service.preference()).toBe('light');
-        });
-
-        it('returns a stored dark preference verbatim', () => {
-            expect(makeService({ initialStored: 'dark' }).service.preference()).toBe('dark');
-        });
-
-        it('returns a stored system preference verbatim', () => {
-            expect(makeService({ initialStored: 'system' }).service.preference()).toBe('system');
+        it.each(['light', 'dark', 'system'])('returns a stored %s preference', stored => {
+            expect(makeService({ initialStored: stored }).service.preference()).toBe(stored);
         });
 
         it('returns a stored system preference over a differing default', () => {

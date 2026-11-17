@@ -1,12 +1,6 @@
 /**
  * WebSocket adapter for the {@link RealtimeConnection} port.
  *
- * Wraps the platform's global {@link WebSocket} API. Reconnects automatically
- * on non-client-initiated closes using the provided backoff strategy. Incoming
- * text frames are dispatched to 'message' subscribers; frames that parse as a
- * JSON envelope `{ event: string, data: unknown }` are additionally dispatched
- * to subscribers for that specific event name.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -24,16 +18,12 @@ import type {
 
 /**
  * Injectable factory for {@link WebSocket} instances.
- *
- * @param url - the WebSocket endpoint URL
- * @param protocols - optional subprotocol(s)
- * @returns a new WebSocket
  */
 export type WebSocketFactory = (url: string, protocols?: string | readonly string[]) => WebSocket;
 
 /** Construction options for {@link WebSocketConnection}. */
 export interface WebSocketConnectionOptions {
-    /** The WebSocket endpoint URL, or a function that returns it. The function form is called on every `connect()`, enabling per-connect auth tokens in the query string. */
+    /** The endpoint URL, or a builder called on every open (reconnects included), for example to embed a fresh token. */
     readonly url: string | (() => string);
 
     /** Optional WebSocket subprotocol(s) forwarded to the constructor. */
@@ -42,22 +32,24 @@ export interface WebSocketConnectionOptions {
     /** Backoff strategy for reconnects. Defaults to `new ExponentialBackoff()`. */
     readonly backoff?: ExponentialBackoff;
 
-    /** Override the WebSocket constructor. Defaults to `(url, protocols) => new WebSocket(url, protocols)`. */
+    /** Override the WebSocket constructor. Defaults to the platform global. */
     readonly webSocketFactory?: WebSocketFactory;
 
     /** Awaited before each reconnect, never before a manual `connect()`; pair it with a `url()` builder that reads the fresh token. */
     readonly beforeReconnect?: BeforeReconnectHook;
 
-    /** Receives the errors the connection contains rather than throws: a throwing subscriber or a failed reconnect open. */
+    /** Receives errors from throwing subscribers and failed reconnect opens, which are never thrown. */
     readonly onError?: (error: unknown) => void;
 }
 
 /**
- * WebSocket adapter implementing {@link RealtimeConnection}.
+ * WebSocket adapter implementing {@link RealtimeConnection}, with an extra
+ * {@link WebSocketConnection.send} for outbound frames.
  *
- * Reconnects automatically on non-client-initiated closes. All registered event
- * listeners are re-applied after every reconnect. Provides an additional
- * {@link WebSocketConnection.send} method for outbound messages.
+ * Reconnects with backoff whenever the socket closes without a `disconnect()`;
+ * subscriptions survive reconnects. Every text frame goes to `'message'`
+ * subscribers, and a frame that parses as a `{ event, data }` JSON envelope
+ * also goes to that event's subscribers, with non-string `data` as JSON.
  */
 export class WebSocketConnection implements RealtimeConnection {
     /** The endpoint URL, or a factory returning it per connect. */
@@ -84,7 +76,7 @@ export class WebSocketConnection implements RealtimeConnection {
     /** Registered connection-state change handlers. */
     readonly #stateHandlers: Set<RealtimeStateHandler> = new Set();
 
-    /** The active WebSocket, or null when not open. */
+    /** The owned WebSocket, or null when there is none. */
     #socket: WebSocket | null = null;
 
     /** The current connection lifecycle state. */
@@ -101,9 +93,6 @@ export class WebSocketConnection implements RealtimeConnection {
 
     /**
      * Construct a new WebSocket connection.
-     *
-     * @param options - URL, protocols, backoff strategy, optional WebSocket
-     * factory, reconnect hook and error sink
      */
     constructor(options: WebSocketConnectionOptions) {
         this.#url = options.url;
@@ -152,13 +141,9 @@ export class WebSocketConnection implements RealtimeConnection {
     }
 
     /**
-     * Subscribe to messages for a specific event name.
+     * Subscribe to messages for a specific event name; `'message'` receives
+     * every raw frame.
      *
-     * To receive all frames use the event name `'message'`. Frames that parse
-     * as a JSON envelope are also dispatched to their named event subscribers.
-     *
-     * @param event - the event name to subscribe to
-     * @param handler - called for each matching incoming message
      * @returns an unsubscribe function
      */
     on(event: string, handler: RealtimeMessageHandler): () => void {
@@ -179,7 +164,6 @@ export class WebSocketConnection implements RealtimeConnection {
     /**
      * Subscribe to connection state changes.
      *
-     * @param handler - called each time the state transitions
      * @returns an unsubscribe function
      */
     onStateChange(handler: RealtimeStateHandler): () => void {
@@ -193,7 +177,6 @@ export class WebSocketConnection implements RealtimeConnection {
     /**
      * Send a text frame over the open socket.
      *
-     * @param data - the raw text to send
      * @throws {@link RealtimeError} when the socket is not in the open state
      */
     send(data: string): void {
@@ -205,9 +188,9 @@ export class WebSocketConnection implements RealtimeConnection {
     }
 
     /**
-     * Open a fresh WebSocket and own it before announcing the connecting state,
-     * so a subscriber that disconnects in response closes it. A throwing
-     * `url()` builder or factory leaves the state untouched.
+     * Open a fresh socket and own it before announcing `connecting`, so a
+     * subscriber that disconnects in response closes it. A throwing `url()`
+     * builder or factory leaves the state untouched.
      */
     #openSocket(): void {
         const url = typeof this.#url === 'function' ? this.#url() : this.#url;
@@ -240,8 +223,6 @@ export class WebSocketConnection implements RealtimeConnection {
     /**
      * Deliver a raw frame to `'message'` subscribers, and additionally to the
      * named-event subscribers when it parses as a JSON envelope.
-     *
-     * @param raw - the raw text frame received from the socket
      */
     #dispatchFrame(raw: string): void {
         this.#deliverToHandlers('message', { event: 'message', data: raw });
@@ -255,9 +236,6 @@ export class WebSocketConnection implements RealtimeConnection {
 
     /**
      * Fan a message out to every handler registered for `event`.
-     *
-     * @param event - the event name whose handlers receive the message
-     * @param message - the message delivered to each handler
      */
     #deliverToHandlers(event: string, message: RealtimeMessage): void {
         const handlers = this.#messageHandlers.get(event);
@@ -309,8 +287,6 @@ export class WebSocketConnection implements RealtimeConnection {
     /**
      * Pass a contained error to the `onError` sink, ignoring a throwing sink so
      * one failure never starves the remaining subscribers.
-     *
-     * @param error - the contained error
      */
     #report(error: unknown): void {
         try {
@@ -341,8 +317,6 @@ export class WebSocketConnection implements RealtimeConnection {
 
     /**
      * Transition to `next`, notifying state subscribers only on a real change.
-     *
-     * @param next - the state to transition to
      */
     #setState(next: RealtimeState): void {
         if (this.#state === next) {
@@ -362,16 +336,8 @@ export class WebSocketConnection implements RealtimeConnection {
 }
 
 /**
- * Default WebSocket factory used when no override is provided.
- *
- * Omits the protocols argument entirely when none were given - some platform
- * constructors treat an explicit `undefined` differently from an absent
- * argument. The readonly-to-mutable cast satisfies the DOM constructor typing;
- * the constructor never mutates the array.
- *
- * @param url - the WebSocket endpoint URL
- * @param protocols - optional subprotocol(s)
- * @returns a new WebSocket
+ * Construct a platform WebSocket, omitting absent protocols because some
+ * platforms treat an explicit `undefined` differently from no argument.
  */
 function defaultWebSocketFactory(url: string, protocols?: string | readonly string[]): WebSocket {
     if (protocols === undefined) {
@@ -382,11 +348,8 @@ function defaultWebSocketFactory(url: string, protocols?: string | readonly stri
 }
 
 /**
- * Report whether a parsed value has the envelope shape: an object carrying a
- * string `event` and a `data` field.
- *
- * @param value - the value parsed from a raw frame
- * @returns true when the value can be read as an event envelope
+ * Report whether a parsed value is an object carrying a string `event` and a
+ * `data` field.
  */
 function isEnvelopeShape(value: unknown): value is {
     /** The event name the envelope declares. */
@@ -407,11 +370,9 @@ function isEnvelopeShape(value: unknown): value is {
 }
 
 /**
- * Attempt to parse a raw text frame as a typed event envelope.
+ * Parse a raw frame as an event envelope, serialising non-string `data`.
  *
- * @param raw - the raw text frame to parse
- * @returns the envelope when the frame is valid JSON with `event` (string) and
- * `data` fields, otherwise `null`
+ * @returns the envelope, or `null` when the frame is not one
  */
 function tryParseEnvelope(raw: string): {
     /** The event name the envelope declares. */

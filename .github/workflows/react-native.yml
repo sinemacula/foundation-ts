@@ -38,9 +38,6 @@ jobs:
     # ==========================================================================
     # JOB: SMOKE
     # ==========================================================================
-    # Bundles the packed package with Metro for iOS and Android, compiles it to
-    # Hermes bytecode and loads every subpath, then requires each one under
-    # React Native's Jest preset.
     smoke:
         name: React Native smoke
         runs-on: ubuntu-latest

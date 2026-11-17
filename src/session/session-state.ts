@@ -1,9 +1,5 @@
 /**
- * Session state shape.
- *
- * The mutable state every session-core transition operates on. Each platform's
- * store owns an instance of this shape (the web pinia store's state satisfies
- * it structurally) and forwards it explicitly into the transitions.
+ * Session state shape, owned by each platform's store and passed to the core.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

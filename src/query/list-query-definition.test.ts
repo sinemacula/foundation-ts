@@ -13,9 +13,6 @@ import { defineListQuery } from './list-query-definition';
 
 /**
  * Narrow a query to the user fields a list needs.
- *
- * @param query - the query to shape
- * @returns the shaped query
  */
 function shapeUser(query: ApiQuery): ApiQuery {
     return query.fieldsFor('user', ['id', 'name']);
