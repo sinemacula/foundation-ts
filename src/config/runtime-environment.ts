@@ -1,12 +1,5 @@
 /**
- * Loader for a runtime environment document.
- *
- * Fetches a JSON document of environment values at boot and keeps only its
- * string-valued entries. A missing document (404) resolves to an empty record
- * so the environment chain falls through to the platform's build-time values;
- * any other failure rejects, because a document that is deployed but cannot be
- * read must not be silently ignored. Where the document lives is the caller's
- * concern; each kernel supplies its own URL convention.
+ * Loader for the runtime environment document fetched at boot.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,10 +26,12 @@ export interface RuntimeEnvironmentSource {
 }
 
 /**
- * Fetch and normalise the runtime environment document.
+ * Fetch the runtime environment document and keep its string-valued entries.
  *
- * @param source - the document location and timeout
- * @param fetchFn - the fetch implementation to use
+ * Only a 404 counts as absent; any other failure rejects so a deployed but
+ * unreadable document never silently falls back to build-time values.
+ *
+ * @param fetchFn - defaults to the global fetch
  * @returns the string-valued entries of the document, or an empty record when
  * it does not exist
  * @throws {RangeError} when the timeout is not a positive timer delay
@@ -73,8 +68,6 @@ export async function fetchRuntimeEnvironment(
 /**
  * Request the document and read its string-valued entries.
  *
- * @param url - the document location
- * @param fetchFn - the fetch implementation
  * @param signal - aborts the request once the deadline passes
  * @returns the string-valued entries, or an empty record when it does not exist
  * @throws {RuntimeEnvironmentError} when the document cannot be loaded or is

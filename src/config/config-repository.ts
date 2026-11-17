@@ -1,9 +1,5 @@
 /**
- * Immutable repository over a resolved configuration tree.
- *
- * The tree is deep-frozen on construction; nothing can mutate configuration
- * after boot. Values are reachable both through the typed root (`all()`) and
- * through Laravel-style dot notation (`get('app.urls.api')`).
+ * Immutable, deep-frozen configuration tree with dot-notation lookup.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,9 +21,7 @@ export class ConfigRepository<T extends Record<string, unknown>> {
     }
 
     /**
-     * The full, typed configuration tree.
-     *
-     * @returns the frozen configuration root
+     * Return the full, typed and frozen configuration tree.
      */
     all(): Readonly<T> {
         return this.#values;
@@ -38,7 +32,6 @@ export class ConfigRepository<T extends Record<string, unknown>> {
      *
      * @param path - the dot-notation path (e.g. `app.urls.api`)
      * @param fallback - the value returned when the path does not resolve
-     * @returns the resolved value, or the fallback
      */
     get(path: string, fallback: unknown = undefined): unknown {
         let current: unknown = this.#values;
@@ -56,9 +49,6 @@ export class ConfigRepository<T extends Record<string, unknown>> {
 
     /**
      * Determine whether a dot-notation path resolves to a value.
-     *
-     * @param path - the dot-notation path
-     * @returns true when the path resolves
      */
     has(path: string): boolean {
         return this.get(path, MISSING) !== MISSING;

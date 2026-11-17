@@ -1,17 +1,12 @@
 /**
- * Confirmation-dialog port.
- *
- * The imperative surface the kernel uses to ask for confirmation. The reactive
- * active-request state + host rendering are a platform concern and stay in each
- * platform's adapter.
+ * Confirmation-dialog port; rendering is left to each platform's adapter.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 
 /**
- * A confirmation request. `title`, `message`, and the labels are, by
- * convention, translation keys the rendering host translates.
+ * A confirmation request whose strings are translation keys.
  */
 export interface ConfirmRequest {
     /** Translation key for the dialog title. */
@@ -34,7 +29,6 @@ export interface Confirmer {
     /**
      * Ask the user to confirm.
      *
-     * @param request - the confirmation request
      * @returns a promise resolving true when confirmed, false when cancelled
      */
     confirm(request: ConfirmRequest): Promise<boolean>;

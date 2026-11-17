@@ -1,6 +1,5 @@
 /**
- * Generic application-singleton holder with an explicit install/resolve
- * lifecycle.
+ * Application-singleton holder with an explicit install/resolve lifecycle.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -14,15 +13,12 @@ import { SupportError } from './support-error';
 export interface ServiceHolder<T> {
     /**
      * Install the service instance, replacing any previously installed one.
-     *
-     * @param instance - the instance to hold
      */
     install(instance: T): void;
 
     /**
      * Return the installed instance.
      *
-     * @returns the installed instance
      * @throws {@link SupportError} when nothing has been installed
      */
     resolve(): T;
@@ -34,8 +30,6 @@ export interface ServiceHolder<T> {
 
     /**
      * Determine whether an instance is currently installed.
-     *
-     * @returns true when an instance is installed
      */
     isInstalled(): boolean;
 }

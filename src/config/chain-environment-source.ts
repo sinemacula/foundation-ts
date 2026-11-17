@@ -1,10 +1,6 @@
 /**
  * Environment source that consults an ordered chain of sources.
  *
- * The first source that defines a key wins. Kernels typically chain the runtime
- * environment document ahead of their build-time variables, so a deployed value
- * always beats a local development default.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -25,7 +21,6 @@ export class ChainEnvironmentSource implements EnvironmentSource {
     /**
      * Return the value from the first source in the chain that defines `key`.
      *
-     * @param key - the environment variable name
      * @returns the first defined value, or undefined when no source defines it
      */
     get(key: string): string | undefined {

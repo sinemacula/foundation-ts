@@ -1,12 +1,5 @@
 /**
- * Network-connectivity monitoring port.
- *
- * The reachability signal the kernel uses to pause pointless work while offline
- * - the update monitor pauses its polling rather than storming a network known
- * to be down. Realtime connections are not wired to it and keep retrying on
- * their own backoff. Each platform supplies an implementation (online/offline
- * window events on web, NetInfo on mobile); consumers depend only on this
- * contract.
+ * Network-connectivity port the kernel uses to pause polling while offline.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,7 +30,6 @@ export interface ConnectivityMonitor {
     /**
      * Subscribe to connectivity changes.
      *
-     * @param handler - invoked with the new state, once per actual change
      * @returns an unsubscribe function
      */
     onChange(handler: ConnectivityHandler): () => void;

@@ -1,10 +1,6 @@
 /**
  * Environment source that maps unprefixed keys onto a prefixed record.
  *
- * Build tooling typically exposes environment records whose keys carry a
- * platform prefix. Wrapping such a record here lets configuration definitions
- * use canonical, deployment-style names (`API_URL`) everywhere.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -30,7 +26,6 @@ export class PrefixedEnvironmentSource implements EnvironmentSource {
      * Look `key` up under its prefixed name, discarding non-string values.
      *
      * @param key - the unprefixed environment variable name
-     * @returns the prefixed value when it is a string, otherwise undefined
      */
     get(key: string): string | undefined {
         const value = this.#values[`${this.#prefix}${key}`];

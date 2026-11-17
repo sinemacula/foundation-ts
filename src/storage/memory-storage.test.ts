@@ -42,7 +42,7 @@ describe('MemoryStorage', () => {
         expect(storage.get('key')).toBeNull();
     });
 
-    it('does not throw when removing a key that does not exist', () => {
+    it('ignores removal of an absent key', () => {
         const storage = new MemoryStorage();
 
         expect(() => storage.remove('nonexistent')).not.toThrow();
@@ -58,7 +58,7 @@ describe('MemoryStorage', () => {
         expect(storage.get('b')).toBe('2');
     });
 
-    it('removing one key does not affect another', () => {
+    it('removes one key without affecting another', () => {
         const storage = new MemoryStorage();
 
         storage.set('a', '1');

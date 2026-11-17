@@ -22,7 +22,7 @@ describe('ConfigRepository', () => {
             const all = config.all();
 
             expect(Object.isFrozen(all)).toBe(true);
-            expect(Object.isFrozen((all as Record<string, unknown>)['app'])).toBe(true);
+            expect(Object.isFrozen(all.app)).toBe(true);
         });
     });
 
@@ -39,7 +39,7 @@ describe('ConfigRepository', () => {
             expect(config.get('app.urls.api')).toBe('https://api.example.com');
         });
 
-        it('returns undefined for a path that does not exist when no fallback is provided', () => {
+        it('returns undefined for a missing path without a fallback', () => {
             const config = new ConfigRepository({ app: { name: 'x' } });
 
             expect(config.get('app.missing')).toBeUndefined();
@@ -103,14 +103,14 @@ describe('ConfigRepository', () => {
     });
 
     describe('deep immutability', () => {
-        it('deeply freezes nested objects so mutations are silently ignored in non-strict contexts', () => {
+        it('freezes nested objects', () => {
             const config = new ConfigRepository({ nested: { value: 42 } });
             const all = config.all();
 
             expect(Object.isFrozen(all.nested)).toBe(true);
         });
 
-        it('deeply freezes array values inside the configuration', () => {
+        it('freezes nested arrays', () => {
             const config = new ConfigRepository({ items: [1, 2, 3] });
             const all = config.all();
 

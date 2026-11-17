@@ -10,13 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { ObjectEnvironmentSource } from './object-environment-source';
 
 /**
- * Build a `Record<string, string>` from an array of `[key, value]` pairs.
- *
- * Keeps non-camelCase environment keys out of object-literal key positions so
- * naming-convention lint rules never see them.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain `Record<string, string>`
+ * Build a record from pairs, keeping env-style keys out of object literals.
  */
 function wire(entries: ReadonlyArray<readonly [string, string]>): Record<string, string> {
     return Object.fromEntries(entries);
@@ -29,7 +23,7 @@ describe('ObjectEnvironmentSource', () => {
         expect(source.get('API_URL')).toBe('https://api.example.com');
     });
 
-    it('returns undefined for a key not present in the record', () => {
+    it('returns undefined for a key the record omits', () => {
         const source = new ObjectEnvironmentSource(wire([['FOO', 'bar']]));
 
         expect(source.get('MISSING')).toBeUndefined();
@@ -41,7 +35,7 @@ describe('ObjectEnvironmentSource', () => {
         expect(source.get('ANY')).toBeUndefined();
     });
 
-    it('returns the correct value when multiple keys are present', () => {
+    it('returns the matching value among several keys', () => {
         const source = new ObjectEnvironmentSource(
             wire([
                 ['A', '1'],

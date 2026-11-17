@@ -10,26 +10,20 @@ import { describe, expect, it } from 'vitest';
 import { PrefixedEnvironmentSource } from './prefixed-environment-source';
 
 /**
- * Build a `Record<string, T>` from an array of `[key, value]` pairs.
- *
- * Keeps non-camelCase environment keys out of object-literal key positions so
- * naming-convention lint rules never see them.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain `Record<string, T>`
+ * Build a record from pairs, keeping env-style keys out of object literals.
  */
 function wire<T>(entries: ReadonlyArray<readonly [string, T]>): Record<string, T> {
     return Object.fromEntries(entries);
 }
 
 describe('PrefixedEnvironmentSource', () => {
-    it('returns the string value for a key that exists under the prefix', () => {
+    it('returns the string value stored under the prefixed key', () => {
         const source = new PrefixedEnvironmentSource(wire([['VITE_API_URL', 'https://api.example.com']]), 'VITE_');
 
         expect(source.get('API_URL')).toBe('https://api.example.com');
     });
 
-    it('returns undefined for a key that does not exist under the prefix', () => {
+    it('returns undefined when the prefixed key is absent', () => {
         const source = new PrefixedEnvironmentSource(wire([['VITE_FOO', 'bar']]), 'VITE_');
 
         expect(source.get('MISSING')).toBeUndefined();
@@ -41,20 +35,12 @@ describe('PrefixedEnvironmentSource', () => {
         expect(source.get('ANY')).toBeUndefined();
     });
 
-    it('returns undefined when the prefixed key exists but has a non-string value', () => {
-        const source = new PrefixedEnvironmentSource(wire([['VITE_COUNT', 42]]), 'VITE_');
-
-        expect(source.get('COUNT')).toBeUndefined();
-    });
-
-    it('returns undefined when the prefixed key exists but has a boolean value', () => {
-        const source = new PrefixedEnvironmentSource(wire([['VITE_FLAG', true]]), 'VITE_');
-
-        expect(source.get('FLAG')).toBeUndefined();
-    });
-
-    it('returns undefined when the prefixed key exists but is null', () => {
-        const source = new PrefixedEnvironmentSource(wire([['VITE_KEY', null]]), 'VITE_');
+    it.each([
+        ['a number', 42],
+        ['a boolean', true],
+        ['null', null],
+    ])('returns undefined when the prefixed value is %s', (_, value) => {
+        const source = new PrefixedEnvironmentSource(wire([['VITE_KEY', value]]), 'VITE_');
 
         expect(source.get('KEY')).toBeUndefined();
     });

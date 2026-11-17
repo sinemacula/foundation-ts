@@ -11,13 +11,7 @@ import type { EnvironmentSource } from './environment';
 import { Environment } from './environment';
 
 /**
- * Build a `Record<string, string>` from an array of `[key, value]` pairs.
- *
- * Keeps non-camelCase environment keys out of object-literal key positions so
- * naming-convention lint rules never see them.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain `Record<string, string>`
+ * Build a record from pairs, keeping env-style keys out of object literals.
  */
 function wire(entries: ReadonlyArray<readonly [string, string]>): Record<string, string> {
     return Object.fromEntries(entries);
@@ -25,9 +19,6 @@ function wire(entries: ReadonlyArray<readonly [string, string]>): Record<string,
 
 /**
  * Build an environment source backed by a fixed record.
- *
- * @param values - the values the source serves
- * @returns the environment source
  */
 function sourceFrom(values: Record<string, string>): EnvironmentSource {
     return { get: (key: string) => values[key] };
@@ -35,8 +26,6 @@ function sourceFrom(values: Record<string, string>): EnvironmentSource {
 
 /**
  * Build an environment source that defines no keys.
- *
- * @returns the environment source
  */
 function emptySource(): EnvironmentSource {
     return { get: () => undefined };
@@ -50,7 +39,7 @@ describe('Environment', () => {
             expect(env.string('FOO')).toBe('bar');
         });
 
-        it('returns undefined when the key is missing and no fallback is provided', () => {
+        it('returns undefined for a missing key without a fallback', () => {
             const env = new Environment(emptySource());
 
             expect(env.string('MISSING')).toBeUndefined();
@@ -70,61 +59,19 @@ describe('Environment', () => {
     });
 
     describe('boolean', () => {
-        it('returns true for the truthy string "1"', () => {
-            const env = new Environment(sourceFrom(wire([['FLAG', '1']])));
+        it.each(['1', 'true', 'yes', 'on', 'TRUE', 'Yes'])('treats "%s" as true', value => {
+            const env = new Environment(sourceFrom(wire([['FLAG', value]])));
 
             expect(env.boolean('FLAG')).toBe(true);
         });
 
-        it('returns true for the truthy string "true"', () => {
-            const env = new Environment(sourceFrom(wire([['FLAG', 'true']])));
-
-            expect(env.boolean('FLAG')).toBe(true);
-        });
-
-        it('returns true for the truthy string "yes"', () => {
-            const env = new Environment(sourceFrom(wire([['FLAG', 'yes']])));
-
-            expect(env.boolean('FLAG')).toBe(true);
-        });
-
-        it('returns true for the truthy string "on"', () => {
-            const env = new Environment(sourceFrom(wire([['FLAG', 'on']])));
-
-            expect(env.boolean('FLAG')).toBe(true);
-        });
-
-        it('returns true for an uppercase truthy string "TRUE"', () => {
-            const env = new Environment(sourceFrom(wire([['FLAG', 'TRUE']])));
-
-            expect(env.boolean('FLAG')).toBe(true);
-        });
-
-        it('returns true for a mixed-case truthy string "Yes"', () => {
-            const env = new Environment(sourceFrom(wire([['FLAG', 'Yes']])));
-
-            expect(env.boolean('FLAG')).toBe(true);
-        });
-
-        it('returns false for the string "false"', () => {
-            const env = new Environment(sourceFrom(wire([['FLAG', 'false']])));
+        it.each(['false', '0', 'no'])('treats "%s" as false', value => {
+            const env = new Environment(sourceFrom(wire([['FLAG', value]])));
 
             expect(env.boolean('FLAG')).toBe(false);
         });
 
-        it('returns false for the string "0"', () => {
-            const env = new Environment(sourceFrom(wire([['FLAG', '0']])));
-
-            expect(env.boolean('FLAG')).toBe(false);
-        });
-
-        it('returns false for an arbitrary non-truthy string', () => {
-            const env = new Environment(sourceFrom(wire([['FLAG', 'no']])));
-
-            expect(env.boolean('FLAG')).toBe(false);
-        });
-
-        it('returns undefined when the key is missing and no fallback is provided', () => {
+        it('returns undefined for a missing key without a fallback', () => {
             const env = new Environment(emptySource());
 
             expect(env.boolean('MISSING')).toBeUndefined();
@@ -144,13 +91,13 @@ describe('Environment', () => {
     });
 
     describe('integer', () => {
-        it('returns the parsed integer for a valid numeric string', () => {
+        it('parses a numeric string', () => {
             const env = new Environment(sourceFrom(wire([['PORT', '3000']])));
 
             expect(env.integer('PORT')).toBe(3000);
         });
 
-        it('returns undefined when the key is missing and no fallback is provided', () => {
+        it('returns undefined for a missing key without a fallback', () => {
             const env = new Environment(emptySource());
 
             expect(env.integer('MISSING')).toBeUndefined();
@@ -168,7 +115,7 @@ describe('Environment', () => {
             expect(env.integer('PORT', 80)).toBe(80);
         });
 
-        it('returns undefined when the value is invalid and no fallback is provided', () => {
+        it('returns undefined for an invalid value without a fallback', () => {
             const env = new Environment(sourceFrom(wire([['PORT', 'abc']])));
 
             expect(env.integer('PORT')).toBeUndefined();
@@ -194,7 +141,7 @@ describe('Environment', () => {
             expect(env.json('DATA')).toStrictEqual([1, 2, 3]);
         });
 
-        it('returns undefined when the key is missing and no fallback is provided', () => {
+        it('returns undefined for a missing key without a fallback', () => {
             const env = new Environment(emptySource());
 
             expect(env.json('MISSING')).toBeUndefined();
@@ -212,7 +159,7 @@ describe('Environment', () => {
             expect(env.json('DATA', null)).toBeNull();
         });
 
-        it('returns undefined when the value is invalid JSON and no fallback is provided', () => {
+        it('returns undefined for invalid JSON without a fallback', () => {
             const env = new Environment(sourceFrom(wire([['DATA', '{broken']])));
 
             expect(env.json('DATA')).toBeUndefined();
