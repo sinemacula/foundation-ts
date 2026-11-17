@@ -1,15 +1,5 @@
 /**
- * Default session API gateway.
- *
- * Implements {@link SessionApi} over the documented controllers of the
- * organisation's authentication package: `POST auth/sign-in` signs in,
- * `POST auth/refresh` refreshes, `POST auth/logout` signs out, and the user
- * record lives at `users/self`. A session response is
- * `{ access_token, expires_in, refresh_token }` (expiry in seconds), or
- * `{ pending_credential, requires }` when a further step such as a second
- * factor is owed; a `{ data }` envelope around either is tolerated. An API
- * whose protocol differs beyond the paths implements {@link SessionApi}
- * instead.
+ * Default {@link SessionApi} gateway over the authentication package's routes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -63,10 +53,10 @@ export interface DefaultSessionApiOptions<C = PasswordCredentials> {
     /** Overrides for the endpoint paths. */
     readonly paths?: SessionPaths;
 
-    /** Build the sign-in request body. Defaults to the credentials plus `platform` set to the device's operating system. */
+    /** Build the sign-in body. Default: the credentials plus `platform` set to the device OS. */
     readonly loginBody?: (credentials: C, device: SessionDevice) => unknown;
 
-    /** The clock the access token expiry is computed against, in epoch milliseconds. Default `Date.now`. */
+    /** The clock, in epoch milliseconds, the access token expiry is computed against. Default `Date.now`. */
     readonly now?: () => number;
 }
 
@@ -94,16 +84,17 @@ const CROSS_SITE_HEADERS: Readonly<Record<string, string>> = { 'X-Requested-With
  * user record onto {@link SessionUser}: id, email, first plus last name, and
  * the string permissions.
  *
+ * A session response is `{ access_token, expires_in, refresh_token }` (expiry
+ * in seconds) or `{ pending_credential, requires }`, either optionally inside a
+ * `{ data }` envelope; an API whose protocol differs beyond the paths
+ * implements {@link SessionApi} instead.
+ *
  * No sign-in, refresh or sign-out request may trigger the unauthorized handler,
  * so a refused sign-in cannot refresh and resurrect an earlier session. Refresh
  * and sign-out failures are not reported to the global error handler, since
  * they surface through the session flow. A refresh never throws: every failure
  * is classified into its result, and in body transport a refresh without a
  * refresh token is rejected without a request.
- *
- * @param http - the HTTP client used to reach the session endpoints
- * @param options - the transport and wire overrides
- * @returns the session API gateway
  */
 export function createDefaultSessionApi<C = PasswordCredentials>(
     http: HttpClient,
@@ -113,10 +104,6 @@ export function createDefaultSessionApi<C = PasswordCredentials>(
 /**
  * Create a {@link SessionApi} over the application HTTP client, mapping the
  * user record onto U with the given mapping.
- *
- * @param http - the HTTP client used to reach the session endpoints
- * @param options - the user mapping, with the transport and wire overrides
- * @returns the session API gateway
  */
 export function createDefaultSessionApi<C, U extends SessionUser>(
     http: HttpClient,
@@ -140,9 +127,6 @@ export function createDefaultSessionApi<C, U extends SessionUser>(
     /**
      * Build the body carrying the refresh token, or none when the token does
      * not travel in the body.
-     *
-     * @param refreshToken - the held refresh token, or null
-     * @returns the request body, or undefined
      */
     const tokenBody = (refreshToken: string | null): Record<string, unknown> | undefined =>
         transport === 'body' && refreshToken !== null ? { [REFRESH_TOKEN_FIELD]: refreshToken } : undefined;
@@ -180,10 +164,6 @@ export function createDefaultSessionApi<C, U extends SessionUser>(
 
 /**
  * Build the default sign-in body: the credentials plus the device platform.
- *
- * @param credentials - the submitted credentials
- * @param device - the device fingerprint
- * @returns the request body
  */
 function defaultLoginBody<C>(credentials: C, device: SessionDevice): unknown {
     return { ...credentials, platform: device.os };
@@ -191,11 +171,6 @@ function defaultLoginBody<C>(credentials: C, device: SessionDevice): unknown {
 
 /**
  * Create the session response mapper.
- *
- * @param transport - how the refresh token travels; a cookie transport ignores
- * any refresh token in the body
- * @param now - the clock the expiry is computed against
- * @returns the mapper
  */
 function createSessionMapper(transport: RefreshTokenTransport, now: () => number): (payload: unknown) => LoginResult {
     return (payload: unknown): LoginResult => {
@@ -222,11 +197,8 @@ function createSessionMapper(transport: RefreshTokenTransport, now: () => number
  * Read and validate the tokens of a session response. A missing refresh token
  * or expiry reads as null.
  *
- * @param data - the unwrapped response record
  * @param transport - how the refresh token travels; a cookie transport ignores
  * any refresh token in the body
- * @param now - the clock the expiry is computed against
- * @returns the tokens
  * @throws {@link SessionError} when a field has the wrong shape
  */
 function readTokens(data: Record<string, unknown>, transport: RefreshTokenTransport, now: () => number): SessionTokens {
@@ -252,8 +224,6 @@ function readTokens(data: Record<string, unknown>, transport: RefreshTokenTransp
 /**
  * Build the error thrown for a session response that does not match the
  * expected shape.
- *
- * @returns the error
  */
 function malformedSession(): SessionError {
     return new SessionError('The session response did not match the expected shape.');
@@ -262,7 +232,6 @@ function malformedSession(): SessionError {
 /**
  * Unwrap a `{ data: {...} }` envelope when present.
  *
- * @param payload - the raw response payload
  * @returns the enveloped record, or the payload itself when not enveloped
  */
 function unwrapOptionalEnvelope(payload: unknown): unknown {
@@ -272,12 +241,9 @@ function unwrapOptionalEnvelope(payload: unknown): unknown {
 /**
  * Map an unwrapped user payload onto the base {@link SessionUser} shape.
  *
- * The identifier is required; email and name degrade to null when absent so the
- * default mapping tolerates sparse user records. The display name joins the
- * wire `first_name` and `last_name` fields.
+ * The identifier is required; email and name degrade to null when absent. The
+ * display name joins the wire `first_name` and `last_name` fields.
  *
- * @param payload - the unwrapped user payload
- * @returns the mapped user
  * @throws {@link SessionError} when the payload is not a record with a usable
  * identifier
  */
@@ -303,8 +269,6 @@ function mapDefaultUser(payload: unknown): SessionUser {
 /**
  * Join the wire name fields into a display name.
  *
- * @param first - the raw `first_name` field
- * @param last - the raw `last_name` field
  * @returns the space-joined string parts, or null when neither is a string
  */
 function composeName(first: unknown, last: unknown): string | null {
@@ -316,7 +280,6 @@ function composeName(first: unknown, last: unknown): string | null {
 /**
  * Extract the string entries of a list field.
  *
- * @param value - the raw field value
  * @returns the string entries of `value` when it is an array, otherwise an
  * empty array
  */

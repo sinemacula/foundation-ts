@@ -1,25 +1,6 @@
 /**
- * Session core transitions.
- *
- * The platform-agnostic session lifecycle: every transition operates on an
- * explicit mutable {@link SessionState} plus the route-free context slice, so
- * each platform's store stays a thin delegator that forwards its own state and
- * installed context. All token writes to persistence happen here, and each is
- * awaited before a transition reports success.
- *
- * A sign-in, sign-out or clear starts a new epoch when it is called, as does
- * adopting another context's session; a sign-in or hydration discards its
- * result once the epoch has moved on, so the latest explicit action wins. A
- * refresh or user fetch belongs to the session the state holds, which a
- * rotation keeps and any other change replaces, a sign-out as soon as it
- * starts. A sign-out or clear removes whatever session is then held unless a
- * sign-in has landed since it started. The persistence operations of one state
- * run one at a time, and each write re-checks supersession first.
- *
- * Each state tracks the persisted revision it is based on. A snapshot at a
- * higher revision is another context's session and replaces the state's; a
- * snapshot at the same revision is never adopted, so a rotated pair that could
- * not be persisted is never traded back for the spent pair still stored.
+ * Platform-agnostic session transitions over an explicit state; every token
+ * write is awaited before a transition reports success.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,7 +30,10 @@ export interface SessionCoreContext<U extends SessionUser = SessionUser, C = Pas
 }
 
 /**
- * The bookkeeping the transitions keep for one state.
+ * The bookkeeping the transitions keep for one state. The latest explicit
+ * action wins: a sign-in or hydration discards its result once the epoch moves
+ * on, and a sign-out or clear removes whatever session is then held unless a
+ * sign-in has landed since it started.
  */
 interface Ledger {
     /** Started by every sign-in, sign-out and clear, and by adopting another context's session. */
@@ -100,8 +84,6 @@ const ledgers = new WeakMap<object, Ledger>();
 /**
  * Build an empty, signed-out session state. Platforms then await
  * {@link hydrateSession} before exposing authenticated state.
- *
- * @returns the initial state, holding no session
  */
 export function createInitialSessionState<U extends SessionUser = SessionUser>(): SessionState<U> {
     return { accessToken: null, refreshToken: null, expiresAtEpochMs: null, user: null };
@@ -116,9 +98,6 @@ export function createInitialSessionState<U extends SessionUser = SessionUser>()
  * the caller refetches it with {@link rehydrateSessionUser} once hydration has
  * settled. While the state holds a rotated pair that could not be persisted,
  * hydration retries persisting it instead. A persistence failure propagates.
- *
- * @param state - the mutable session state
- * @param context - the session core context
  */
 export async function hydrateSession<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -154,11 +133,6 @@ export async function hydrateSession<U extends SessionUser, C>(
  * then load the current user. Persisting first lets a refresh the user fetch
  * triggers rotate the persisted pair. When persisting or loading the user
  * fails, the session is rolled back and the failure rethrown.
- *
- * @param state - the mutable session state
- * @param context - the session core context
- * @param credentials - the login credentials
- * @returns what the sign-in did
  */
 export async function loginWithCredentials<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -223,10 +197,6 @@ export async function loginWithCredentials<U extends SessionUser, C>(
  * reported as such. A transient or other failure keeps the tokens. The refresh
  * credential may be absent from state, as when it travels in a cookie; the
  * gateway decides whether it can refresh without one.
- *
- * @param state - the mutable session state
- * @param context - the session core context
- * @returns what the refresh did
  */
 export async function refreshSession<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -270,9 +240,6 @@ export async function refreshSession<U extends SessionUser, C>(
  * Best-effort invalidate the session server-side, then discard whatever session
  * is held, including one adopted from another context meanwhile. A sign-in that
  * lands while the server call is in flight is left in place.
- *
- * @param state - the mutable session state
- * @param context - the session core context
  */
 export async function logoutSession<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -306,9 +273,6 @@ export async function logoutSession<U extends SessionUser, C>(
  * Clear all session state, then remove whatever session is persisted. State is
  * cleared before the returned promise settles; a persistence failure
  * propagates.
- *
- * @param state - the mutable session state
- * @param context - the session core context
  */
 export async function clearSession<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -333,9 +297,6 @@ export async function clearSession<U extends SessionUser, C>(
  * Fetch and store the current user when a session is present but no user record
  * has been loaded yet. Concurrent callers of one session share the single
  * in-flight request, and failures are swallowed.
- *
- * @param state - the mutable session state
- * @param context - the session core context
  */
 export async function rehydrateSessionUser<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -370,7 +331,6 @@ export async function rehydrateSessionUser<U extends SessionUser, C>(
  * is new for every sign-in and every session adopted from another context. A
  * sign-out keeps it until the session is cleared.
  *
- * @param state - the session state
  * @returns the session's identity, or null when the state holds no session
  */
 export function sessionIdentity(state: SessionState<SessionUser>): object | null {
@@ -380,10 +340,6 @@ export function sessionIdentity(state: SessionState<SessionUser>): object | null
 /**
  * Fetch the current user into state, swallowing a dead-session failure and
  * discarding a user that arrives after the session was replaced.
- *
- * @param state - the mutable session state
- * @param context - the session core context
- * @param ledger - the state's ledger
  */
 async function fetchCurrentUser<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -399,18 +355,13 @@ async function fetchCurrentUser<U extends SessionUser, C>(
             state.user = user;
         }
     } catch {
-        // Swallowed: a dead session is handled by the 401-refresh flow or the
-        // session-loss watcher.
+        // A dead session is handled by the 401 refresh or session-loss watcher.
     }
 }
 
 /**
  * Ask the gateway for a refresh, classifying a thrown failure with the default
  * policy.
- *
- * @param context - the session core context
- * @param refreshToken - the refresh token to present, or null
- * @returns the gateway's refresh result
  */
 async function requestRefresh<U extends SessionUser, C>(
     context: SessionCoreContext<U, C>,
@@ -426,13 +377,6 @@ async function requestRefresh<U extends SessionUser, C>(
 /**
  * Persist a rotated pair, keeping it in state and reporting the failure when it
  * cannot be persisted.
- *
- * @param state - the mutable session state
- * @param context - the session core context
- * @param ledger - the state's ledger
- * @param isCurrent - whether the refresh is still current
- * @param tokens - the rotated pair
- * @returns what the refresh did
  */
 async function storeRotation<U extends SessionUser, C>(
     state: SessionState<U>,
@@ -463,11 +407,6 @@ async function storeRotation<U extends SessionUser, C>(
  * Persist a rotated pair at the state's revision and apply it, or adopt the
  * session another context persisted first. A persistence failure propagates.
  *
- * @param state - the mutable session state
- * @param context - the session core context
- * @param ledger - the state's ledger
- * @param isCurrent - whether the transition saving it is still current
- * @param tokens - the rotated pair
  * @returns refreshed when the state holds a session afterwards, otherwise
  * superseded
  */
@@ -505,11 +444,6 @@ async function saveRotation<U extends SessionUser, C>(
  * refresh presented, otherwise adopt the session persisted since. When it
  * cannot be cleared it is still discarded from state, and the failure reported.
  *
- * @param state - the mutable session state
- * @param context - the session core context
- * @param ledger - the state's ledger
- * @param isCurrent - whether the refresh is still current
- * @param presented - the revision the refresh presented
  * @param outcome - what the refresh reports when the session is cleared
  * @returns the outcome, refreshed when a persisted session was adopted, or the
  * failure to clear it
@@ -559,8 +493,6 @@ async function discard<U extends SessionUser, C>(
  * Write over whatever is persisted, retrying at each revision another context
  * wrote meanwhile. Nothing more is written once the write is superseded.
  *
- * @param isCurrent - whether the write is still current
- * @param ledger - the state's ledger
  * @param write - the conditional write, given the revision it expects
  */
 async function overwrite(
@@ -587,11 +519,8 @@ async function overwrite(
  * Bring the state in line with a snapshot at another revision, starting a new
  * epoch when that changes the state's session. A higher revision is another
  * context's session; a lower one means the store was reset, which signs the
- * state out. The state's own revision changes nothing.
- *
- * @param state - the mutable session state
- * @param ledger - the state's ledger
- * @param snapshot - the persisted snapshot
+ * state out. The state's own revision changes nothing, so a rotated pair that
+ * could not be persisted is never traded back for the spent pair still stored.
  */
 function adopt(state: SessionState<SessionUser>, ledger: Ledger, snapshot: SessionSnapshot): void {
     const newer = snapshot.revision > ledger.revision ? snapshot.tokens : null;
@@ -607,8 +536,6 @@ function adopt(state: SessionState<SessionUser>, ledger: Ledger, snapshot: Sessi
 /**
  * Replace the state's session and drop its user.
  *
- * @param state - the mutable session state
- * @param ledger - the state's ledger
  * @param tokens - the new session's tokens, or null to sign out
  * @returns the new session
  */
@@ -632,9 +559,6 @@ function replaceSession(state: SessionState<SessionUser>, ledger: Ledger, tokens
 
 /**
  * Write a token set onto the state.
- *
- * @param state - the mutable session state
- * @param tokens - the tokens to apply
  */
 function setTokens(state: SessionState<SessionUser>, tokens: SessionTokens): void {
     state.accessToken = tokens.accessToken;
@@ -644,9 +568,6 @@ function setTokens(state: SessionState<SessionUser>, tokens: SessionTokens): voi
 
 /**
  * Start a new epoch, superseding every transition started before it.
- *
- * @param ledger - the state's ledger
- * @returns the new epoch
  */
 function advance(ledger: Ledger): object {
     ledger.epoch = {};
@@ -656,9 +577,6 @@ function advance(ledger: Ledger): object {
 
 /**
  * Resolve the state's ledger, starting one on first use.
- *
- * @param state - the session state
- * @returns the ledger
  */
 function ledgerOf(state: object): Ledger {
     const existing = ledgers.get(state);

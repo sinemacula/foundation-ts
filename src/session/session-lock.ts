@@ -1,9 +1,6 @@
 /**
- * Session lock port.
- *
- * Serialises the read-compare-write steps of a persistence adapter so each
- * conditional write is atomic. A browser implements it with the Web Locks API,
- * under one lock name shared by every tab writing the same storage key.
+ * Lock port making each conditional persistence write atomic; a browser uses
+ * the Web Locks API under one name per storage key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -17,7 +14,6 @@ export interface SessionLock {
      * Run the task once every task started before it has settled.
      *
      * @param task - the task to run while holding the lock
-     * @returns the task's result
      */
     run<T>(task: () => Promise<T>): Promise<T>;
 }

@@ -1,9 +1,5 @@
 /**
- * Error type for the session layer.
- *
- * Thrown when a session or user response, or a persisted session snapshot, does
- * not have the expected shape, so a malformed payload surfaces as a typed
- * failure callers can branch on with `instanceof` rather than a bare `Error`.
+ * Error for a malformed session response, user response or persisted snapshot.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

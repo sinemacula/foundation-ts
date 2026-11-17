@@ -1,10 +1,5 @@
 /**
- * Post-login redirect target handling.
- *
- * Guarded navigations attach the originally-requested path as a query parameter
- * so the login screen can return the visitor there once signed in. Only
- * same-origin, relative paths are ever honoured; anything else is treated as
- * untrusted input and discarded.
+ * Post-login redirect target handling; only same-origin relative paths pass.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

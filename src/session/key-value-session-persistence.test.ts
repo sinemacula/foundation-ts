@@ -25,9 +25,6 @@ class RecordingLock implements SessionLock {
 
     /**
      * Run the task, marking the lock held until it settles.
-     *
-     * @param task - the task to run
-     * @returns the task's result
      */
     async run<T>(task: () => Promise<T>): Promise<T> {
         this.held = true;
@@ -58,9 +55,6 @@ class LockCheckingStorage extends MemoryStorage {
 
     /**
      * Record whether the lock is held, then store the value.
-     *
-     * @param key - the storage key
-     * @param value - the value to store
      */
     override set(key: string, value: string): void {
         this.writesHeld.push(this.#lock.held);
@@ -72,10 +66,6 @@ const TOKENS: SessionTokens = { accessToken: 'access', refreshToken: 'refresh', 
 
 /**
  * Serialise a stored snapshot.
- *
- * @param revision - the stored revision
- * @param tokens - the stored tokens
- * @returns the stored value
  */
 function stored(revision: unknown, tokens: unknown): string {
     return JSON.stringify({ revision, tokens });
@@ -83,9 +73,6 @@ function stored(revision: unknown, tokens: unknown): string {
 
 /**
  * Load from a storage holding the given value under the default key.
- *
- * @param value - the stored value
- * @returns the load result
  */
 function loadStored(value: string): Promise<unknown> {
     const storage = new MemoryStorage();

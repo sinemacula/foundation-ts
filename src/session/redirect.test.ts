@@ -10,70 +10,30 @@ import { describe, expect, it } from 'vitest';
 import { REDIRECT_QUERY_KEY, sanitiseRedirectTarget } from './redirect';
 
 describe('sanitiseRedirectTarget', () => {
-    it('accepts a valid relative path', () => {
-        expect(sanitiseRedirectTarget('/dashboard', '/login')).toBe('/dashboard');
+    it.each([
+        ['a relative path', '/dashboard', '/login'],
+        ['the root path', '/', '/login'],
+        ['a nested path carrying its own query string', '/settings/billing?tab=invoices', '/login'],
+        ['the default login path under a custom login path', '/login', '/signin'],
+        ['an ordinary path under a custom login path', '/dashboard', '/signin'],
+    ])('accepts %s', (_label, target, loginPath) => {
+        expect(sanitiseRedirectTarget(target, loginPath)).toBe(target);
     });
 
-    it('accepts the root path', () => {
-        expect(sanitiseRedirectTarget('/', '/login')).toBe('/');
-    });
-
-    it('accepts a nested path carrying its own query string', () => {
-        expect(sanitiseRedirectTarget('/settings/billing?tab=invoices', '/login')).toBe(
-            '/settings/billing?tab=invoices',
-        );
-    });
-
-    it('rejects a protocol-relative target', () => {
-        expect(sanitiseRedirectTarget('//evil.example.com', '/login')).toBeNull();
-    });
-
-    it('rejects an absolute external url', () => {
-        expect(sanitiseRedirectTarget('https://evil.example.com', '/login')).toBeNull();
-    });
-
-    it('rejects a target containing a backslash', () => {
-        expect(sanitiseRedirectTarget('/\\evil.example.com', '/login')).toBeNull();
-    });
-
-    it('rejects the login path to avoid a bounce loop', () => {
-        expect(sanitiseRedirectTarget('/login', '/login')).toBeNull();
-    });
-
-    it('rejects the login path carrying its own query', () => {
-        expect(sanitiseRedirectTarget('/login?redirect=%2F', '/login')).toBeNull();
-    });
-
-    it('rejects any target sharing the login-path prefix', () => {
-        expect(sanitiseRedirectTarget('/login/help', '/login')).toBeNull();
-    });
-
-    it('rejects a non-string value', () => {
-        expect(sanitiseRedirectTarget(42, '/login')).toBeNull();
-    });
-
-    it('rejects an array value', () => {
-        expect(sanitiseRedirectTarget(['/dashboard'], '/login')).toBeNull();
-    });
-
-    it('rejects a custom login path', () => {
-        expect(sanitiseRedirectTarget('/signin', '/signin')).toBeNull();
-    });
-
-    it('rejects a custom login path carrying its own query', () => {
-        expect(sanitiseRedirectTarget('/signin?redirect=%2F', '/signin')).toBeNull();
-    });
-
-    it('accepts another login-like path under a custom login path', () => {
-        expect(sanitiseRedirectTarget('/login', '/signin')).toBe('/login');
-    });
-
-    it('still rejects a protocol-relative target under a custom login path', () => {
-        expect(sanitiseRedirectTarget('//evil.example.com', '/signin')).toBeNull();
-    });
-
-    it('still accepts an ordinary path under a custom login path', () => {
-        expect(sanitiseRedirectTarget('/dashboard', '/signin')).toBe('/dashboard');
+    it.each([
+        ['a protocol-relative target', '//evil.example.com', '/login'],
+        ['an absolute external url', 'https://evil.example.com', '/login'],
+        ['a target containing a backslash', '/\\evil.example.com', '/login'],
+        ['the login path', '/login', '/login'],
+        ['the login path carrying its own query', '/login?redirect=%2F', '/login'],
+        ['any target sharing the login-path prefix', '/login/help', '/login'],
+        ['a non-string value', 42, '/login'],
+        ['an array value', ['/dashboard'], '/login'],
+        ['a custom login path', '/signin', '/signin'],
+        ['a custom login path carrying its own query', '/signin?redirect=%2F', '/signin'],
+        ['a protocol-relative target under a custom login path', '//evil.example.com', '/signin'],
+    ])('rejects %s', (_label, target, loginPath) => {
+        expect(sanitiseRedirectTarget(target, loginPath)).toBeNull();
     });
 });
 

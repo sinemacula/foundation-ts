@@ -57,7 +57,7 @@ interface AdminUser extends SessionUser {
 
 /**
  * An in-memory {@link HttpClient} fake that records every call and replays
- * queued response payloads (or errors) in order.
+ * queued payloads or errors in order.
  */
 class FakeHttpClient implements HttpClient {
     /** Every call made, in order. */
@@ -68,8 +68,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Queue a response payload for the next call.
-     *
-     * @param value - the payload the next call resolves with
      */
     queueResponse(value: unknown): void {
         this.#queue.push({ value });
@@ -77,8 +75,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Queue a failure for the next call.
-     *
-     * @param error - the error the next call rejects with
      */
     queueError(error: unknown): void {
         this.#queue.push({ error });
@@ -86,10 +82,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Record a GET.
-     *
-     * @param path - the request path
-     * @param options - the request options
-     * @returns the next queued outcome
      */
     get<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('GET', path, undefined, options);
@@ -97,11 +89,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Record a POST.
-     *
-     * @param path - the request path
-     * @param body - the request body
-     * @param options - the request options
-     * @returns the next queued outcome
      */
     post<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('POST', path, body, options);
@@ -109,11 +96,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Record a PUT.
-     *
-     * @param path - the request path
-     * @param body - the request body
-     * @param options - the request options
-     * @returns the next queued outcome
      */
     put<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('PUT', path, body, options);
@@ -121,11 +103,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Record a PATCH.
-     *
-     * @param path - the request path
-     * @param body - the request body
-     * @param options - the request options
-     * @returns the next queued outcome
      */
     patch<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('PATCH', path, body, options);
@@ -133,10 +110,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Record a DELETE.
-     *
-     * @param path - the request path
-     * @param options - the request options
-     * @returns the next queued outcome
      */
     delete<T>(path: string, options?: HttpRequestOptions): Promise<T> {
         return this.#consume('DELETE', path, undefined, options);
@@ -144,10 +117,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Record a download.
-     *
-     * @param path - the request path
-     * @param options - the request options
-     * @returns the next queued outcome
      */
     download(path: string, options?: HttpRequestOptions): Promise<Blob> {
         return this.#consume('DOWNLOAD', path, undefined, options);
@@ -155,12 +124,6 @@ class FakeHttpClient implements HttpClient {
 
     /**
      * Record a call and settle it with the next queued outcome.
-     *
-     * @param method - the HTTP method
-     * @param path - the request path
-     * @param body - the request body
-     * @param options - the request options
-     * @returns the next queued outcome
      */
     #consume<T>(method: string, path: string, body: unknown, options: HttpRequestOptions | undefined): Promise<T> {
         this.calls.push({ method, path, body, options });
@@ -176,13 +139,8 @@ class FakeHttpClient implements HttpClient {
 }
 
 /**
- * Build a `Record<string, unknown>` from an array of `[key, value]` pairs.
- *
- * Keeps snake_case wire-field names out of object-literal key positions so
- * naming-convention lint rules never see them.
- *
- * @param entries - key-value pairs for the record
- * @returns a plain `Record<string, unknown>`
+ * Build a record from key-value pairs, keeping snake_case wire keys out of
+ * object-literal key positions where the naming convention would flag them.
  */
 function wire(entries: ReadonlyArray<readonly [string, unknown]>): Record<string, unknown> {
     return Object.fromEntries(entries);
@@ -198,9 +156,6 @@ const COOKIE_QUIET = { ...COOKIE, ...QUIET };
 
 /**
  * Build a documented session response body.
- *
- * @param overrides - fields replacing the defaults
- * @returns the response body
  */
 function sessionBody(overrides: ReadonlyArray<readonly [string, unknown]> = []): Record<string, unknown> {
     return wire([['access_token', 'access'], ['expires_in', 900], ['refresh_token', 'refresh'], ...overrides]);
@@ -208,8 +163,6 @@ function sessionBody(overrides: ReadonlyArray<readonly [string, unknown]> = []):
 
 /**
  * Build a documented pending response body.
- *
- * @returns the response body
  */
 function pendingBody(): Record<string, unknown> {
     return wire([
@@ -220,10 +173,6 @@ function pendingBody(): Record<string, unknown> {
 
 /**
  * Build a gateway over the fake with a fixed clock.
- *
- * @param http - the fake HTTP client
- * @param options - further gateway options
- * @returns the gateway
  */
 function gateway(http: HttpClient, options: DefaultSessionApiOptions = {}): SessionApi {
     return createDefaultSessionApi(http, { now: () => NOW, ...options });
@@ -231,8 +180,6 @@ function gateway(http: HttpClient, options: DefaultSessionApiOptions = {}): Sess
 
 /**
  * Build a user response wrapped in a data envelope.
- *
- * @returns the response body
  */
 function userEnvelope(): Record<string, unknown> {
     return {
@@ -315,24 +262,18 @@ describe('createDefaultSessionApi', () => {
             });
         });
 
-        it('maps a missing refresh token and expiry to null', async () => {
-            const http = new FakeHttpClient();
-            http.queueResponse(wire([['access_token', 'access']]));
-
-            await expect(gateway(http).login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
-                kind: 'authenticated',
-                tokens: { accessToken: 'access', refreshToken: null, expiresAtEpochMs: null },
-            });
-        });
-
-        it('maps a null refresh token and expiry to null', async () => {
-            const http = new FakeHttpClient();
-            http.queueResponse(
+        it.each([
+            ['missing', wire([['access_token', 'access']])],
+            [
+                'null',
                 sessionBody([
                     ['refresh_token', null],
                     ['expires_in', null],
                 ]),
-            );
+            ],
+        ])('maps a %s refresh token and expiry to null', async (_label, body) => {
+            const http = new FakeHttpClient();
+            http.queueResponse(body);
 
             await expect(gateway(http).login(CREDENTIALS, DEVICE)).resolves.toStrictEqual({
                 kind: 'authenticated',

@@ -1,10 +1,6 @@
 /**
- * Key-value session persistence adapter.
- *
- * Implements {@link SessionPersistence} over the synchronous key-value storage
- * port, writing the revisioned snapshot as JSON under one key, so a single
- * storage write replaces the whole session. Every conditional write reads,
- * compares and writes while holding a {@link SessionLock}.
+ * Key-value {@link SessionPersistence}: the snapshot is one JSON value, so a
+ * single storage write replaces the whole session.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,7 +28,7 @@ export interface KeyValueSessionPersistenceOptions {
     /** The key the snapshot is stored under. Default `DEFAULT_SESSION_STORAGE_KEYS.session`. */
     readonly key?: string;
 
-    /** The lock every context writing the key shares. Default an {@link InProcessSessionLock}, which suffices only for a single context. */
+    /** The lock every context writing the key shares. Default {@link InProcessSessionLock}, which suffices only for one context. */
     readonly lock?: SessionLock;
 }
 
@@ -103,10 +99,8 @@ export class KeyValueSessionPersistence implements SessionPersistence {
      * Write the tokens at the next revision, while holding the lock, when the
      * snapshot is still at the expected revision.
      *
-     * @param expectedRevision - the revision the caller last saw
      * @param tokens - the tokens to write, or null to clear
      * @param status - the status a successful write reports
-     * @returns the new revision, or the snapshot that changed meanwhile
      */
     #writeIf<S extends 'saved' | 'cleared'>(
         expectedRevision: number,
@@ -135,7 +129,6 @@ export class KeyValueSessionPersistence implements SessionPersistence {
     /**
      * Read the snapshot synchronously.
      *
-     * @param parse - parses a stored value
      * @returns the stored snapshot, or the empty one when none is stored
      */
     #read(parse: (raw: string) => SessionSnapshot): SessionSnapshot {
@@ -148,8 +141,6 @@ export class KeyValueSessionPersistence implements SessionPersistence {
 /**
  * Parse a stored snapshot.
  *
- * @param raw - the stored value
- * @returns the snapshot
  * @throws {@link SessionError} when the value is not a snapshot
  */
 function parseSnapshot(raw: string): SessionSnapshot {
@@ -177,9 +168,6 @@ function parseSnapshot(raw: string): SessionSnapshot {
 
 /**
  * Parse a stored snapshot, reading a value that is not one as the empty store.
- *
- * @param raw - the stored value
- * @returns the snapshot, or the empty one
  */
 function parseOrEmpty(raw: string): SessionSnapshot {
     try {
@@ -192,8 +180,6 @@ function parseOrEmpty(raw: string): SessionSnapshot {
 /**
  * Parse the stored tokens.
  *
- * @param value - the stored tokens
- * @returns the tokens
  * @throws {@link SessionError} when the value is not a token set
  */
 function parseTokens(value: unknown): SessionTokens {
@@ -217,9 +203,6 @@ function parseTokens(value: unknown): SessionTokens {
 
 /**
  * Check for a revision a write produced: a positive safe integer.
- *
- * @param value - the stored revision
- * @returns whether the value is a revision
  */
 function isRevision(value: unknown): value is number {
     return Number.isSafeInteger(value) && Number(value) > 0;
@@ -227,9 +210,6 @@ function isRevision(value: unknown): value is number {
 
 /**
  * Check for a finite number.
- *
- * @param value - the value to check
- * @returns whether the value is a finite number
  */
 function isFiniteNumber(value: unknown): value is number {
     return Number.isFinite(value);
@@ -239,7 +219,6 @@ function isFiniteNumber(value: unknown): value is number {
  * Build the error for a stored value that is not a snapshot.
  *
  * @param cause - the parse failure, when there was one
- * @returns the error
  */
 function unreadable(cause?: unknown): SessionError {
     return new SessionError('The persisted session could not be read.', cause === undefined ? undefined : { cause });

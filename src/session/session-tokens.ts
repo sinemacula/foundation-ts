@@ -1,10 +1,5 @@
 /**
- * Session token set.
- *
- * The normalised token bundle returned by every {@link SessionApi} call that
- * establishes or renews a session. Wire-format parsing happens at the API
- * gateway boundary, never in the session lifecycle, so consumers only ever see
- * epoch milliseconds.
+ * Normalised session token set; the gateway parses the wire format.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

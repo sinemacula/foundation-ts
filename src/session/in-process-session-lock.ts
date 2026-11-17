@@ -1,10 +1,6 @@
 /**
- * In-process session lock.
- *
- * A {@link SessionLock} that serialises tasks within one JavaScript context. It
- * suffices only where a single context writes the session, as in React Native
- * or a test; browser tabs sharing storage need a lock they all hold, such as
- * one over the Web Locks API.
+ * Single-context session lock (React Native, tests); browser tabs sharing
+ * storage need a lock they all hold, such as one over the Web Locks API.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
