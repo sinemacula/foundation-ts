@@ -1200,6 +1200,25 @@ describe('ApiQuery', () => {
         });
     });
 
+    describe.each([
+        ['fieldsFor', 'fields[user]', (q: ApiQuery, names: string[]) => q.fieldsFor('user', names)],
+        ['aggregatesFor', 'aggregates[user]', (q: ApiQuery, names: string[]) => q.aggregatesFor('user', names)],
+    ] as const)('%s selections', (method, key, select) => {
+        it('emits an empty list as the explicit empty selection', () => {
+            expect(select(ApiQuery.create(), []).toQueryParameters()).toStrictEqual({ [key]: '' });
+        });
+
+        it('replaces an earlier selection with the empty one', () => {
+            expect(select(select(ApiQuery.create(), ['a']), []).toQueryParameters()).toStrictEqual({ [key]: '' });
+        });
+
+        it.each([[['']], [['  ']], [['a', '']]])('refuses the blank names in %j', names => {
+            expect(() => select(ApiQuery.create(), names)).toThrow(
+                new QueryError(`${method}("user") names must not be blank.`),
+            );
+        });
+    });
+
     describe('aggregatesFor', () => {
         it('emits a per-resource aggregates bracket key', () => {
             const params = ApiQuery.create()

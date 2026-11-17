@@ -112,8 +112,10 @@ const query = ApiQuery.create()
 - `withTrashed()` / `onlyTrashed()` set `trashed=with` / `trashed=only`.
 - Changing the filters, search, soft-delete visibility or order drops any cursor token but keeps cursor pagination;
   `limit` and `page` keep it. Random order under cursor pagination throws.
-- `$`-prefixed field or relation names, non-finite numbers, and a page or limit that is not a positive integer throw
-  a `QueryError`.
+- `fieldsFor(type, [])` requests only the fixed fields and `aggregatesFor(type, [])` suppresses the default
+  aggregates.
+- `$`-prefixed field or relation names, non-finite numbers, blank field or aggregate names, and a page or limit that
+  is not a positive integer throw a `QueryError`.
 - `ResourceClient.list` returns the mapped `items`, `meta` (`{ mode: 'length-aware', total, count, hasMore }`,
   `{ mode: 'cursor', hasMore }`, or `null`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
 

@@ -155,6 +155,19 @@ function positiveInteger(label: 'page' | 'limit', n: number): number {
 }
 
 /**
+ * Copy a field or aggregate selection, refusing blank names.
+ *
+ * @throws {@link QueryError} when a name is empty or whitespace only
+ */
+function selection(method: string, resource: string, names: readonly string[]): readonly string[] {
+    if (names.some(name => name.trim() === '')) {
+        throw new QueryError(`${method}("${resource}") names must not be blank.`);
+    }
+
+    return [...names];
+}
+
+/**
  * Determine whether a filter document carries no conditions.
  */
 function isEmpty(document: FilterTree): boolean {
@@ -608,9 +621,14 @@ export class ApiQuery {
 
     /**
      * Request a per-resource field list (`fields[user]=name,email`).
+     *
+     * An empty list is an explicit empty selection: the toolkit then returns
+     * only the resource's fixed fields.
+     *
+     * @throws {@link QueryError} when a name is blank
      */
     fieldsFor(resource: string, names: readonly string[]): ApiQuery {
-        const fieldsMap = { ...this.#state.fieldsMap, [resource]: [...names] };
+        const fieldsMap = { ...this.#state.fieldsMap, [resource]: selection('fieldsFor', resource, names) };
 
         return new ApiQuery({ ...this.#state, fieldsMap });
     }
@@ -623,12 +641,14 @@ export class ApiQuery {
      * `{relation}_exists`, `{relation}_sum_{column}`,
      * `{relation}_avg_{column}`, `{relation}_min_{column}`,
      * `{relation}_max_{column}`, or a declared alias. Requesting any key
-     * replaces the type's default aggregates. The values render under the
-     * record's `aggregates` field only when `aggregates` is in `fields[type]`
-     * or the resource's default fields.
+     * replaces the type's default aggregates, and an empty list suppresses
+     * them. The values render under the record's `aggregates` field only when
+     * `aggregates` is in `fields[type]` or the resource's default fields.
+     *
+     * @throws {@link QueryError} when a key is blank
      */
     aggregatesFor(resource: string, keys: readonly string[]): ApiQuery {
-        const aggregatesMap = { ...this.#state.aggregatesMap, [resource]: [...keys] };
+        const aggregatesMap = { ...this.#state.aggregatesMap, [resource]: selection('aggregatesFor', resource, keys) };
 
         return new ApiQuery({ ...this.#state, aggregatesMap });
     }
