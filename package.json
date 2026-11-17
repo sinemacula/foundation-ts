@@ -326,6 +326,7 @@
         "fmt": "qlty fmt",
         "smells": "qlty smells",
         "deadcode": "knip",
+        "smoke:node": "node smoke/node/run.mjs",
         "smoke:react-native": "npm ci --prefix smoke/react-native && node smoke/react-native/run.mjs",
         "api:report": "npm run build && node scripts/api-report.mjs",
         "api:check": "npm run build && node scripts/api-report.mjs --check",

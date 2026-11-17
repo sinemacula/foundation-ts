@@ -14,8 +14,15 @@ const sourceEntries = Object.values(manifest.exports).map(({ default: target }) 
 );
 
 const config: KnipConfig = {
-    entry: [...sourceEntries, 'src/**/*.test.ts', 'test/**/*.test.ts', 'stryker.config.json', 'scripts/*.mjs'],
-    project: ['src/**/*.ts', 'test/**/*.ts', 'scripts/**/*.mjs'],
+    entry: [
+        ...sourceEntries,
+        'src/**/*.test.ts',
+        'test/**/*.test.ts',
+        'stryker.config.json',
+        'scripts/*.mjs',
+        'smoke/*/run.mjs',
+    ],
+    project: ['src/**/*.ts', 'test/**/*.ts', 'scripts/**/*.mjs', 'smoke/**/*.{js,mjs}'],
     ignoreBinaries: ['qlty'],
     ignoreExportsUsedInFile: true,
 };

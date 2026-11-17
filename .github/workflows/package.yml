@@ -1,0 +1,71 @@
+# ==============================================================================
+# PACKAGE
+# ==============================================================================
+# Lints the packed tarball, imports and type-checks it from a scratch consumer,
+# and compares the public API with the committed report.
+# ==============================================================================
+name: Package
+
+# ==============================================================================
+# TRIGGERS
+# ==============================================================================
+on:
+    push:
+        branches: [ master ]
+    pull_request:
+        types: [ opened, synchronize, reopened, ready_for_review ]
+    workflow_dispatch:
+
+# ==============================================================================
+# CONCURRENCY
+# ==============================================================================
+concurrency:
+    group: package-${{ github.event.pull_request.number || github.ref }}
+    cancel-in-progress: true
+
+# ==============================================================================
+# PERMISSIONS
+# ==============================================================================
+permissions:
+    contents: read
+
+# ==============================================================================
+# DEFAULTS
+# ==============================================================================
+defaults:
+    run:
+        shell: bash
+
+jobs:
+
+    # ==========================================================================
+    # JOB: PACKAGE CHECKS
+    # ==========================================================================
+    package:
+        name: Package checks
+        runs-on: ubuntu-latest
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v7
+                with:
+                    persist-credentials: false
+
+            # The engines floor, so the packed output is proven on the oldest supported Node.
+            -   name: Setup Node.js
+                uses: actions/setup-node@v7
+                with:
+                    node-version: '22'
+                    cache: npm
+
+            -   name: Install dependencies
+                run: npm ci
+
+            -   name: Lint the packed tarball
+                run: npm run check:pkg
+
+            -   name: Import and type-check the packed tarball
+                run: npm run smoke:node
+
+            -   name: Compare the public API with the report
+                run: npm run api:check
