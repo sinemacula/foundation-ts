@@ -116,6 +116,8 @@ const query = ApiQuery.create()
   aggregates.
 - `$`-prefixed field or relation names, non-finite numbers, blank field or aggregate names, and a page or limit that
   is not a positive integer throw a `QueryError`.
+- `ResourceClient` percent-encodes each `/`-separated id segment and rejects an id with an empty, `.` or `..` segment
+  before sending a request.
 - `ResourceClient.list` returns the mapped `items`, `meta` (`{ mode: 'length-aware', total, count, hasMore }`,
   `{ mode: 'cursor', hasMore }`, or `null`), the pagination `links`, and `nextCursor` / `prevCursor` read from them.
 
