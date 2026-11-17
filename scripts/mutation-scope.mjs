@@ -13,7 +13,11 @@ import { readFileSync } from 'node:fs';
 import { minimatch } from 'minimatch';
 
 /** Source tests named after something other than the file they cover. */
-const TEST_SOURCES = [['src/http/fetch-http-client-*.test.ts', 'src/http/fetch-http-client.ts']];
+const TEST_SOURCES = [
+    ['src/app/session-http.integration.test.ts', 'src/app/wire-http-client.ts'],
+    ['src/http/fetch-http-client-*.test.ts', 'src/http/fetch-http-client.ts'],
+    ['src/http/url-search-params-surface.test.ts', 'src/http/fetch-http-client.ts'],
+];
 
 const SOURCE_TEST = /^src\/.+\.test\.ts$/;
 
