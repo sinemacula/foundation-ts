@@ -12,7 +12,8 @@ export interface KeyValueStorage {
     /**
      * Resolve the value for `key`.
      *
-     * @returns the stored value, or null when absent
+     * @returns the stored value, or null when absent; an empty string is a
+     * stored value
      */
     get(key: string): string | null;
 

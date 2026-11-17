@@ -8,6 +8,15 @@
 import { describe, expect, it } from 'vitest';
 
 import { InProcessSessionLock } from './in-process-session-lock';
+import { describeSessionLockContract } from './test-support/session-lock-contract';
+
+describeSessionLockContract({
+    create: () => {
+        const lock = new InProcessSessionLock();
+
+        return () => lock;
+    },
+});
 
 describe('InProcessSessionLock', () => {
     it('runs each task once the tasks started before it have settled', async () => {

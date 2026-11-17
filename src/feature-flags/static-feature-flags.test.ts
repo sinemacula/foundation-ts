@@ -5,11 +5,21 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, expectTypeOf, it, vi } from 'vitest';
 
+import type { FeatureFlags, FlagValue } from './feature-flags';
 import { StaticFeatureFlags } from './static-feature-flags';
+import { describeFeatureFlagsContract } from './test-support/feature-flags-contract';
 
 describe('StaticFeatureFlags', () => {
+    describeFeatureFlagsContract({
+        create(initial) {
+            const flags = new StaticFeatureFlags(initial);
+
+            return { flags, change: next => flags.replace(next) };
+        },
+    });
+
     describe('constructor', () => {
         it('defaults to an empty flag set', () => {
             const flags = new StaticFeatureFlags();
@@ -24,57 +34,54 @@ describe('StaticFeatureFlags', () => {
         });
     });
 
-    describe('isEnabled', () => {
-        it.each([true, false])('returns a stored %s', stored => {
-            expect(new StaticFeatureFlags({ 'feat-a': stored }).isEnabled('feat-a')).toBe(stored);
+    describe('variant types', () => {
+        const flags = new StaticFeatureFlags({ flag: 'a' });
+        const port: FeatureFlags = flags;
+        const mixed = 'a' as 0 | 'a';
+
+        it('widens a literal fallback to its primitive type', () => {
+            expectTypeOf(port.variant('flag', 'a')).toEqualTypeOf<string>();
+            expectTypeOf(port.variant('flag', 1)).toEqualTypeOf<number>();
+            expectTypeOf(port.variant('flag', true)).toEqualTypeOf<boolean>();
+            expectTypeOf(flags.variant('flag', 'a')).toEqualTypeOf<string>();
+            expectTypeOf(flags.variant('flag', 1)).toEqualTypeOf<number>();
+            expectTypeOf(flags.variant('flag', true)).toEqualTypeOf<boolean>();
         });
 
-        it('returns false for an absent flag', () => {
-            const flags = new StaticFeatureFlags();
-
-            expect(flags.isEnabled('missing')).toBe(false);
+        it('compares a resolved variant with any other literal', () => {
+            expect(port.variant('flag', 'b') === 'a').toBe(true);
+            expect(flags.variant('flag', 'b') === 'c').toBe(false);
         });
 
-        it('returns a custom fallback for an absent flag', () => {
-            const flags = new StaticFeatureFlags();
+        it('widens a mixed fallback to FlagValue', () => {
+            const anyValue = 0 as FlagValue;
 
-            expect(flags.isEnabled('missing', true)).toBe(true);
+            expectTypeOf(port.variant('flag', mixed)).toEqualTypeOf<FlagValue>();
+            expectTypeOf(port.variant('flag', anyValue)).toEqualTypeOf<FlagValue>();
+            expectTypeOf(flags.variant('flag', mixed)).toEqualTypeOf<FlagValue>();
+            expectTypeOf(flags.variant('flag', anyValue)).toEqualTypeOf<FlagValue>();
         });
 
-        it('returns the fallback for a string value', () => {
-            const flags = new StaticFeatureFlags({ 'variant-flag': 'blue' });
+        it('does not narrow a mixed fallback from the assignment target', () => {
+            // @ts-expect-error a mixed fallback resolves to FlagValue
+            const fromPort: 0 | 'a' = port.variant('flag', mixed);
+            // @ts-expect-error a mixed fallback resolves to FlagValue
+            const fromAdapter: 0 | 'a' = flags.variant('flag', mixed);
 
-            expect(flags.isEnabled('variant-flag')).toBe(false);
+            expect([fromPort, fromAdapter]).toStrictEqual(['a', 'a']);
         });
 
-        it('returns the fallback for a number value', () => {
-            const flags = new StaticFeatureFlags({ 'numeric-flag': 42 });
-
-            expect(flags.isEnabled('numeric-flag', true)).toBe(true);
-        });
-    });
-
-    describe('variant', () => {
-        it.each([
-            ['string', 'checkout-v2', 'checkout-v1'],
-            ['number', 100, 0],
-            ['boolean', true, false],
-        ])('returns a stored %s matching the fallback type', (_, stored, fallback) => {
-            expect(new StaticFeatureFlags({ flag: stored }).variant('flag', fallback)).toBe(stored);
+        it('narrows to an explicit type argument', () => {
+            expectTypeOf(port.variant<'a' | 'b'>('flag', 'b')).toEqualTypeOf<'a' | 'b'>();
+            expectTypeOf(flags.variant<'a' | 'b'>('flag', 'b')).toEqualTypeOf<'a' | 'b'>();
+            expect(port.variant<'a' | 'b'>('flag', 'b')).toBe('a');
         });
 
-        it('returns the fallback for an absent key', () => {
-            const flags = new StaticFeatureFlags();
-
-            expect(flags.variant('missing', 'default')).toBe('default');
-        });
-
-        it.each([
-            ['string', 'number', 'many', 0],
-            ['number', 'string', 42, 'default'],
-            ['boolean', 'string', true, 'default'],
-        ])('returns the fallback for a stored %s against a %s fallback', (_, _type, stored, fallback) => {
-            expect(new StaticFeatureFlags({ flag: stored }).variant('flag', fallback)).toBe(fallback);
+        it('rejects a fallback outside an explicit type argument', () => {
+            // @ts-expect-error 'c' is not one of the declared variants
+            expect(port.variant<'a' | 'b'>('missing', 'c')).toBe('c');
+            // @ts-expect-error 'c' is not one of the declared variants
+            expect(flags.variant<'a' | 'b'>('missing', 'c')).toBe('c');
         });
     });
 
@@ -98,55 +105,45 @@ describe('StaticFeatureFlags', () => {
         });
     });
 
-    describe('onChange', () => {
-        it('notifies a handler on replace', () => {
-            const flags = new StaticFeatureFlags();
+    describe('throwing handlers', () => {
+        it('reports the error and still runs later handlers against the new flags', () => {
+            const error = new Error('handler failed');
+            const onError = vi.fn();
+            const flags = new StaticFeatureFlags({ feat: false }, { onError });
+            const seen: boolean[] = [];
+
+            flags.onChange(() => {
+                throw error;
+            });
+            flags.onChange(() => seen.push(flags.isEnabled('feat')));
+
+            expect(() => flags.replace({ feat: true })).not.toThrow();
+            expect(seen).toStrictEqual([true]);
+            expect(flags.isEnabled('feat')).toBe(true);
+            expect(onError).toHaveBeenCalledExactlyOnceWith(error);
+        });
+
+        it.each([
+            ['no sink', {}],
+            [
+                'a throwing sink',
+                {
+                    onError: () => {
+                        throw new Error('sink failed');
+                    },
+                },
+            ],
+        ])('contains the failure with %s', (_, options) => {
+            const flags = new StaticFeatureFlags({}, options);
             const handler = vi.fn();
 
+            flags.onChange(() => {
+                throw new Error('handler failed');
+            });
             flags.onChange(handler);
-            flags.replace({ 'new-flag': true });
 
+            expect(() => flags.replace({ feat: true })).not.toThrow();
             expect(handler).toHaveBeenCalledOnce();
-        });
-
-        it('notifies every handler on replace', () => {
-            const flags = new StaticFeatureFlags();
-            const handlerA = vi.fn();
-            const handlerB = vi.fn();
-
-            flags.onChange(handlerA);
-            flags.onChange(handlerB);
-            flags.replace({});
-
-            expect(handlerA).toHaveBeenCalledOnce();
-            expect(handlerB).toHaveBeenCalledOnce();
-        });
-
-        it('stops notifying after unsubscribe', () => {
-            const flags = new StaticFeatureFlags();
-            const handler = vi.fn();
-
-            const unsubscribe = flags.onChange(handler);
-
-            unsubscribe();
-            flags.replace({ after: true });
-
-            expect(handler).not.toHaveBeenCalled();
-        });
-
-        it('leaves other subscribers intact after one unsubscribes', () => {
-            const flags = new StaticFeatureFlags();
-            const handlerA = vi.fn();
-            const handlerB = vi.fn();
-
-            const unsubscribeA = flags.onChange(handlerA);
-
-            flags.onChange(handlerB);
-            unsubscribeA();
-            flags.replace({});
-
-            expect(handlerA).not.toHaveBeenCalled();
-            expect(handlerB).toHaveBeenCalledOnce();
         });
     });
 

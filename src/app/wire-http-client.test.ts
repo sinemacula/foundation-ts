@@ -9,7 +9,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FetchHttpClient } from '../http/fetch-http-client';
 import type { HttpClient, HttpRequest, RequestInterceptor, UnauthorizedHandler } from '../http/http-client';
-import { HttpError, HttpValidationError, NetworkError } from '../http/http-error';
+import {
+    CancelledError,
+    HttpError,
+    HttpValidationError,
+    MaintenanceError,
+    NetworkError,
+    ResponseParseError,
+    TimeoutError,
+} from '../http/http-error';
 import type { ModuleHttpContributions } from '../http/module-http-contributions';
 import type { Toaster } from '../notifications/toaster';
 import type { ErrorReporter } from '../reporting/error-reporter';
@@ -137,6 +145,155 @@ function jsonOk(): Response {
     return new Response('{"ok":true}', { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
+/**
+ * Build a JSON response with the given status and body.
+ */
+function jsonResponse(status: number, body: unknown): Response {
+    return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+/** A fetch fake that settles only through its request's abort signal. */
+interface AbortHonouringFetch extends FetchStub {
+    /** Resolves once a request is in flight with its abort listener attached. */
+    readonly requested: Promise<void>;
+}
+
+/**
+ * Build a fetch fake that never responds and, like a real fetch, rejects with
+ * an AbortError once the request's signal has aborted, recording every init.
+ */
+function createAbortHonouringFetch(): AbortHonouringFetch {
+    const urls: string[] = [];
+    const inits: (RequestInit | undefined)[] = [];
+
+    /** Signal that a request is in flight; replaced by the promise below. */
+    let markRequested = (): void => undefined;
+    const requested = new Promise<void>(resolve => {
+        markRequested = resolve;
+    });
+
+    /**
+     * Record the call and settle only when its signal aborts.
+     */
+    const fetchFn: typeof fetch = (input, init) => {
+        urls.push(String(input));
+        inits.push(init);
+
+        return new Promise<Response>((_, reject) => {
+            /** Reject the way fetch does for an aborted request. */
+            const abort = (): void => {
+                reject(new DOMException('This operation was aborted', 'AbortError'));
+            };
+
+            if (init?.signal?.aborted === true) {
+                abort();
+            }
+
+            init?.signal?.addEventListener('abort', abort);
+            markRequested();
+        });
+    };
+
+    return { fetchFn, urls, inits, requested };
+}
+
+/**
+ * Resolve with the rejection reason of a request, failing if it resolves.
+ */
+function rejectionOf(request: Promise<unknown>): Promise<unknown> {
+    return request.then(
+        () => {
+            throw new Error('expected the request to reject');
+        },
+        (error: unknown) => error,
+    );
+}
+
+/** The toast key every default-policy test arms. */
+const TOAST_KEY = 'app.errors.unexpected';
+
+/** One server response routed through the default policy, and its outcome. */
+interface PolicyCase {
+    /** What the server sent, for the test title. */
+    readonly response: string;
+
+    /** Build the server response. */
+    readonly respond: () => Response;
+
+    /** The error class the request rejects with. */
+    readonly type: new (
+        ...args: never[]
+    ) => Error;
+
+    /** The rejection's identifying properties. */
+    readonly expected: Readonly<Record<string, unknown>>;
+
+    /** Whether the default policy toasts and reports the failure. */
+    readonly notified: boolean;
+}
+
+const validationEnvelope = {
+    error: {
+        status: 422,
+        code: 10106,
+        title: 'Invalid Input',
+        detail: 'The given data was invalid.',
+        meta: { email: ['The email field is required.'] },
+    },
+};
+
+const policyCases: readonly PolicyCase[] = [
+    {
+        response: 'a 422 invalid-input envelope',
+        respond: () => jsonResponse(422, validationEnvelope),
+        type: HttpValidationError,
+        expected: {
+            status: 422,
+            message: 'The given data was invalid.',
+            code: 10106,
+            errors: { email: ['The email field is required.'] },
+        },
+        notified: false,
+    },
+    {
+        response: 'a 401 envelope without a refresh handler',
+        respond: () =>
+            jsonResponse(401, {
+                error: { status: 401, code: 10101, title: 'Unauthenticated', detail: 'Unauthenticated.' },
+            }),
+        type: HttpError,
+        expected: { name: 'HttpError', status: 401, message: 'Unauthenticated.', code: 10101 },
+        notified: false,
+    },
+    {
+        response: 'a 503 maintenance envelope',
+        respond: () =>
+            jsonResponse(503, {
+                error: { status: 503, code: 10200, title: 'Maintenance', detail: 'Back soon.' },
+            }),
+        type: MaintenanceError,
+        expected: { status: 503, message: 'Back soon.', code: 10200 },
+        notified: true,
+    },
+    {
+        response: 'a 200 HTML page served as JSON',
+        respond: () => new Response('<html>', { status: 200, headers: { 'content-type': 'application/json' } }),
+        type: ResponseParseError,
+        expected: {
+            status: 200,
+            message: 'GET https://api.example.com/items returned a JSON body that could not be parsed.',
+        },
+        notified: true,
+    },
+    {
+        response: 'a 500 plain message body',
+        respond: () => jsonResponse(500, { message: 'Server Error' }),
+        type: HttpError,
+        expected: { name: 'HttpError', status: 500, message: 'Server Error', code: null },
+        notified: true,
+    },
+];
+
 /** A fetch seam for tests whose client must never issue a request. */
 const failingFetch: typeof fetch = () => Promise.reject(new Error('fetch must not run in this test'));
 
@@ -226,6 +383,23 @@ describe('wireHttpClient', () => {
 
             expect(client).toBeInstanceOf(FetchHttpClient);
             expect(api()).toBe(client);
+        });
+
+        it('rejects a timeout above the timer maximum and installs no client', () => {
+            const config: FoundationConfig = {
+                ...createConfig(),
+                api: { baseUrl: 'https://api.example.com', timeout: Infinity },
+            };
+
+            /**
+             * Wire the client over the out-of-range configuration.
+             */
+            const wire = (): HttpClient =>
+                wireHttpClient({ config, fetchFn: failingFetch, contributions: createContributions() });
+
+            expect(wire).toThrow(RangeError);
+            expect(wire).toThrow('The request timeout must be at most 2147483647 ms; pass zero or less for none.');
+            expect(() => api()).toThrow('http client accessed before initialisation');
         });
 
         it('sends requests to the base URL through the fetch seam with a timeout signal', async () => {
@@ -341,6 +515,116 @@ describe('wireHttpClient', () => {
                 method: 'GET',
                 url: 'https://api.example.com/boom',
             });
+        });
+    });
+
+    describe('default policy over server responses', () => {
+        it.each(policyCases)(
+            'rejects $response with the decoded error and notifies only when expected',
+            async ({ respond, type, expected, notified }) => {
+                const toaster = createRecordingToaster();
+                const reporter = createRecordingReporter();
+
+                installToasts(toaster);
+                installReporting(reporter);
+
+                const client = wireHttpClient({
+                    config: createConfig(),
+                    fetchFn: createFetchStub(respond).fetchFn,
+                    contributions: createContributions(),
+                    unexpectedErrorToastKey: TOAST_KEY,
+                });
+
+                const error = await rejectionOf(client.get('items'));
+
+                expect(error).toBeInstanceOf(type);
+                expect(error).toMatchObject(expected);
+                expect(toaster.recorded).toStrictEqual(notified ? [{ variant: 'error', message: TOAST_KEY }] : []);
+                expect(reporter.captured.map(captured => captured.error)).toStrictEqual(notified ? [error] : []);
+            },
+        );
+
+        it('stays silent when the caller aborts a request in flight', async () => {
+            const toaster = createRecordingToaster();
+            const reporter = createRecordingReporter();
+
+            installToasts(toaster);
+            installReporting(reporter);
+
+            const controller = new AbortController();
+            const hanging = createAbortHonouringFetch();
+            const client = wireHttpClient({
+                config: createConfig(),
+                fetchFn: hanging.fetchFn,
+                contributions: createContributions(),
+                unexpectedErrorToastKey: TOAST_KEY,
+            });
+
+            const pending = rejectionOf(client.get('items', { signal: controller.signal }));
+
+            await hanging.requested;
+            controller.abort();
+
+            const error = await pending;
+
+            expect(error).toBeInstanceOf(CancelledError);
+            expect(error).toHaveProperty('message', 'GET https://api.example.com/items was cancelled.');
+            expect(toaster.recorded).toStrictEqual([]);
+            expect(reporter.captured).toStrictEqual([]);
+        });
+    });
+
+    describe('configured request timeout', () => {
+        afterEach(() => {
+            vi.useRealTimers();
+        });
+
+        it('times a hanging request out at config.api.timeout, then toasts and reports it once', async () => {
+            vi.useFakeTimers();
+
+            const toaster = createRecordingToaster();
+            const reporter = createRecordingReporter();
+
+            installToasts(toaster);
+            installReporting(reporter);
+
+            const client = wireHttpClient({
+                config: { ...createConfig(), api: { baseUrl: 'https://api.example.com', timeout: 50 } },
+                fetchFn: createAbortHonouringFetch().fetchFn,
+                contributions: createContributions(),
+                unexpectedErrorToastKey: TOAST_KEY,
+            });
+
+            let settled = false;
+            const pending = rejectionOf(client.get('items')).finally(() => {
+                settled = true;
+            });
+
+            await vi.advanceTimersByTimeAsync(49);
+
+            expect(settled).toBe(false);
+
+            await vi.advanceTimersByTimeAsync(1);
+
+            const error = await pending;
+
+            expect(error).toBeInstanceOf(TimeoutError);
+            expect(error).toHaveProperty('message', 'GET https://api.example.com/items timed out after 50ms.');
+            expect(toaster.recorded).toStrictEqual([{ variant: 'error', message: TOAST_KEY }]);
+            expect(reporter.captured.map(captured => captured.error)).toStrictEqual([error]);
+        });
+
+        it('sends no abort signal when the timeout is zero', async () => {
+            const stub = createFetchStub(() => jsonOk());
+            const client = wireHttpClient({
+                config: { ...createConfig(), api: { baseUrl: 'https://api.example.com', timeout: 0 } },
+                fetchFn: stub.fetchFn,
+                contributions: createContributions(),
+            });
+
+            await client.get('items');
+
+            expect(stub.inits[0]?.signal).toBeNull();
         });
     });
 

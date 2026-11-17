@@ -13,7 +13,7 @@ export interface SessionRoutes<L> {
     /** Where unauthenticated visitors are sent. */
     readonly login: L;
 
-    /** The login-path prefix the redirect sanitiser rejects as a loop guard; set it with `login`. */
+    /** The path the redirect sanitiser's loop guard rejects, with every path under it; `/` rejects all. Set it with `login`. */
     readonly loginPath: string;
 
     /** Where authenticated visitors leaving guest-only routes are sent. */

@@ -5,9 +5,14 @@
  * @copyright   2026 Sine Macula Limited
  */
 
+import { getEventListeners } from 'node:events';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ExponentialBackoff } from '../realtime/exponential-backoff';
 import { FetchHttpClient } from './fetch-http-client';
+import type { FetchHttpClientOptions } from './fetch-http-client';
+import type { HttpRequest } from './http-client';
 import { CancelledError, HttpError, NetworkError, ResponseParseError, TimeoutError } from './http-error';
 
 /** The fetch call signature, so mock.calls carries a typed tuple. */
@@ -18,6 +23,45 @@ type FetchStub = ReturnType<typeof vi.fn<(...args: FetchArgs) => Promise<Respons
 
 /** A constructor of the error type a rejection is expected to have. */
 type ErrorType<E extends Error> = new (...args: never[]) => E;
+
+/** A promise plus its externally callable settlers. */
+interface Deferred<T> {
+    /** The controlled promise. */
+    readonly promise: Promise<T>;
+
+    /** Settle the promise successfully. */
+    readonly resolve: (value: T) => void;
+}
+
+/**
+ * Create a promise whose resolution the test controls.
+ */
+function deferred<T>(): Deferred<T> {
+    let resolve!: (value: T) => void;
+
+    const promise = new Promise<T>(resolveValue => {
+        resolve = resolveValue;
+    });
+
+    return { promise, resolve };
+}
+
+/**
+ * Settle a request to a plain outcome label, so a rejection is always handled.
+ */
+function outcomeOf(promise: Promise<unknown>): Promise<'resolved' | 'rejected'> {
+    return promise.then(
+        () => 'resolved',
+        () => 'rejected',
+    );
+}
+
+/**
+ * Report the abort listeners still attached to a signal.
+ */
+function abortListeners(signal: AbortSignal): unknown[] {
+    return getEventListeners(signal, 'abort');
+}
 
 /**
  * Build a JSON response.
@@ -177,6 +221,48 @@ describe('FetchHttpClient - abort signal resolution', () => {
     });
 });
 
+describe('FetchHttpClient - timeout bounds', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it.each([Infinity, 2_147_483_648, Number.NaN])('rejects a timeout of %d at construction', timeout => {
+        let failure: unknown;
+
+        try {
+            makeClient(makeFetch(hangUntilAborted), { timeout });
+        } catch (error) {
+            failure = error;
+        }
+
+        expect(failure).toBeInstanceOf(RangeError);
+        expect((failure as RangeError).message).toBe(
+            'The request timeout must be at most 2147483647 ms; pass zero or less for none.',
+        );
+    });
+
+    it('times out after exactly the largest timer delay', async () => {
+        const client = makeClient(makeFetch(hangUntilAborted), { timeout: 2_147_483_647 });
+        let settled = false;
+
+        const pending = rejectionOf(client.get('/items'), TimeoutError).finally(() => {
+            settled = true;
+        });
+
+        await vi.advanceTimersByTimeAsync(2_147_483_646);
+        expect(settled).toBe(false);
+
+        await vi.advanceTimersByTimeAsync(1);
+
+        expect((await pending).message).toBe('GET https://api.example.com/items timed out after 2147483647ms.');
+        expect(vi.getTimerCount()).toBe(0);
+    });
+});
+
 describe('FetchHttpClient - request timeout', () => {
     beforeEach(() => {
         vi.useFakeTimers();
@@ -246,13 +332,14 @@ describe('FetchHttpClient - request timeout', () => {
         expect(onResponseError).not.toHaveBeenCalled();
     });
 
-    it('rejects with a CancelledError when the caller signal had already aborted', async () => {
+    it('rejects with a CancelledError and never fetches when the caller signal had already aborted', async () => {
         const fetchFn = makeFetch(hangUntilAborted);
         const client = makeClient(fetchFn, { timeout: 5_000 });
 
         await rejectionOf(client.get('/items', { signal: AbortSignal.abort() }), CancelledError);
 
-        expect(lastSignal(fetchFn)?.aborted).toBe(true);
+        expect(fetchFn).not.toHaveBeenCalled();
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it('keeps a caller abort a CancelledError when the timeout elapses before fetch settles', async () => {
@@ -479,5 +566,138 @@ describe('FetchHttpClient - cancellation during retry backoff', () => {
 
         await expect(pending).resolves.toStrictEqual({ recovered: true });
         expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+    });
+});
+
+describe('FetchHttpClient - listener and timer release', () => {
+    let fetchCalls = 0;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+        fetchCalls = 0;
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    it.each<readonly [string, () => Promise<Response>, Partial<FetchHttpClientOptions>]>([
+        ['a success', async () => jsonResponse({ ok: true }), {}],
+        ['a 422', async () => jsonResponse({ error: { status: 422, code: 10106, title: 'Invalid' } }, 422), {}],
+        [
+            'a 503 with retries exhausted',
+            async () => jsonResponse({}, 503),
+            {
+                retry: {
+                    attempts: 1,
+                    backoff: new ExponentialBackoff({ initialDelay: 10, multiplier: 1, maxDelay: 10 }),
+                },
+            },
+        ],
+        ['a network rejection', () => Promise.reject(new TypeError('Failed to fetch')), {}],
+        [
+            'an invalid JSON body',
+            async () => new Response('{', { status: 200, headers: { 'content-type': 'application/json' } }),
+            {},
+        ],
+        ['a timeout', failAfterTenSeconds, {}],
+        [
+            'a 401 refreshed into a success',
+            () => {
+                fetchCalls += 1;
+
+                return Promise.resolve(
+                    fetchCalls % 2 === 1 ? new Response('', { status: 401 }) : jsonResponse({ ok: true }),
+                );
+            },
+            { onUnauthorized: () => Promise.resolve(true) },
+        ],
+        [
+            'a 401 whose handler rejects',
+            async () => new Response('', { status: 401 }),
+            { onUnauthorized: () => Promise.reject(new Error('refresh failed')) },
+        ],
+        [
+            'an async interceptor',
+            async () => jsonResponse({ ok: true }),
+            { requestInterceptors: [async (request: HttpRequest) => Promise.resolve(request)] },
+        ],
+        [
+            'a rejecting interceptor',
+            async () => jsonResponse({ ok: true }),
+            { requestInterceptors: [() => Promise.reject(new Error('interceptor failed'))] },
+        ],
+    ])('releases the caller signal and every timer after %s', async (_case, fetchImpl, extra) => {
+        const caller = new AbortController();
+        const client = makeClient(makeFetch(fetchImpl), { timeout: 1_000, ...extra });
+
+        for (let run = 0; run < 3; run += 1) {
+            const outcome = outcomeOf(client.get('/items', { signal: caller.signal }));
+
+            await vi.advanceTimersByTimeAsync(10_000);
+            await outcome;
+
+            expect(abortListeners(caller.signal)).toStrictEqual([]);
+            expect(vi.getTimerCount()).toBe(0);
+        }
+    });
+
+    it('releases the caller signal and every timer when the caller aborts the body read', async () => {
+        const caller = new AbortController();
+        const fetchFn = makeFetch(async (_input, init) =>
+            streamedResponse(controller => {
+                const signal = init?.signal;
+
+                /**
+                 * Fail the body with the abort reason and stop listening.
+                 */
+                const fail = (): void => {
+                    signal?.removeEventListener('abort', fail);
+                    controller.error(signal?.reason);
+                };
+
+                signal?.addEventListener('abort', fail);
+            }),
+        );
+        const client = makeClient(fetchFn, { timeout: 1_000 });
+
+        const pending = rejectionOf(client.get('/items', { signal: caller.signal }), CancelledError);
+
+        await vi.advanceTimersByTimeAsync(10);
+        caller.abort();
+        await pending;
+
+        expect(abortListeners(caller.signal)).toStrictEqual([]);
+        expect(vi.getTimerCount()).toBe(0);
+    });
+
+    it.each<readonly [string, (gate: Promise<undefined>) => Partial<FetchHttpClientOptions>]>([
+        [
+            'an interceptor',
+            gate => ({
+                requestInterceptors: [async (request: HttpRequest) => gate.then(() => request)],
+            }),
+        ],
+        ['the unauthorized handler', gate => ({ onUnauthorized: () => gate.then(() => true) })],
+    ])('releases the caller signal at once when the caller aborts while %s is pending', async (_case, options) => {
+        const gate = deferred<undefined>();
+        const caller = new AbortController();
+        const client = makeClient(
+            makeFetch(async () => new Response('', { status: 401 })),
+            { timeout: 1_000, ...options(gate.promise) },
+        );
+
+        try {
+            const pending = rejectionOf(client.get('/items', { signal: caller.signal }), CancelledError);
+
+            await vi.advanceTimersByTimeAsync(10);
+            caller.abort();
+            await pending;
+
+            expect(abortListeners(caller.signal)).toStrictEqual([]);
+            expect(vi.getTimerCount()).toBe(0);
+        } finally {
+            gate.resolve(undefined);
+        }
     });
 });

@@ -7,11 +7,13 @@
  */
 
 /**
- * Runs tasks one at a time across every context sharing the lock.
+ * Runs tasks one at a time across every context sharing the lock. Not
+ * re-entrant: a task that waits on another run of the same lock never settles.
  */
 export interface SessionLock {
     /**
-     * Run the task once every task started before it has settled.
+     * Run the task once every task started before it has settled, handing back
+     * its value, or its failure whether it rejects or throws.
      *
      * @param task - the task to run while holding the lock
      */

@@ -12,11 +12,13 @@ import { InProcessSessionLock } from './in-process-session-lock';
 import { SessionError } from './session-error';
 import type { SessionLock } from './session-lock';
 import type {
+    PersistedSession,
     SessionClearResult,
     SessionPersistence,
     SessionSaveResult,
     SessionSnapshot,
     SessionSnapshotChanged,
+    SessionVersion,
 } from './session-persistence';
 import { DEFAULT_SESSION_STORAGE_KEYS } from './session-storage-keys';
 import type { SessionTokens } from './session-tokens';
@@ -43,10 +45,12 @@ interface Written<S extends 'saved' | 'cleared'> {
     readonly revision: number;
 }
 
-const EMPTY: SessionSnapshot = { revision: 0, tokens: null };
+const EMPTY: SessionSnapshot = { revision: 0, session: null };
 
 /**
- * Persist the session snapshot in a key-value storage adapter.
+ * Persist the session snapshot in a key-value storage adapter as one JSON
+ * value, `{ revision, session: { lineage, tokens } }`, with a null `session`
+ * once cleared.
  *
  * The storage must throw when it cannot read or write: a storage that swallows
  * failures would report a lost write as saved and an unreadable session as
@@ -80,31 +84,32 @@ export class KeyValueSessionPersistence implements SessionPersistence {
     }
 
     /**
-     * Persist the tokens at the next revision when the snapshot is still at the
-     * expected one.
+     * Persist the session at the next revision when the snapshot is still at
+     * the expected version.
      */
-    saveIf(expectedRevision: number, tokens: SessionTokens): Promise<SessionSaveResult> {
-        return this.#writeIf(expectedRevision, tokens, 'saved');
+    saveIf(expected: SessionVersion, session: PersistedSession): Promise<SessionSaveResult> {
+        return this.#writeIf(expected, session, 'saved');
     }
 
     /**
      * Store an empty snapshot at the next revision when the snapshot is still
-     * at the expected one.
+     * at the expected version.
      */
-    clearIf(expectedRevision: number): Promise<SessionClearResult> {
-        return this.#writeIf(expectedRevision, null, 'cleared');
+    clearIf(expected: SessionVersion): Promise<SessionClearResult> {
+        return this.#writeIf(expected, null, 'cleared');
     }
 
     /**
-     * Write the tokens at the next revision, while holding the lock, when the
-     * snapshot is still at the expected revision.
+     * Write the session at the next revision, while holding the lock, when the
+     * snapshot is still at the expected version.
      *
-     * @param tokens - the tokens to write, or null to clear
+     * @param session - the session to write, or null to clear
      * @param status - the status a successful write reports
+     * @throws {@link SessionError} when the revision cannot grow any further
      */
     #writeIf<S extends 'saved' | 'cleared'>(
-        expectedRevision: number,
-        tokens: SessionTokens | null,
+        expected: SessionVersion,
+        session: PersistedSession | null,
         status: S,
     ): Promise<Written<S> | SessionSnapshotChanged> {
         return this.#lock.run(
@@ -112,7 +117,7 @@ export class KeyValueSessionPersistence implements SessionPersistence {
                 new Promise(resolve => {
                     const current = this.#read(parseOrEmpty);
 
-                    if (current.revision !== expectedRevision) {
+                    if (current.revision !== expected.revision || lineageOf(current) !== expected.lineage) {
                         resolve({ status: 'changed', current });
 
                         return;
@@ -120,7 +125,11 @@ export class KeyValueSessionPersistence implements SessionPersistence {
 
                     const revision = current.revision + 1;
 
-                    this.#storage.set(this.#key, JSON.stringify({ revision, tokens }));
+                    if (!Number.isSafeInteger(revision)) {
+                        throw new SessionError('The persisted session revision cannot grow any further.');
+                    }
+
+                    this.#storage.set(this.#key, serialise(revision, session));
                     resolve({ status, revision });
                 }),
         );
@@ -136,6 +145,30 @@ export class KeyValueSessionPersistence implements SessionPersistence {
 
         return raw === null ? EMPTY : parse(raw);
     }
+}
+
+/**
+ * The lineage of the snapshot's session, or null when it holds none.
+ */
+function lineageOf(snapshot: SessionSnapshot): string | null {
+    return snapshot.session?.lineage ?? null;
+}
+
+/**
+ * Serialise a snapshot with its fields in a fixed order, whatever the shape of
+ * the objects handed in.
+ */
+function serialise(revision: number, session: PersistedSession | null): string {
+    if (session === null) {
+        return JSON.stringify({ revision, session });
+    }
+
+    const { accessToken, refreshToken, expiresAtEpochMs } = session.tokens;
+
+    return JSON.stringify({
+        revision,
+        session: { lineage: session.lineage, tokens: { accessToken, refreshToken, expiresAtEpochMs } },
+    });
 }
 
 /**
@@ -157,13 +190,13 @@ function parseSnapshot(raw: string): SessionSnapshot {
     }
 
     const revision = value['revision'];
-    const tokens = value['tokens'];
+    const session = value['session'];
 
     if (!isRevision(revision)) {
         throw unreadable();
     }
 
-    return { revision, tokens: tokens === null ? null : parseTokens(tokens) };
+    return { revision, session: session === null ? null : parseSession(session) };
 }
 
 /**
@@ -175,6 +208,25 @@ function parseOrEmpty(raw: string): SessionSnapshot {
     } catch {
         return EMPTY;
     }
+}
+
+/**
+ * Parse the stored session.
+ *
+ * @throws {@link SessionError} when the value is not a session
+ */
+function parseSession(value: unknown): PersistedSession {
+    if (!isRecord(value)) {
+        throw unreadable();
+    }
+
+    const { lineage, tokens } = value;
+
+    if (typeof lineage !== 'string' || lineage === '') {
+        throw unreadable();
+    }
+
+    return { lineage, tokens: parseTokens(tokens) };
 }
 
 /**

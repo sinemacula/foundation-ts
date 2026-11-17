@@ -29,6 +29,12 @@ export type RealtimeStateHandler = (state: RealtimeState) => void;
 
 /**
  * A transport-agnostic channel for server-pushed events.
+ *
+ * Every `on` and `onStateChange` call is its own registration: a handler
+ * registered twice is called twice, and each unsubscribe removes only its own
+ * registration. A delivery reaches the handlers registered when it starts,
+ * skipping any removed meanwhile, and a throwing handler never starves the
+ * rest.
  */
 export interface RealtimeConnection {
     /** The current connection lifecycle state. */
@@ -44,21 +50,26 @@ export interface RealtimeConnection {
 
     /**
      * Close the connection and cancel any pending reconnect until the next
-     * `connect()`, which restarts the backoff.
+     * `connect()`, which restarts the backoff. A message being delivered from
+     * the released transport reaches no further handlers.
      */
     disconnect(): void;
 
     /**
      * Subscribe to messages for a specific event name.
      *
-     * @returns a function that stops further delivery to `handler`
+     * @returns a function that removes this registration
      */
     on(event: string, handler: RealtimeMessageHandler): () => void;
 
     /**
      * Subscribe to connection state changes.
      *
-     * @returns a function that stops further delivery to `handler`
+     * A transition made from inside a handler is delivered after the current
+     * one, so each call records one transition in order and `state` may already
+     * be later.
+     *
+     * @returns a function that removes this registration
      */
     onStateChange(handler: RealtimeStateHandler): () => void;
 }

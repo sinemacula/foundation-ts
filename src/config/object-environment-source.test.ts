@@ -7,6 +7,8 @@
 
 import { describe, expect, it } from 'vitest';
 
+import { ChainEnvironmentSource } from './chain-environment-source';
+import { Environment } from './environment';
 import { ObjectEnvironmentSource } from './object-environment-source';
 
 /**
@@ -45,5 +47,35 @@ describe('ObjectEnvironmentSource', () => {
         );
 
         expect(source.get('B')).toBe('2');
+    });
+
+    it.each(['constructor', 'toString', 'hasOwnProperty', '__proto__'])(
+        'returns undefined for the inherited %s',
+        key => {
+            const source = new ObjectEnvironmentSource(wire([['FOO', 'bar']]));
+
+            expect(source.get(key)).toBeUndefined();
+        },
+    );
+
+    it('returns an own constructor entry', () => {
+        const source = new ObjectEnvironmentSource(wire([['constructor', 'yes']]));
+
+        expect(source.get('constructor')).toBe('yes');
+    });
+
+    it('lets a typed reader fall back for an inherited key instead of throwing', () => {
+        const env = new Environment(new ObjectEnvironmentSource({}));
+
+        expect(env.boolean('constructor', true)).toBe(true);
+    });
+
+    it('lets a chain fall through an inherited key to a later source', () => {
+        const chain = new ChainEnvironmentSource([
+            new ObjectEnvironmentSource({}),
+            new ObjectEnvironmentSource(wire([['constructor', 'build']])),
+        ]);
+
+        expect(chain.get('constructor')).toBe('build');
     });
 });
