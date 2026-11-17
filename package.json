@@ -354,17 +354,23 @@
         "test:watch": "vitest",
         "test:coverage": "vitest run --coverage",
         "test:mutation": "stryker run",
+        "bench": "vitest bench --run",
+        "bench:baseline": "vitest bench --run --outputJson build/bench/baseline.json",
+        "bench:compare": "vitest bench --run --compare build/bench/baseline.json",
         "check": "qlty check",
         "fmt": "qlty fmt",
         "smells": "qlty smells",
         "deadcode": "knip",
+        "smoke:node": "node smoke/node/run.mjs",
         "smoke:react-native": "npm ci --prefix smoke/react-native && node smoke/react-native/run.mjs",
+        "api:report": "npm run build && node scripts/api-report.mjs",
+        "api:check": "npm run build && node scripts/api-report.mjs --check",
         "check:pkg": "rm -rf .pack && mkdir -p .pack && npm pack --pack-destination .pack --silent && publint .pack/*.tgz && attw .pack/*.tgz --profile esm-only",
         "prepare": "node scripts/build.mjs"
     },
     "devDependencies": {
         "@arethetypeswrong/cli": "^0.18.5",
-        "@sinemacula/coding-standards": "^1.30.1",
+        "@sinemacula/coding-standards": "^1.30.2",
         "@stryker-mutator/core": "^9.6.1",
         "@stryker-mutator/vitest-runner": "^9.6.1",
         "@types/node": "^25.9.3",
@@ -372,6 +378,7 @@
         "@vitest/coverage-v8": "^4.1.8",
         "fast-check": "^4.10.2",
         "knip": "^6.16.1",
+        "minimatch": "^11.0.8",
         "mkdist": "^2.4.1",
         "publint": "^0.3.21",
         "typescript": "^6.0.3",
@@ -386,7 +393,7 @@
         "qs": "^6.17.1"
     },
     "peerDependencies": {
-        "vitest": ">=3"
+        "vitest": ">=3.1"
     },
     "peerDependenciesMeta": {
         "vitest": {

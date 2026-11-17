@@ -222,7 +222,7 @@ asynchronous secure store implements `SessionPersistence` directly.
 ## Requirements
 
 - Node.js 22+
-- Vitest 3+, only for the contract suites under `*/test-support`
+- Vitest 3.1+, only for the contract suites under `*/test-support`
 
 ## Testing
 
@@ -236,8 +236,15 @@ npm run fmt                 # format via qlty
 npm run smells              # duplication / complexity smells via qlty
 npm run deadcode            # dead-code detection via knip
 npm run check:pkg           # publint + attw on the packed tarball
-npm run smoke:react-native  # load every subpath under Metro, Hermes and Jest
+npm run smoke:node          # import and type-check the packed tarball as Node16 and bundler consumers
+npm run smoke:react-native  # type-check, bundle and run the packed tarball under Metro, Hermes and Jest
+npm run api:check           # compare the public API with api/foundation.api.md
+npm run bench               # benchmark the hot paths (not gated)
 ```
+
+After a deliberate API change, run `npm run api:report` and commit the regenerated report. To compare performance, run
+`npm run bench:baseline` on `master`, switch to your branch and run `npm run bench:compare`; the baseline stays local
+in `build/bench/`, since timings only compare on the same machine.
 
 ## Changelog
 
