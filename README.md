@@ -117,14 +117,45 @@ The toolkit enforces cost caps server-side and answers a request over one with a
 
 ### Realtime
 
-`WebSocketConnection` (`realtime/web-socket-connection`) reconnects with exponential backoff after any close it did not
-initiate; `disconnect()` stops it until the next `connect()`. `beforeReconnect` skips an attempt when it resolves
-`false` or rejects:
+`WebSocketConnection` (`realtime/web-socket-connection`) reconnects after any close it did not initiate, with an
+equal-jittered `ExponentialBackoff` by default so clients dropped together do not return together. The backoff resets
+only once a socket has stayed open for `STABLE_CONNECTION_MS` (5 s), so a server that accepts and closes at once still
+sees growing delays. `disconnect()` stops reconnecting until the next `connect()`.
+
+`beforeReconnect` receives an `AbortSignal` that aborts on `disconnect()`, and skips the attempt when it resolves
+`false` or rejects. Map a classified refresh explicitly and act on its outcome only while the signal is live:
 
 ```ts
 const connection = new WebSocketConnection({
     url: () => `wss://example.test/realtime?token=${readAccessToken()}`,
-    beforeReconnect: async () => (await coordinator.refresh()).kind === 'refreshed',
+    beforeReconnect: async signal => {
+        const outcome = await coordinator.refresh();
+
+        if (signal.aborted) {
+            return false;
+        }
+
+        switch (outcome.kind) {
+            case 'refreshed':
+                return true;
+            case 'retryable':
+            case 'superseded':
+                return false;
+            case 'failed':
+                reporter.captureError(outcome.error);
+
+                if (!signal.aborted) {
+                    connection.disconnect();
+                }
+
+                return false;
+            case 'rejected':
+            case 'interactionRequired':
+                connection.disconnect();
+
+                return false;
+        }
+    },
     onError: error => reporter.captureError(error),
 });
 
@@ -133,9 +164,12 @@ connection.connect();
 ```
 
 `on('message')` receives every text frame; a `{ event, data }` envelope also reaches that event's subscribers, with a
-non-string `data` re-serialised as JSON. `onError` receives failures the connection contains (a throwing subscriber,
-`url()` builder or socket factory); the same failure inside `connect()` throws a `RealtimeError` with the original as
-its `cause`.
+non-string `data` re-serialised as JSON. Binary frames are dropped and reported to `onError`, and `send()` throws
+unless the socket is open. Each `on` / `onStateChange` call is its own registration, a delivery reaches the handlers
+registered when it started, and state changes made from a handler are delivered in order after the current one.
+`onError` receives failures the connection contains (a throwing subscriber, `url()` builder or socket factory); the
+same failure inside `connect()` throws a `RealtimeError` with the original as its `cause`. `realtime/subscribers`
+exports the registries behind these rules for other transport adapters.
 
 ### React Native
 
