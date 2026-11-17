@@ -6,7 +6,7 @@
  */
 
 import { ExponentialBackoff } from '../realtime/exponential-backoff';
-import { MAX_TIMER_DELAY } from '../support/timer';
+import { clampTimerDelay, MAX_TIMER_DELAY } from '../support/timer';
 import { stripQueryAndFragment } from '../support/url';
 import { onAbort, openAbortScope, untilAborted } from './abort-scope';
 import type { AbortScope } from './abort-scope';
@@ -39,7 +39,7 @@ export interface RetryBackoff {
      * Compute the delay before the retry that follows a failed attempt.
      *
      * @param attempt - zero-based index of the failed attempt
-     * @returns the delay in milliseconds
+     * @returns the delay in milliseconds; one above 2147483647 waits that long
      */
     delayFor(attempt: number): number;
 }
@@ -316,7 +316,7 @@ export class FetchHttpClient implements HttpClient {
      */
     async #awaitBackoff(attempt: number, sendRequest: SendRequest, request: HttpRequest | null): Promise<void> {
         const { method, path, options } = sendRequest;
-        const delay = this.#retryBackoff.delayFor(attempt);
+        const delay = clampTimerDelay(this.#retryBackoff.delayFor(attempt));
         const target = describeRequest(request ?? { method, url: this.#buildUrl(path, options?.query) });
 
         await new Promise<void>((resolve, reject) => {

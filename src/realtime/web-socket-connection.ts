@@ -6,6 +6,7 @@
  */
 
 import { isRecord } from '../support/is-record';
+import { clampTimerDelay } from '../support/timer';
 import { ExponentialBackoff } from './exponential-backoff';
 import { RealtimeError } from './realtime-error';
 import { type BeforeReconnectHook, runReconnect, STABLE_CONNECTION_MS } from './reconnect';
@@ -273,7 +274,7 @@ export class WebSocketConnection implements RealtimeConnection {
      * subscriber that disconnects in response cancels it.
      */
     #scheduleReconnect(): void {
-        const delay = this.#backoff.delayFor(this.#attempt++);
+        const delay = clampTimerDelay(this.#backoff.delayFor(this.#attempt++));
 
         this.#reconnectTimer = setTimeout(() => {
             this.#reconnectTimer = undefined;
