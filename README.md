@@ -137,6 +137,13 @@ non-string `data` re-serialised as JSON. `onError` receives failures the connect
 `url()` builder or socket factory); the same failure inside `connect()` throws a `RealtimeError` with the original as
 its `cause`.
 
+### Contained failures
+
+`StaticFeatureFlags`, `ColorSchemeService` and `installPageTracking` take an optional `onError` sink, as
+`WebSocketConnection` does: a synchronous throw from a change handler, listener, tracker or breadcrumb trail goes to the
+sink and never stops the others or reaches the caller. Page tracking records only completed navigations, by path: query
+strings and hashes never reach the tracker or the trail.
+
 ### Adapter contracts
 
 A `FeatureFlags` or `RealtimeConnection` adapter proves its behaviour by running the shared suite from its own tests:
