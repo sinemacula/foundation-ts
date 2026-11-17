@@ -224,7 +224,9 @@ class World {
      */
     expectUsersOwnTheirSessions(): void {
         for (const { state } of Object.values(this.parties)) {
-            expect(state.user === null || this.server.issuerOf(state.accessToken)?.owner === state.user.id).toBe(true);
+            if (state.user !== null) {
+                expect(this.server.issuerOf(state.accessToken)?.owner).toBe(state.user.id);
+            }
         }
     }
 
@@ -365,8 +367,11 @@ describe('session state machine', () => {
                     await world.drain();
 
                     const stored = await world.stored();
+                    const { revisions } = world.storage;
 
-                    expect(world.storage.revisions).toStrictEqual([...world.storage.revisions].sort((x, y) => x - y));
+                    expect(
+                        revisions.filter((revision, index) => revision <= (revisions[index - 1] ?? 0)),
+                    ).toStrictEqual([]);
                     expect(
                         world.server.sessions().filter(session => session.revoked === 'rotation_reuse'),
                     ).toStrictEqual([]);

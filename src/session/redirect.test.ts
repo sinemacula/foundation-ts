@@ -96,7 +96,7 @@ describe('sanitiseRedirectTarget', () => {
     ])('never returns a hostile target %j that resolves to another origin', target => {
         const result = sanitiseRedirectTarget(target, '/login');
 
-        expect(result === null || originOf(result) === ORIGIN).toBe(true);
+        expect(result === null ? ORIGIN : originOf(result)).toBe(ORIGIN);
     });
 });
 
