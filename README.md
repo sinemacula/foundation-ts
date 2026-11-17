@@ -144,10 +144,18 @@ surface under Metro, Hermes and React Native's Jest preset. The package ships ES
 `transformIgnorePatterns` allow-list. `KeyValueStorage` is synchronous, so back it with a synchronous store; an
 asynchronous secure store implements `SessionPersistence` directly.
 
+### Adapter contracts
+
+Each port a platform adapts ships a Vitest contract suite to run against its adapters, under the area's `test-support`:
+`describeRealtimeContract`, `describeSessionPersistenceContract`, `describeSessionLockContract`,
+`describeKeyValueStorageContract` and `describeConnectivityMonitorContract`. `session/test-support/fake-auth-server`
+serves the session endpoints from memory, with rotation, its grace window, replay revocation and cookie sign-out, for
+integration tests of a session wiring.
+
 ## Requirements
 
 - Node.js 22+
-- Vitest 3+, only for the realtime contract suite in `realtime/test-support`
+- Vitest 3+, only for the contract suites in `test-support`
 
 ## Testing
 

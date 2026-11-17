@@ -279,6 +279,10 @@
             "types": "./dist/session/session-user.d.ts",
             "default": "./dist/session/session-user.js"
         },
+        "./session/test-support/fake-auth-server": {
+            "types": "./dist/session/test-support/fake-auth-server.d.ts",
+            "default": "./dist/session/test-support/fake-auth-server.js"
+        },
         "./session/test-support/session-lock-contract": {
             "types": "./dist/session/test-support/session-lock-contract.d.ts",
             "default": "./dist/session/test-support/session-lock-contract.js"
@@ -353,6 +357,7 @@
         "@stryker-mutator/vitest-runner": "^9.6.1",
         "@types/node": "^25.9.3",
         "@vitest/coverage-v8": "^4.1.8",
+        "fast-check": "^4.10.2",
         "knip": "^6.16.1",
         "mkdist": "^2.4.1",
         "publint": "^0.3.21",
