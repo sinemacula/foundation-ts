@@ -6,7 +6,9 @@
  */
 
 /**
- * Performs the actual token refresh.
+ * Performs the actual token refresh. A refresh sent through an HTTP client
+ * whose unauthorized handler joins this refresh must opt out of that handler,
+ * or its 401 waits on itself.
  *
  * @typeParam T - what a refresh resolves with; true when the session was
  * refreshed, by default
