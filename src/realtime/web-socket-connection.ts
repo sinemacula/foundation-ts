@@ -5,9 +5,10 @@
  * @copyright   2026 Sine Macula Limited
  */
 
+import { isRecord } from '../support/is-record';
 import { ExponentialBackoff } from './exponential-backoff';
 import { RealtimeError } from './realtime-error';
-import { type BeforeReconnectHook, runReconnect } from './reconnect';
+import { type BeforeReconnectHook, runReconnect, STABLE_CONNECTION_MS } from './reconnect';
 import type {
     RealtimeConnection,
     RealtimeMessage,
@@ -15,6 +16,10 @@ import type {
     RealtimeState,
     RealtimeStateHandler,
 } from './realtime-connection';
+import { EventSubscribers, SubscriberList } from './subscribers';
+
+/** `WebSocket.OPEN`, inlined so factories work where there is no global. */
+const OPEN = 1;
 
 /**
  * Injectable factory for {@link WebSocket} instances.
@@ -29,16 +34,16 @@ export interface WebSocketConnectionOptions {
     /** Optional WebSocket subprotocol(s) forwarded to the constructor. */
     readonly protocols?: string | readonly string[];
 
-    /** Backoff strategy for reconnects. Defaults to `new ExponentialBackoff()`. */
+    /** Backoff strategy for reconnects. Defaults to `new ExponentialBackoff({ jitter: 'equal' })`. */
     readonly backoff?: ExponentialBackoff;
 
-    /** Override the WebSocket constructor. Defaults to the platform global. */
+    /** Override the WebSocket constructor. Defaults to the platform global; an injected one must report `readyState`. */
     readonly webSocketFactory?: WebSocketFactory;
 
     /** Awaited before each reconnect, never before a manual `connect()`; pair it with a `url()` builder that reads the fresh token. */
     readonly beforeReconnect?: BeforeReconnectHook;
 
-    /** Receives errors from throwing subscribers and failed reconnect opens, which are never thrown. */
+    /** Receives errors the connection contains (throwing subscribers, failed reconnect opens, dropped binary frames). */
     readonly onError?: (error: unknown) => void;
 }
 
@@ -47,9 +52,11 @@ export interface WebSocketConnectionOptions {
  * {@link WebSocketConnection.send} for outbound frames.
  *
  * Reconnects with backoff whenever the socket closes without a `disconnect()`;
- * subscriptions survive reconnects. Every text frame goes to `'message'`
- * subscribers, and a frame that parses as a `{ event, data }` JSON envelope
- * also goes to that event's subscribers, with non-string `data` as JSON.
+ * subscriptions survive reconnects, and the backoff resets only once a socket
+ * stays open for {@link STABLE_CONNECTION_MS}. Every text frame goes to
+ * `'message'` subscribers, and a frame that parses as a `{ event, data }` JSON
+ * envelope also goes to that event's subscribers, with non-string `data` as
+ * JSON. Binary frames are dropped and reported to `onError`.
  */
 export class WebSocketConnection implements RealtimeConnection {
     /** The endpoint URL, or a factory returning it per connect. */
@@ -67,14 +74,14 @@ export class WebSocketConnection implements RealtimeConnection {
     /** Optional hook awaited before each reconnect. */
     readonly #beforeReconnect: BeforeReconnectHook | undefined;
 
-    /** The optional sink for errors the connection contains. */
-    readonly #onError: ((error: unknown) => void) | undefined;
+    /** The sink for errors the connection contains. */
+    readonly #onError: (error: unknown) => void;
 
     /** Registered message handlers, keyed by event name. */
-    readonly #messageHandlers: Map<string, Set<RealtimeMessageHandler>> = new Map();
+    readonly #messages: EventSubscribers<RealtimeMessage> = new EventSubscribers(error => this.#report(error));
 
     /** Registered connection-state change handlers. */
-    readonly #stateHandlers: Set<RealtimeStateHandler> = new Set();
+    readonly #states: SubscriberList<RealtimeState> = new SubscriberList(error => this.#report(error));
 
     /** The owned WebSocket, or null when there is none. */
     #socket: WebSocket | null = null;
@@ -85,11 +92,14 @@ export class WebSocketConnection implements RealtimeConnection {
     /** The current zero-based reconnect attempt counter. */
     #attempt: number = 0;
 
+    /** When the owned socket counts as stable, or Infinity until it opens. */
+    #stableAt: number = Number.POSITIVE_INFINITY;
+
     /** The pending reconnect timer, or undefined when none. */
     #reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
-    /** Advanced on every disconnect so a superseded reconnect attempt abandons itself. */
-    #generation: number = 0;
+    /** Aborted by every disconnect, so a superseded reconnect attempt abandons itself. */
+    #lifecycle: AbortController = new AbortController();
 
     /**
      * Construct a new WebSocket connection.
@@ -97,10 +107,10 @@ export class WebSocketConnection implements RealtimeConnection {
     constructor(options: WebSocketConnectionOptions) {
         this.#url = options.url;
         this.#protocols = options.protocols;
-        this.#backoff = options.backoff ?? new ExponentialBackoff();
+        this.#backoff = options.backoff ?? new ExponentialBackoff({ jitter: 'equal' });
         this.#factory = options.webSocketFactory ?? defaultWebSocketFactory;
         this.#beforeReconnect = options.beforeReconnect;
-        this.#onError = options.onError;
+        this.#onError = options.onError ?? ignoreError;
     }
 
     /**
@@ -133,54 +143,48 @@ export class WebSocketConnection implements RealtimeConnection {
      * `connect()`, which restarts the backoff.
      */
     disconnect(): void {
-        this.#generation += 1;
+        const previous = this.#lifecycle;
+        const lifecycle = new AbortController();
+
+        this.#lifecycle = lifecycle;
         this.#attempt = 0;
         this.#cancelReconnect();
-        this.#closeSocket();
-        this.#setState('closed');
+        this.#release()?.close();
+        previous.abort();
+
+        // An abort listener may have started a newer lifecycle already.
+        if (this.#lifecycle === lifecycle) {
+            this.#setState('closed');
+        }
     }
 
     /**
      * Subscribe to messages for a specific event name; `'message'` receives
      * every raw frame.
      *
-     * @returns an unsubscribe function
+     * @returns a function that removes this registration
      */
     on(event: string, handler: RealtimeMessageHandler): () => void {
-        let handlers = this.#messageHandlers.get(event);
-
-        if (handlers === undefined) {
-            handlers = new Set();
-            this.#messageHandlers.set(event, handlers);
-        }
-
-        handlers.add(handler);
-
-        return () => {
-            handlers.delete(handler);
-        };
+        return this.#messages.on(event, handler);
     }
 
     /**
      * Subscribe to connection state changes.
      *
-     * @returns an unsubscribe function
+     * @returns a function that removes this registration
      */
     onStateChange(handler: RealtimeStateHandler): () => void {
-        this.#stateHandlers.add(handler);
-
-        return () => {
-            this.#stateHandlers.delete(handler);
-        };
+        return this.#states.add(handler);
     }
 
     /**
      * Send a text frame over the open socket.
      *
-     * @throws {@link RealtimeError} when the socket is not in the open state
+     * @throws {@link RealtimeError} unless the connection is open and the
+     * socket reports `OPEN`
      */
     send(data: string): void {
-        if (this.#socket === null || this.#state !== 'open') {
+        if (this.#socket?.readyState !== OPEN || this.#state !== 'open') {
             throw new RealtimeError('Cannot send: WebSocket is not open.');
         }
 
@@ -198,20 +202,24 @@ export class WebSocketConnection implements RealtimeConnection {
 
         socket.onopen = () => {
             if (this.#socket === socket) {
-                this.#attempt = 0;
+                this.#stableAt = performance.now() + STABLE_CONNECTION_MS;
                 this.#setState('open');
             }
         };
 
         socket.onmessage = (event: MessageEvent) => {
             if (this.#socket === socket) {
-                this.#dispatchFrame(String(event.data));
+                this.#dispatchFrame(socket, event.data);
             }
         };
 
         socket.onclose = () => {
             if (this.#socket === socket) {
-                this.#socket = null;
+                if (performance.now() >= this.#stableAt) {
+                    this.#attempt = 0;
+                }
+
+                this.#release();
                 this.#scheduleReconnect();
             }
         };
@@ -221,36 +229,36 @@ export class WebSocketConnection implements RealtimeConnection {
     }
 
     /**
-     * Deliver a raw frame to `'message'` subscribers, and additionally to the
-     * named-event subscribers when it parses as a JSON envelope.
+     * Deliver a text frame to `'message'` subscribers, and to the named-event
+     * subscribers when it parses as a JSON envelope. Both groups are captured
+     * before either runs, and delivery stops once the socket is released.
      */
-    #dispatchFrame(raw: string): void {
-        this.#deliverToHandlers('message', { event: 'message', data: raw });
+    #dispatchFrame(socket: WebSocket, data: unknown): void {
+        if (typeof data !== 'string') {
+            this.#report(new RealtimeError('Dropped a binary WebSocket frame: only text frames are supported.'));
 
-        const envelope = tryParseEnvelope(raw);
+            return;
+        }
+
+        const envelope = tryParseEnvelope(data);
+        const deliveries = [this.#capture({ event: 'message', data })];
 
         if (envelope !== null && envelope.event !== 'message') {
-            this.#deliverToHandlers(envelope.event, { event: envelope.event, data: envelope.data });
+            deliveries.push(this.#capture(envelope));
+        }
+
+        for (const deliver of deliveries) {
+            deliver(() => this.#socket === socket);
         }
     }
 
     /**
-     * Fan a message out to every handler registered for `event`.
+     * Capture the current subscribers of a message's event for delivery.
      */
-    #deliverToHandlers(event: string, message: RealtimeMessage): void {
-        const handlers = this.#messageHandlers.get(event);
+    #capture(message: RealtimeMessage): (isLive: () => boolean) => void {
+        const deliver = this.#messages.snapshot(message.event);
 
-        if (handlers === undefined) {
-            return;
-        }
-
-        for (const handler of handlers) {
-            try {
-                handler(message);
-            } catch (error) {
-                this.#report(error);
-            }
-        }
+        return isLive => deliver?.(message, isLive);
     }
 
     /**
@@ -263,25 +271,16 @@ export class WebSocketConnection implements RealtimeConnection {
 
         this.#reconnectTimer = setTimeout(() => {
             this.#reconnectTimer = undefined;
-            void this.#runReconnect();
+            void runReconnect({
+                beforeReconnect: this.#beforeReconnect,
+                signal: this.#lifecycle.signal,
+                reopen: () => this.#openSocket(),
+                reschedule: () => this.#scheduleReconnect(),
+                onError: error => this.#report(error),
+            });
         }, delay);
 
         this.#setState('connecting');
-    }
-
-    /**
-     * Run one reconnect attempt, abandoning it if a disconnect lands first.
-     */
-    async #runReconnect(): Promise<void> {
-        const generation = this.#generation;
-
-        await runReconnect({
-            beforeReconnect: this.#beforeReconnect,
-            isStale: () => this.#generation > generation,
-            reopen: () => this.#openSocket(),
-            reschedule: () => this.#scheduleReconnect(),
-            onError: error => this.#report(error),
-        });
     }
 
     /**
@@ -290,21 +289,25 @@ export class WebSocketConnection implements RealtimeConnection {
      */
     #report(error: unknown): void {
         try {
-            this.#onError?.(error);
+            this.#onError(error);
         } catch {
             // The sink is the last resort; nothing is left to report to.
         }
     }
 
     /**
-     * Release the active socket and close it. Ownership goes first, so its
-     * handlers ignore the close event and anything else it still delivers.
+     * Release ownership of the active socket, so its handlers ignore anything
+     * it still delivers.
+     *
+     * @returns the released socket, or null when there was none
      */
-    #closeSocket(): void {
+    #release(): WebSocket | null {
         const socket = this.#socket;
 
         this.#socket = null;
-        socket?.close();
+        this.#stableAt = Number.POSITIVE_INFINITY;
+
+        return socket;
     }
 
     /**
@@ -324,15 +327,15 @@ export class WebSocketConnection implements RealtimeConnection {
         }
 
         this.#state = next;
-
-        for (const handler of this.#stateHandlers) {
-            try {
-                handler(next);
-            } catch (error) {
-                this.#report(error);
-            }
-        }
+        this.#states.emit(next);
     }
+}
+
+/**
+ * The default error sink: contained errors are dropped.
+ */
+function ignoreError(): void {
+    // Nothing to do without an application sink.
 }
 
 /**
@@ -348,39 +351,12 @@ function defaultWebSocketFactory(url: string, protocols?: string | readonly stri
 }
 
 /**
- * Report whether a parsed value is an object carrying a string `event` and a
- * `data` field.
- */
-function isEnvelopeShape(value: unknown): value is {
-    /** The event name the envelope declares. */
-    event: string;
-
-    /** The payload the envelope carries. */
-    data: unknown;
-} {
-    if (typeof value !== 'object' || value === null) {
-        return false;
-    }
-
-    if (!('event' in value) || !('data' in value)) {
-        return false;
-    }
-
-    return typeof (value as Record<string, unknown>)['event'] === 'string';
-}
-
-/**
- * Parse a raw frame as an event envelope, serialising non-string `data`.
+ * Parse a text frame as an `{ event, data }` envelope, serialising non-string
+ * `data` as JSON.
  *
- * @returns the envelope, or `null` when the frame is not one
+ * @returns the envelope's message, or `null` when the frame is not one
  */
-function tryParseEnvelope(raw: string): {
-    /** The event name the envelope declares. */
-    event: string;
-
-    /** The payload text extracted from the envelope. */
-    data: string;
-} | null {
+function tryParseEnvelope(raw: string): RealtimeMessage | null {
     let parsed: unknown;
 
     try {
@@ -389,11 +365,15 @@ function tryParseEnvelope(raw: string): {
         return null;
     }
 
-    if (!isEnvelopeShape(parsed)) {
+    if (!isRecord(parsed) || !('data' in parsed)) {
         return null;
     }
 
-    const data = typeof parsed.data === 'string' ? parsed.data : JSON.stringify(parsed.data);
+    const { event, data } = parsed;
 
-    return { event: parsed.event, data };
+    if (typeof event !== 'string') {
+        return null;
+    }
+
+    return { event, data: typeof data === 'string' ? data : JSON.stringify(data) };
 }
