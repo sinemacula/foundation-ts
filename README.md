@@ -220,7 +220,7 @@ asynchronous secure store implements `SessionPersistence` directly.
 ## Requirements
 
 - Node.js 22+
-- Vitest 3+, only for the contract suites under `*/test-support`
+- Vitest 3.1+, only for the contract suites under `*/test-support`
 
 ## Testing
 

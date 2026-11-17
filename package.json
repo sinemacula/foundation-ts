@@ -389,7 +389,7 @@
         "qs": "^6.17.1"
     },
     "peerDependencies": {
-        "vitest": ">=3"
+        "vitest": ">=3.1"
     },
     "peerDependenciesMeta": {
         "vitest": {
