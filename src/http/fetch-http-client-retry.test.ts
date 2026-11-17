@@ -100,6 +100,7 @@ describe('FetchHttpClient - transient retry', () => {
 
     afterEach(() => {
         vi.useRealTimers();
+        vi.restoreAllMocks();
     });
 
     it('recovers from a 503 after the backoff delay', async () => {
@@ -135,21 +136,27 @@ describe('FetchHttpClient - transient retry', () => {
         expect(fetchFn).toHaveBeenCalledTimes(2);
     });
 
-    it('defaults the attempts and backoff when retry is enabled without options', async () => {
-        const fetchFn = vi
-            .fn<(...args: FetchArgs) => Promise<Response>>()
-            .mockResolvedValueOnce(jsonResponse({}, 503))
-            .mockResolvedValueOnce(jsonResponse({}, 503))
-            .mockResolvedValueOnce(jsonResponse({ recovered: true }));
+    it.each([
+        [0, 500, 1_000],
+        [0.5, 750, 1_500],
+    ])('defaults to two equal-jittered retries (random %s waits %s ms, then %s ms)', async (sample, first, second) => {
+        vi.spyOn(Math, 'random').mockReturnValue(sample);
+
+        const fetchFn = statusSequence([503, 503, 200]);
         const client = makeClient(fetchFn, { retry: {} });
 
         const pending = client.get<RecoveredBody>('/items');
 
-        // The default backoff waits 1000ms, then 2000ms.
-        await vi.advanceTimersByTimeAsync(1_000);
+        await vi.advanceTimersByTimeAsync(first - 1);
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1);
         expect(fetchFn).toHaveBeenCalledTimes(2);
 
-        await vi.advanceTimersByTimeAsync(2_000);
+        await vi.advanceTimersByTimeAsync(second - 1);
+        expect(fetchFn).toHaveBeenCalledTimes(2);
+
+        await vi.advanceTimersByTimeAsync(1);
         expect(fetchFn).toHaveBeenCalledTimes(3);
 
         await expect(pending).resolves.toStrictEqual({ recovered: true });
@@ -234,6 +241,41 @@ describe('FetchHttpClient - transient retry', () => {
 
         await expect(pending).resolves.toStrictEqual({ recovered: true });
         expect(delayFor).toHaveBeenCalledWith(0);
+    });
+
+    it.each([
+        ['the timer maximum', 2_147_483_647],
+        ['one above the timer maximum', 2_147_483_648],
+        ['Infinity', Number.POSITIVE_INFINITY],
+    ])('waits the timer maximum for a custom delay of %s', async (_case, delay) => {
+        const fetchFn = statusSequence([503, 200]);
+        const client = makeClient(fetchFn, { retry: { attempts: 1, backoff: { delayFor: () => delay } } });
+
+        const pending = client.get<RecoveredBody>('/items');
+
+        await vi.advanceTimersByTimeAsync(2_147_483_646);
+        expect(fetchFn).toHaveBeenCalledTimes(1);
+
+        await vi.advanceTimersByTimeAsync(1);
+
+        await expect(pending).resolves.toStrictEqual({ recovered: true });
+    });
+
+    it('cancels a wait on a clamped delay when the caller aborts', async () => {
+        const caller = new AbortController();
+        const fetchFn = statusSequence([503, 200]);
+        const client = makeClient(fetchFn, {
+            retry: { attempts: 1, backoff: { delayFor: () => Number.POSITIVE_INFINITY } },
+        });
+
+        const pending = rejectionOf(client.get('/items', { signal: caller.signal }), CancelledError);
+
+        await vi.advanceTimersByTimeAsync(1_000);
+        caller.abort();
+
+        expect((await pending).message).toBe('GET https://api.example.com/items was cancelled before its retry.');
+        expect(fetchFn).toHaveBeenCalledOnce();
+        expect(vi.getTimerCount()).toBe(0);
     });
 
     it('does not retry a transient status when no retry policy is configured', async () => {

@@ -6,7 +6,9 @@
  */
 
 /**
- * A minimal string key-value store.
+ * A minimal string key-value store. Any method may throw, for example when the
+ * backing store is unavailable or full; each caller decides whether to contain
+ * the failure.
  */
 export interface KeyValueStorage {
     /**

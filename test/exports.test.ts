@@ -25,6 +25,7 @@ const INTERNAL_MODULES = [
     'realtime/test-support/realtime-contract-cases',
     'reporting/console-error-reporter',
     'support/deep-freeze',
+    'support/timer',
     'support/url',
 ];
 

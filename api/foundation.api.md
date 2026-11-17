@@ -200,18 +200,19 @@ export declare function resetFoundationServices(): void;
 Exported as `@sinemacula/foundation/app/wire-http-client`.
 
 ```ts
+import type { DeepReadonly } from "../config/config-repository.js";
 import type { HttpClient, RequestInterceptor, ResponseErrorHandler, UnauthorizedHandler } from "../http/http-client.js";
 import type { ModuleHttpContributions } from "../http/module-http-contributions.js";
 import type { FoundationConfig } from "./foundation-config.js";
 export interface WireHttpClientTools<T extends FoundationConfig> {
-    readonly config: Readonly<T>;
+    readonly config: DeepReadonly<T>;
     readonly fetchFn: typeof fetch;
     readonly interceptors: readonly RequestInterceptor[];
     readonly onUnauthorized: UnauthorizedHandler | null;
     readonly onResponseError: ResponseErrorHandler;
 }
 export interface WireHttpClientOptions<T extends FoundationConfig> {
-    readonly config: Readonly<T>;
+    readonly config: DeepReadonly<T>;
     readonly fetchFn: typeof fetch;
     readonly interceptors?: readonly RequestInterceptor[];
     readonly contributions: ModuleHttpContributions;
@@ -991,15 +992,8 @@ export declare function runReconnect(steps: ReconnectSteps): Promise<void>;
 Exported as `@sinemacula/foundation/realtime/subscribers`.
 
 ```ts
-export type SubscriberDelivery<T> = (value: T, isLive?: () => boolean) => void;
-export declare class SubscriberList<T> {
-    #private;
-    constructor(report: (error: unknown) => void);
-    get size(): number;
-    add(handler: (value: T) => void): () => void;
-    snapshot(): SubscriberDelivery<T>;
-    emit(value: T): void;
-}
+import { type SubscriberDelivery, SubscriberList } from "../support/subscriber-list.js";
+export { type SubscriberDelivery, SubscriberList };
 export declare class EventSubscribers<T> {
     #private;
     constructor(report: (error: unknown) => void);
@@ -1176,7 +1170,7 @@ export interface SessionUserMapping<U extends SessionUser> {
     readonly mapUser: (payload: unknown) => U;
 }
 export declare function createDefaultSessionApi<C = PasswordCredentials>(http: HttpClient, options?: DefaultSessionApiOptions<C>): SessionApi<SessionUser, C>;
-export declare function createDefaultSessionApi<C, U extends SessionUser>(http: HttpClient, options: DefaultSessionApiOptions<C> & SessionUserMapping<U>): SessionApi<U, C>;
+export declare function createDefaultSessionApi<C = PasswordCredentials, U extends SessionUser = SessionUser>(http: HttpClient, options: DefaultSessionApiOptions<C> & SessionUserMapping<U>): SessionApi<U, C>;
 ```
 
 ## dist/session/in-process-session-lock.d.ts
@@ -1653,6 +1647,22 @@ export interface ServiceHolder<T> {
     isInstalled(): boolean;
 }
 export declare function createServiceHolder<T>(name: string): ServiceHolder<T>;
+```
+
+## dist/support/subscriber-list.d.ts
+
+Exported as `@sinemacula/foundation/support/subscriber-list`.
+
+```ts
+export type SubscriberDelivery<T> = (value: T, isLive?: () => boolean) => void;
+export declare class SubscriberList<T> {
+    #private;
+    constructor(report: (error: unknown) => void);
+    get size(): number;
+    add(handler: (value: T) => void): () => void;
+    snapshot(): SubscriberDelivery<T>;
+    emit(value: T): void;
+}
 ```
 
 ## dist/support/support-error.d.ts

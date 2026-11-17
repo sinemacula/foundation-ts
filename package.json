@@ -339,6 +339,10 @@
             "types": "./dist/support/service-holder.d.ts",
             "default": "./dist/support/service-holder.js"
         },
+        "./support/subscriber-list": {
+            "types": "./dist/support/subscriber-list.d.ts",
+            "default": "./dist/support/subscriber-list.js"
+        },
         "./support/support-error": {
             "types": "./dist/support/support-error.d.ts",
             "default": "./dist/support/support-error.js"

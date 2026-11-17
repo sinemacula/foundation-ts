@@ -510,6 +510,38 @@ describe('WebSocketConnection', () => {
         });
     });
 
+    describe('oversized backoff', () => {
+        /**
+         * A backoff whose override returns a delay no timer honours.
+         */
+        class UnboundedBackoff extends ExponentialBackoff {
+            /**
+             * Return an unbounded delay for every attempt.
+             */
+            override delayFor(): number {
+                return Number.POSITIVE_INFINITY;
+            }
+        }
+
+        it('waits the timer maximum for a delay above it', () => {
+            const { sockets, factory } = createFakeWebSocketFactory();
+            const conn = new WebSocketConnection({
+                url: 'ws://test',
+                webSocketFactory: factory,
+                backoff: new UnboundedBackoff(),
+            });
+
+            conn.connect();
+            sockets.at(0)?.emitClose();
+
+            vi.advanceTimersByTime(2_147_483_646);
+            expect(sockets).toHaveLength(1);
+
+            vi.advanceTimersByTime(1);
+            expect(sockets).toHaveLength(2);
+        });
+    });
+
     describe('socket ownership', () => {
         it('closes the new socket when a state subscriber disconnects as it starts connecting', () => {
             const { sockets, factory } = createFakeWebSocketFactory();

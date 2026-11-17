@@ -107,7 +107,7 @@ export function createDefaultSessionApi<C = PasswordCredentials>(
  * Create a {@link SessionApi} over the application HTTP client, mapping the
  * user record onto U with the given mapping.
  */
-export function createDefaultSessionApi<C, U extends SessionUser>(
+export function createDefaultSessionApi<C = PasswordCredentials, U extends SessionUser = SessionUser>(
     http: HttpClient,
     options: DefaultSessionApiOptions<C> & SessionUserMapping<U>,
 ): SessionApi<U, C>;

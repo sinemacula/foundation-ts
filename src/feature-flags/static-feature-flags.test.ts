@@ -166,5 +166,26 @@ describe('StaticFeatureFlags', () => {
 
             expect(calls).toEqual(['a', 'b']);
         });
+
+        it('lets the rest of a delivery read flags replaced from inside a handler, then notifies again', () => {
+            const flags = new StaticFeatureFlags({ step: 0 });
+            const seen: string[] = [];
+            let replaced = false;
+
+            flags.onChange(() => {
+                seen.push(`a:${String(flags.variant('step', 0))}`);
+
+                if (!replaced) {
+                    replaced = true;
+                    flags.replace({ step: 2 });
+                }
+            });
+            flags.onChange(() => {
+                seen.push(`b:${String(flags.variant('step', 0))}`);
+            });
+            flags.replace({ step: 1 });
+
+            expect(seen).toStrictEqual(['a:1', 'b:2', 'a:2', 'b:2']);
+        });
     });
 });
