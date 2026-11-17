@@ -110,7 +110,8 @@ const query = ApiQuery.create()
 - Aggregates render under the record's `aggregates` field only when `aggregates` is in `fields[type]` or the
   resource's default fields.
 - `withTrashed()` / `onlyTrashed()` set `trashed=with` / `trashed=only`.
-- Changing the order drops any cursor token but keeps cursor pagination; random order under cursor pagination throws.
+- Changing the filters, search, soft-delete visibility or order drops any cursor token but keeps cursor pagination;
+  `limit` and `page` keep it. Random order under cursor pagination throws.
 - `$`-prefixed field or relation names, non-finite numbers, and a page or limit that is not a positive integer throw
   a `QueryError`.
 - `ResourceClient.list` returns the mapped `items`, `meta` (`{ mode: 'length-aware', total, count, hasMore }`,

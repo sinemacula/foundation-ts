@@ -536,7 +536,7 @@ export class ApiQuery {
     search(term: string): ApiQuery {
         const trimmed = term.trim();
 
-        return new ApiQuery({ ...this.#state, searchTerm: trimmed === '' ? undefined : trimmed });
+        return this.#withRows({ searchTerm: trimmed === '' ? undefined : trimmed });
     }
 
     /**
@@ -549,13 +549,8 @@ export class ApiQuery {
      * @throws {@link QueryError} when random order meets cursor pagination
      */
     orderBy(column: string, direction: SortDirection = 'asc'): ApiQuery {
-        const { order, cursorToken, cursorPagination } = this.#state;
-
-        return ApiQuery.#guarded({
-            ...this.#state,
-            order: [...order.filter(e => e.column !== column), { column, direction }],
-            cursorToken: undefined,
-            cursorPagination: cursorPagination || cursorToken !== undefined,
+        return this.#withRows({
+            order: [...this.#state.order.filter(e => e.column !== column), { column, direction }],
         });
     }
 
@@ -590,6 +585,10 @@ export class ApiQuery {
     /**
      * Set the cursor token, which alone selects cursor pagination on the
      * server.
+     *
+     * A token seeks within one ordered row set, so any later filter, search,
+     * soft-delete or order call drops it, even one repeating the current value,
+     * while the query stays cursor-paginated. `limit` and `page` keep it.
      *
      * @param token - the opaque cursor string returned by the server
      * @throws {@link QueryError} when the order is random
@@ -638,14 +637,14 @@ export class ApiQuery {
      * Include soft-deleted records alongside live ones (`trashed=with`).
      */
     withTrashed(): ApiQuery {
-        return new ApiQuery({ ...this.#state, trashed: 'with' });
+        return this.#withRows({ trashed: 'with' });
     }
 
     /**
      * Read soft-deleted records only (`trashed=only`).
      */
     onlyTrashed(): ApiQuery {
-        return new ApiQuery({ ...this.#state, trashed: 'only' });
+        return this.#withRows({ trashed: 'only' });
     }
 
     /**
@@ -785,6 +784,24 @@ export class ApiQuery {
     }
 
     /**
+     * Return a query with `patch` applied, dropping any cursor token, which
+     * only seeks within the row set and order it was issued for, while keeping
+     * the query cursor-paginated.
+     *
+     * @throws {@link QueryError} when random order meets cursor pagination
+     */
+    #withRows(patch: Partial<QueryState>): ApiQuery {
+        const { cursorToken, cursorPagination } = this.#state;
+
+        return ApiQuery.#guarded({
+            ...this.#state,
+            ...patch,
+            cursorToken: undefined,
+            cursorPagination: cursorPagination || cursorToken !== undefined,
+        });
+    }
+
+    /**
      * Return a query with one operator merged into `field`'s conditions,
      * copying a list operand so the caller keeps its array.
      */
@@ -814,7 +831,7 @@ export class ApiQuery {
      * Return a query with `patch` merged into the root document.
      */
     #withMergedDocument(patch: FilterTree): ApiQuery {
-        return new ApiQuery({ ...this.#state, filters: mergeDocument(this.#state.filters, patch) });
+        return this.#withRows({ filters: mergeDocument(this.#state.filters, patch) });
     }
 
     /**

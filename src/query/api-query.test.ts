@@ -54,6 +54,16 @@ const NAMED_CALLS: ReadonlyArray<readonly [string, (query: ApiQuery, name: strin
     ['whereHasNot', (q, name) => q.whereHasNot(name, r => r.where('a', 1))],
 ];
 
+/** The calls that change the rows a query selects. */
+const ROW_SET_CALLS: ReadonlyArray<readonly [string, (query: ApiQuery) => ApiQuery]> = [
+    ...NAMED_CALLS.map(([method, call]) => [method, (q: ApiQuery) => call(q, 'f')] as const),
+    ['andWhere', q => q.andWhere([a => a.where('a', 1)])],
+    ['orWhere', q => q.orWhere([a => a.where('a', 1)])],
+    ['search', q => q.search('ada')],
+    ['withTrashed', q => q.withTrashed()],
+    ['onlyTrashed', q => q.onlyTrashed()],
+];
+
 /**
  * Build the filter calls that carry `n` as an operand on the field `n`.
  */
@@ -1036,6 +1046,35 @@ describe('ApiQuery', () => {
             const query = ApiQuery.create().page(2).orderBy('name');
 
             expect(query.toQueryParameters()).toEqual({ order: 'name', page: 2 });
+        });
+    });
+
+    describe('cursor lifetime', () => {
+        it.each(ROW_SET_CALLS)('%s drops the token of a query paginated by it alone', (_method, call) => {
+            const params = call(ApiQuery.create().cursor('tok')).toQueryParameters();
+
+            expect([params['cursor'], params['pagination']]).toStrictEqual([undefined, 'cursor']);
+        });
+
+        it.each(ROW_SET_CALLS)('%s drops the token under forced cursor pagination', (_method, call) => {
+            const params = call(ApiQuery.create().useCursorPagination().cursor('tok')).toQueryParameters();
+
+            expect([params['cursor'], params['pagination']]).toStrictEqual([undefined, 'cursor']);
+        });
+
+        it.each(ROW_SET_CALLS)('%s leaves an offset-paginated query offset-paginated', (_method, call) => {
+            const params = call(ApiQuery.create().page(2)).toQueryParameters();
+
+            expect([params['cursor'], params['pagination'], params['page']]).toStrictEqual([undefined, undefined, 2]);
+        });
+
+        it.each([
+            ['limit', (q: ApiQuery) => q.limit(10)],
+            ['page', (q: ApiQuery) => q.page(2)],
+            ['fieldsFor', (q: ApiQuery) => q.fieldsFor('user', ['id'])],
+            ['aggregatesFor', (q: ApiQuery) => q.aggregatesFor('user', ['posts_count'])],
+        ])('%s keeps the token', (_method, call) => {
+            expect(call(ApiQuery.create().cursor('tok')).toQueryParameters()['cursor']).toBe('tok');
         });
     });
 
