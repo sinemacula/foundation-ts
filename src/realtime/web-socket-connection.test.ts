@@ -36,9 +36,6 @@ class FakeWebSocket {
 
     /**
      * Record the construction arguments.
-     *
-     * @param url - the WebSocket endpoint URL
-     * @param protocols - optional subprotocol(s)
      */
     constructor(url: string, protocols?: string | readonly string[]) {
         this.url = url;
@@ -47,8 +44,6 @@ class FakeWebSocket {
 
     /**
      * Record an outbound frame.
-     *
-     * @param data - the frame text
      */
     send(data: string): void {
         this.sentMessages.push(data);
@@ -70,8 +65,6 @@ class FakeWebSocket {
 
     /**
      * Simulate an incoming text frame.
-     *
-     * @param data - the frame text
      */
     emitMessage(data: string): void {
         this.onmessage?.(new MessageEvent('message', { data }));
@@ -81,8 +74,7 @@ class FakeWebSocket {
      * Simulate the socket closing.
      */
     emitClose(): void {
-        // Not the DOM CloseEvent: that global only exists from node 23, and the
-        // connection's close handler never reads the event anyway.
+        // CloseEvent is only a global from node 23, and the handler ignores it.
         this.onclose?.(new Event('close') as CloseEvent);
     }
 }
@@ -100,11 +92,7 @@ interface RecordingFactory {
 }
 
 /**
- * Create a typed {@link WebSocketFactory} that records each fake it creates.
- * The cast to `WebSocket` is confined to the closure so every test body can use
- * the strongly-typed {@link FakeWebSocket} directly.
- *
- * @returns the recorded sockets, the factory and its failure switch
+ * Create a {@link WebSocketFactory} that records each fake socket it creates.
  */
 function makeFactory(): RecordingFactory {
     const recording: RecordingFactory = {
@@ -127,10 +115,7 @@ function makeFactory(): RecordingFactory {
 }
 
 /**
- * Fixed-delay backoff for deterministic reconnect assertions.
- *
- * @param delay - the delay in milliseconds for every attempt
- * @returns the backoff strategy
+ * Backoff that waits `delay` milliseconds before every attempt.
  */
 function fixedBackoff(delay: number): ExponentialBackoff {
     return new ExponentialBackoff({ initialDelay: delay, multiplier: 1, maxDelay: delay });
@@ -186,8 +171,6 @@ function stubGlobalWebSocket(): unknown[][] {
     class RecordingWebSocket {
         /**
          * Record the construction arguments.
-         *
-         * @param args - the arguments the constructor received
          */
         constructor(...args: unknown[]) {
             calls.push(args);
@@ -224,7 +207,7 @@ describe('WebSocketConnection', () => {
             expect(socket?.protocols).toBe('v1');
         });
 
-        it('passes just the url to the platform WebSocket when no protocols are set', () => {
+        it('omits protocols from the platform WebSocket when none are set', () => {
             const calls = stubGlobalWebSocket();
             const conn = new WebSocketConnection({ url: 'ws://localhost' });
 
@@ -233,7 +216,7 @@ describe('WebSocketConnection', () => {
             expect(calls).toEqual([['ws://localhost']]);
         });
 
-        it('passes a string protocol through to the platform WebSocket', () => {
+        it('passes a string protocol to the platform WebSocket', () => {
             const calls = stubGlobalWebSocket();
             const conn = new WebSocketConnection({ url: 'ws://localhost', protocols: 'v1' });
 
@@ -242,7 +225,7 @@ describe('WebSocketConnection', () => {
             expect(calls).toEqual([['ws://localhost', 'v1']]);
         });
 
-        it('passes a protocols array through to the platform WebSocket', () => {
+        it('passes a protocols array to the platform WebSocket', () => {
             const calls = stubGlobalWebSocket();
             const conn = new WebSocketConnection({ url: 'ws://localhost', protocols: ['v1', 'v2'] });
 
@@ -267,7 +250,7 @@ describe('WebSocketConnection', () => {
             expect(received).toEqual(['hello']);
         });
 
-        it('sets event to "message" for raw frame delivery', () => {
+        it('labels a raw frame with the message event', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -281,7 +264,7 @@ describe('WebSocketConnection', () => {
             expect(events).toEqual(['message']);
         });
 
-        it('keeps delivering to remaining subscribers when one throws', () => {
+        it('keeps delivering to remaining message subscribers when one throws', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -317,7 +300,7 @@ describe('WebSocketConnection', () => {
             expect(states).toEqual(['connecting', 'open']);
         });
 
-        it('delivers an envelope frame to both message and named-event subscribers', () => {
+        it('delivers an envelope to message and named-event subscribers', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -348,7 +331,7 @@ describe('WebSocketConnection', () => {
             expect(received).toEqual([JSON.stringify({ value: 42 })]);
         });
 
-        it('handles a JSON envelope whose data is null', () => {
+        it('stringifies null envelope data', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -362,7 +345,7 @@ describe('WebSocketConnection', () => {
             expect(received).toEqual(['null']);
         });
 
-        it('does not dispatch to named-event subscribers for non-JSON frames', () => {
+        it('delivers a non-JSON frame only to message subscribers', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -379,7 +362,11 @@ describe('WebSocketConnection', () => {
             expect(messageReceived).toEqual(['not json']);
         });
 
-        it('does not dispatch to named-event subscribers for invalid envelope shapes', () => {
+        it.each([
+            ['no event', { data: 'something' }],
+            ['a non-string event', { event: 42, data: 'something' }],
+            ['no data', { event: 'update' }],
+        ])('ignores an envelope with %s', (_label, envelope) => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -388,19 +375,12 @@ describe('WebSocketConnection', () => {
             conn.on('update', msg => namedReceived.push(msg.data));
             conn.connect();
             sockets.at(0)?.emitOpen();
-
-            // Missing 'event' field.
-            sockets.at(0)?.emitMessage(JSON.stringify({ data: 'something' }));
-            // Non-string 'event' field.
-            sockets.at(0)?.emitMessage(JSON.stringify({ event: 42, data: 'something' }));
-            // Missing 'data' field.
-            sockets.at(0)?.emitMessage(JSON.stringify({ event: 'update' }));
+            sockets.at(0)?.emitMessage(JSON.stringify(envelope));
 
             expect(namedReceived).toEqual([]);
         });
 
-        it('delivers envelope "message" event frames only to message subscribers once', () => {
-            // An envelope with event='message' should not be double-delivered.
+        it('delivers a message-event envelope once', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -411,23 +391,20 @@ describe('WebSocketConnection', () => {
             sockets.at(0)?.emitOpen();
             sockets.at(0)?.emitMessage(JSON.stringify({ event: 'message', data: 'hi' }));
 
-            // Delivered once via the raw-frame path; not a second time from the
-            // envelope path.
             expect(received).toHaveLength(1);
         });
 
-        it('does not deliver messages when no handlers are registered for the event', () => {
+        it('accepts a frame with no subscribers', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
             conn.connect();
             sockets.at(0)?.emitOpen();
 
-            // No handler registered - must not throw.
             expect(() => sockets.at(0)?.emitMessage('hello')).not.toThrow();
         });
 
-        it('does not treat a JSON primitive or null frame as an envelope', () => {
+        it('delivers a JSON primitive or null frame only to message subscribers', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -438,9 +415,6 @@ describe('WebSocketConnection', () => {
             conn.on('message', msg => messageReceived.push(msg.data));
             conn.connect();
             sockets.at(0)?.emitOpen();
-
-            // A frame that is valid JSON but not an object is not an envelope;
-            // it is delivered only as the raw message frame.
             sockets.at(0)?.emitMessage('42');
             sockets.at(0)?.emitMessage('null');
 
@@ -464,14 +438,14 @@ describe('WebSocketConnection', () => {
             expect(socket?.sentMessages).toEqual(['hello']);
         });
 
-        it('throws when the socket is not open (idle)', () => {
+        it('throws when idle', () => {
             const { factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
             expect(() => conn.send('msg')).toThrow('Cannot send: WebSocket is not open.');
         });
 
-        it('throws when the socket is connecting', () => {
+        it('throws while connecting', () => {
             const { factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 
@@ -480,7 +454,7 @@ describe('WebSocketConnection', () => {
             expect(() => conn.send('msg')).toThrow('Cannot send: WebSocket is not open.');
         });
 
-        it('throws when the socket is closed', () => {
+        it('throws when closed', () => {
             const { sockets, factory } = makeFactory();
             const conn = new WebSocketConnection({ url: 'ws://test', webSocketFactory: factory });
 

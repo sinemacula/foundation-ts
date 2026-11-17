@@ -1,11 +1,5 @@
 /**
- * Realtime connection port.
- *
- * Server push is a separate concern from request/response. This port sits
- * BESIDE {@link HttpClient}, not on top of it - it models a persistent,
- * server-initiated stream rather than a one-shot request. The WebSocket adapter
- * lives here and each platform may add its own stream adapters; tests
- * substitute an in-memory fake.
+ * Transport-agnostic port for server-pushed realtime events.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,23 +19,16 @@ export interface RealtimeMessage {
 
 /**
  * Handles a single incoming realtime message.
- *
- * @param message - the received message
  */
 export type RealtimeMessageHandler = (message: RealtimeMessage) => void;
 
 /**
  * Notified whenever the connection transitions to a new state.
- *
- * @param state - the new connection state
  */
 export type RealtimeStateHandler = (state: RealtimeState) => void;
 
 /**
  * A transport-agnostic channel for server-pushed events.
- *
- * Implementations must be injectable so that product modules never couple
- * themselves to a concrete transport.
  */
 export interface RealtimeConnection {
     /** The current connection lifecycle state. */
@@ -64,17 +51,14 @@ export interface RealtimeConnection {
     /**
      * Subscribe to messages for a specific event name.
      *
-     * @param event - the event name to subscribe to
-     * @param handler - called for each matching incoming message
-     * @returns an unsubscribe function; calling it stops further delivery
+     * @returns a function that stops further delivery to `handler`
      */
     on(event: string, handler: RealtimeMessageHandler): () => void;
 
     /**
      * Subscribe to connection state changes.
      *
-     * @param handler - called each time the state transitions
-     * @returns an unsubscribe function; calling it stops further delivery
+     * @returns a function that stops further delivery to `handler`
      */
     onStateChange(handler: RealtimeStateHandler): () => void;
 }
