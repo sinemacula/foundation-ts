@@ -1,9 +1,5 @@
 /**
- * Foundation boot failure.
- *
- * Thrown when the kernel is asked to boot with an option combination that
- * cannot work, so misconfiguration surfaces loudly at boot instead of silently
- * producing an application with missing behaviour.
+ * Thrown when the kernel boots with an option combination that cannot work.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

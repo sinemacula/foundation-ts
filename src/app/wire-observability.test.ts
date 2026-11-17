@@ -20,9 +20,6 @@ import { wireObservability } from './wire-observability';
 
 /**
  * Build a minimal contract-satisfying configuration for the given environment.
- *
- * @param environment - the application environment name
- * @returns the configuration fixture
  */
 function createConfig(environment: string): FoundationConfig {
     return {
@@ -50,16 +47,8 @@ describe('wireObservability', () => {
         expect(result.logger).toBeInstanceOf(ConsoleLogger);
     });
 
-    it('defaults to null adapters outside the local environment', () => {
-        const result = wireObservability({ config: createConfig('production') });
-
-        expect(result.reporter).toBeInstanceOf(NullErrorReporter);
-        expect(result.analytics).toBeInstanceOf(NullAnalyticsTracker);
-        expect(result.logger).toBeInstanceOf(NullLogger);
-    });
-
-    it('matches the local environment case-sensitively', () => {
-        const result = wireObservability({ config: createConfig('Local') });
+    it.each(['production', 'Local'])("defaults to null adapters in the '%s' environment", environment => {
+        const result = wireObservability({ config: createConfig(environment) });
 
         expect(result.reporter).toBeInstanceOf(NullErrorReporter);
         expect(result.analytics).toBeInstanceOf(NullAnalyticsTracker);

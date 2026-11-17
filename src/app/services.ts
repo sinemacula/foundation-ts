@@ -1,10 +1,5 @@
 /**
- * Base application service singletons (composition root).
- *
- * One service holder per shared service, each with an install/accessor pair.
- * The bootstrap preset installs every instance during boot; components and
- * module services read them through the accessors. `resetFoundationServices`
- * clears every base holder between tests.
+ * Base application service singletons, each with an install/accessor pair.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +46,6 @@ const baseHolders = [
 
 /**
  * Install the configuration repository. Called once at boot.
- *
- * @param instance - the frozen configuration repository to install
  */
 export function installConfig(instance: ConfigRepository<Record<string, unknown>>): void {
     configHolder.install(instance);
@@ -61,8 +54,7 @@ export function installConfig(instance: ConfigRepository<Record<string, unknown>
 /**
  * The frozen configuration tree, cast to the application's shape.
  *
- * @returns the frozen configuration root
- * @throws Error when accessed before {@link installConfig} has been called
+ * @throws {SupportError} when called before {@link installConfig}
  */
 export function appConfig<T = unknown>(): Readonly<T> {
     return configHolder.resolve().all() as Readonly<T>;
@@ -71,8 +63,7 @@ export function appConfig<T = unknown>(): Readonly<T> {
 /**
  * The active configuration repository, cast to the application's shape.
  *
- * @returns the active configuration repository
- * @throws Error when accessed before {@link installConfig} has been called
+ * @throws {SupportError} when called before {@link installConfig}
  */
 export function appConfigRepository<
     T extends Record<string, unknown> = Record<string, unknown>,
@@ -82,8 +73,6 @@ export function appConfigRepository<
 
 /**
  * Install the HTTP client. Called once at boot.
- *
- * @param instance - the HTTP client to install
  */
 export function installApi(instance: HttpClient): void {
     httpHolder.install(instance);
@@ -92,8 +81,7 @@ export function installApi(instance: HttpClient): void {
 /**
  * The active HTTP client.
  *
- * @returns the active HTTP client
- * @throws Error when accessed before {@link installApi} has been called
+ * @throws {SupportError} when called before {@link installApi}
  */
 export function api(): HttpClient {
     return httpHolder.resolve();
@@ -101,8 +89,6 @@ export function api(): HttpClient {
 
 /**
  * Install the storage adapter. Called once at boot.
- *
- * @param instance - the storage adapter to install
  */
 export function installStorage(instance: KeyValueStorage): void {
     storageHolder.install(instance);
@@ -111,8 +97,7 @@ export function installStorage(instance: KeyValueStorage): void {
 /**
  * The active storage adapter.
  *
- * @returns the active storage adapter
- * @throws Error when accessed before {@link installStorage} has been called
+ * @throws {SupportError} when called before {@link installStorage}
  */
 export function appStorage(): KeyValueStorage {
     return storageHolder.resolve();
@@ -120,8 +105,6 @@ export function appStorage(): KeyValueStorage {
 
 /**
  * Install the toast notification service. Called once at boot.
- *
- * @param instance - the toast service to install
  */
 export function installToasts(instance: Toaster): void {
     toastsHolder.install(instance);
@@ -130,8 +113,7 @@ export function installToasts(instance: Toaster): void {
 /**
  * The active toast notification service.
  *
- * @returns the active toast service
- * @throws Error when accessed before {@link installToasts} has been called
+ * @throws {SupportError} when called before {@link installToasts}
  */
 export function toasts(): Toaster {
     return toastsHolder.resolve();
@@ -139,8 +121,6 @@ export function toasts(): Toaster {
 
 /**
  * Install the confirmation dialog service. Called once at boot.
- *
- * @param instance - the confirm service to install
  */
 export function installConfirm(instance: Confirmer): void {
     confirmHolder.install(instance);
@@ -149,8 +129,7 @@ export function installConfirm(instance: Confirmer): void {
 /**
  * The active confirmation dialog service.
  *
- * @returns the active confirm service
- * @throws Error when accessed before {@link installConfirm} has been called
+ * @throws {SupportError} when called before {@link installConfirm}
  */
 export function confirmDialogs(): Confirmer {
     return confirmHolder.resolve();
@@ -158,8 +137,6 @@ export function confirmDialogs(): Confirmer {
 
 /**
  * Install the error reporter. Called once at boot.
- *
- * @param instance - the error reporter to install
  */
 export function installReporting(instance: ErrorReporter): void {
     reportingHolder.install(instance);
@@ -168,8 +145,7 @@ export function installReporting(instance: ErrorReporter): void {
 /**
  * The active error reporter.
  *
- * @returns the active error reporter
- * @throws Error when accessed before {@link installReporting} has been called
+ * @throws {SupportError} when called before {@link installReporting}
  */
 export function reporting(): ErrorReporter {
     return reportingHolder.resolve();
@@ -177,8 +153,6 @@ export function reporting(): ErrorReporter {
 
 /**
  * Install the analytics tracker. Called once at boot.
- *
- * @param instance - the analytics tracker to install
  */
 export function installAnalytics(instance: AnalyticsTracker): void {
     analyticsHolder.install(instance);
@@ -187,8 +161,7 @@ export function installAnalytics(instance: AnalyticsTracker): void {
 /**
  * The active analytics tracker.
  *
- * @returns the active analytics tracker
- * @throws Error when accessed before {@link installAnalytics} has been called
+ * @throws {SupportError} when called before {@link installAnalytics}
  */
 export function analytics(): AnalyticsTracker {
     return analyticsHolder.resolve();
@@ -196,8 +169,6 @@ export function analytics(): AnalyticsTracker {
 
 /**
  * Install the logger. Called once at boot.
- *
- * @param instance - the logger to install
  */
 export function installLogger(instance: Logger): void {
     loggerHolder.install(instance);
@@ -206,8 +177,7 @@ export function installLogger(instance: Logger): void {
 /**
  * The active logger.
  *
- * @returns the active logger
- * @throws Error when accessed before {@link installLogger} has been called
+ * @throws {SupportError} when called before {@link installLogger}
  */
 export function logger(): Logger {
     return loggerHolder.resolve();
@@ -215,8 +185,6 @@ export function logger(): Logger {
 
 /**
  * Install the feature-flag adapter. Called once at boot.
- *
- * @param instance - the feature-flag adapter to install
  */
 export function installFeatureFlags(instance: FeatureFlags): void {
     featureFlagsHolder.install(instance);
@@ -225,9 +193,7 @@ export function installFeatureFlags(instance: FeatureFlags): void {
 /**
  * The active feature-flag adapter.
  *
- * @returns the active feature-flag adapter
- * @throws Error when accessed before {@link installFeatureFlags} has been
- * called
+ * @throws {SupportError} when called before {@link installFeatureFlags}
  */
 export function featureFlags(): FeatureFlags {
     return featureFlagsHolder.resolve();
@@ -235,8 +201,6 @@ export function featureFlags(): FeatureFlags {
 
 /**
  * Install the colour-scheme service. Called once at boot.
- *
- * @param instance - the colour-scheme service to install
  */
 export function installColorScheme(instance: ColorSchemeService): void {
     colorSchemeHolder.install(instance);
@@ -245,8 +209,7 @@ export function installColorScheme(instance: ColorSchemeService): void {
 /**
  * The active colour-scheme service.
  *
- * @returns the active colour-scheme service
- * @throws Error when accessed before {@link installColorScheme} has been called
+ * @throws {SupportError} when called before {@link installColorScheme}
  */
 export function colorScheme(): ColorSchemeService {
     return colorSchemeHolder.resolve();
@@ -255,8 +218,6 @@ export function colorScheme(): ColorSchemeService {
 /**
  * Install the realtime connection. Called once at boot, when the application
  * opts in.
- *
- * @param instance - the realtime connection to install
  */
 export function installRealtime(instance: RealtimeConnection): void {
     realtimeHolder.install(instance);
@@ -265,8 +226,7 @@ export function installRealtime(instance: RealtimeConnection): void {
 /**
  * The active realtime connection.
  *
- * @returns the active realtime connection
- * @throws Error when accessed before {@link installRealtime} has been called
+ * @throws {SupportError} when called before {@link installRealtime}
  */
 export function realtime(): RealtimeConnection {
     return realtimeHolder.resolve();

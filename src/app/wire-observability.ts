@@ -1,12 +1,5 @@
 /**
- * Observability wiring unit for the bootstrap preset.
- *
- * Resolves the error reporter, analytics tracker, and logger from the
- * application's optional factories, installs each instance into its base
- * service holder, and creates the breadcrumb trail. Without a factory the local
- * environment gets console adapters and every other environment gets the null
- * adapters. The instances and trail are returned so the orchestrator can wire
- * global error handling and page tracking over them without ambient reads.
+ * Observability wiring for the bootstrap preset.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,10 +53,9 @@ export interface WiredObservability {
 }
 
 /**
- * Resolve and install the observability services.
- *
- * @param options - the frozen configuration and optional adapter factories
- * @returns the installed instances plus the breadcrumb trail
+ * Resolve and install the observability services. Without a factory, the
+ * `local` environment gets console adapters and every other environment gets
+ * null adapters.
  */
 export function wireObservability<T extends FoundationConfig>(
     options: WireObservabilityOptions<T>,

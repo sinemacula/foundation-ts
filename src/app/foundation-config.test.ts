@@ -10,13 +10,9 @@ import { describe, expect, it } from 'vitest';
 import type { FoundationConfig } from './foundation-config';
 
 /**
- * Build a configuration tree mirroring the reference application's
- * `defineConfiguration` output shape, extra keys included, so assignment to
- * {@link FoundationConfig} pins structural satisfaction at compile time.
- *
- * @returns a configuration tree richer than the contract slice
+ * Build an application configuration tree richer than the contract slice.
  */
-function definePlaygroundShapedConfiguration() {
+function defineApplicationConfiguration() {
     return {
         api: { baseUrl: 'https://api.example.com', timeout: 30_000 },
         app: {
@@ -48,8 +44,8 @@ function definePlaygroundShapedConfiguration() {
 }
 
 describe('FoundationConfig', () => {
-    it('is satisfied structurally by a playground-shaped configuration tree', () => {
-        const configuration: FoundationConfig = definePlaygroundShapedConfiguration();
+    it('is satisfied structurally by a richer configuration tree', () => {
+        const configuration: FoundationConfig = defineApplicationConfiguration();
 
         expect(configuration.api.baseUrl).toBe('https://api.example.com');
         expect(configuration.api.timeout).toBe(30_000);

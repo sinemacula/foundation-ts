@@ -37,8 +37,6 @@ import {
 
 /**
  * Build a minimal contract-satisfying configuration fixture.
- *
- * @returns the configuration fixture
  */
 function createConfig(): FoundationConfig {
     return {
@@ -55,9 +53,6 @@ function createConfig(): FoundationConfig {
 
 /**
  * Build empty module HTTP contributions with optional overrides.
- *
- * @param overrides - fields to replace on the empty contribution set
- * @returns the contributions fixture
  */
 function createContributions(overrides: Partial<ModuleHttpContributions> = {}): ModuleHttpContributions {
     return { requestInterceptors: [], onUnauthorized: null, responseErrorHandlers: [], ...overrides };
@@ -77,8 +72,6 @@ function createConfirmerStub(): Confirmer {
 function createHttpClientStub(): HttpClient {
     /**
      * Reject every call, since the stub must never be used.
-     *
-     * @returns a rejected promise
      */
     const fail = (): Promise<never> => Promise.reject(new Error('not implemented'));
 
@@ -108,7 +101,6 @@ interface SequencedFetch {
  *
  * @param apiResponses - response factories for the calls after the runtime
  * fetch
- * @returns the stub and its captured calls
  */
 function createSequencedFetch(...apiResponses: ReadonlyArray<() => Response>): SequencedFetch {
     const urls: string[] = [];
@@ -196,7 +188,7 @@ describe('bootFoundationCore', () => {
         resetFoundationServices();
     });
 
-    it('boots with defaults, installs every core service, and returns the core', async () => {
+    it('installs every core service with the defaults', async () => {
         const storage = new MemoryStorage();
         const toaster = createToasterStub();
         const confirmer = createConfirmerStub();
@@ -255,7 +247,7 @@ describe('bootFoundationCore', () => {
         expect(createEnvironment).toHaveBeenCalledWith(runtimeDocument);
     });
 
-    it('builds the environment over no runtime values without fetching when no runtime document is configured', async () => {
+    it('skips the fetch and passes empty runtime values without a runtime document', async () => {
         const fetchFn = vi.fn();
         const createEnvironment = vi.fn().mockReturnValue(environmentOf());
 
@@ -325,7 +317,7 @@ describe('bootFoundationCore', () => {
         }
     });
 
-    it('invokes the registration bridge once, after installs, with the repository and environment', async () => {
+    it('runs the registration bridge once, after the core installs', async () => {
         const environment = environmentOf();
         const observed: RegistrationObservation[] = [];
         const interceptor = vi.fn();
@@ -358,7 +350,7 @@ describe('bootFoundationCore', () => {
         expect(core.http).toBe(api());
     });
 
-    it('boots with every override and records exactly the seven core phases in order', async () => {
+    it('honours every override and reports the core phases in order', async () => {
         const phases: FoundationCorePhase[] = [];
         const flags = new StaticFeatureFlags({ custom: true });
         const reporter = new NullErrorReporter();
@@ -416,11 +408,6 @@ describe('bootFoundationCore', () => {
         /**
          * Boot the core over a sequenced fetch with the given http options and
          * default collaborators everywhere else.
-         *
-         * @param fetch - the sequenced fetch stub
-         * @param http - the http options under test
-         * @param toaster - the toaster to install
-         * @returns the booted core
          */
         function bootWithHttp(
             fetch: SequencedFetch,
