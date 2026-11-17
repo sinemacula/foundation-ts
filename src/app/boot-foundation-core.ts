@@ -142,6 +142,10 @@ export interface FoundationCore<T extends FoundationConfig> {
 /**
  * Run the platform-agnostic boot phases and install the core services.
  *
+ * A failure rejects with the original error and leaves in place the services
+ * installed so far, alongside any from an earlier boot that this one had not
+ * yet replaced.
+ *
  * @throws {RuntimeEnvironmentError} when a configured runtime document cannot
  * be loaded
  */

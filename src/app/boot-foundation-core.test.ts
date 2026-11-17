@@ -19,13 +19,20 @@ import type { Confirmer } from '../notifications/confirmer';
 import type { Toaster } from '../notifications/toaster';
 import { NullErrorReporter } from '../reporting/null-error-reporter';
 import { MemoryStorage } from '../storage/memory-storage';
-import type { FoundationCorePhase } from './boot-foundation-core';
+import { SupportError } from '../support/support-error';
+import type {
+    FoundationCore,
+    FoundationCoreOptions,
+    FoundationCorePhase,
+    FoundationCoreRegistration,
+} from './boot-foundation-core';
 import { bootFoundationCore } from './boot-foundation-core';
 import type { FoundationConfig } from './foundation-config';
 import {
     analytics,
     api,
     appConfig,
+    appConfigRepository,
     appStorage,
     confirmDialogs,
     featureFlags,
@@ -144,23 +151,281 @@ function createRecordingToaster(): RecordingToaster {
     };
 }
 
+/**
+ * Return what a call throws, or undefined when it returns.
+ */
+function errorOf(call: () => unknown): unknown {
+    try {
+        call();
+    } catch (error) {
+        return error;
+    }
+
+    return undefined;
+}
+
 /** The runtime environment document location every boot fetches. */
 const RUNTIME_URL = '/runtime-env.json';
 
 /** Build an environment that defines no keys. */
 const environmentOf = (): Environment => new Environment(new ObjectEnvironmentSource({}));
 
-/** What the registration bridge saw when it ran. */
+/** The accessor of every service the core boot installs, by name. */
+const CORE_SERVICES = {
+    configuration: appConfigRepository,
+    storage: appStorage,
+    featureFlags,
+    toasts,
+    confirmDialogs,
+    reporting,
+    analytics,
+    logger,
+    api,
+} as const;
+
+/** The name of a service the core boot installs. */
+type CoreServiceName = keyof typeof CORE_SERVICES;
+
+/** The instance each installed core service resolves to, by name. */
+type ResolvedServices = Partial<Record<CoreServiceName, unknown>>;
+
+/**
+ * Resolve every installed core service, leaving out those that throw.
+ */
+function resolveServices(): ResolvedServices {
+    return Object.fromEntries(
+        Object.entries(CORE_SERVICES).flatMap(([name, accessor]) => {
+            try {
+                return [[name, accessor()]];
+            } catch {
+                return [];
+            }
+        }),
+    );
+}
+
+/** The collaborators a boot installs exactly as supplied. */
+interface BootCollaborators {
+    /** The configuration definition, frozen in place by the boot. */
+    readonly definition: FoundationConfig;
+
+    /** The storage adapter. */
+    readonly storage: MemoryStorage;
+
+    /** The toast notifier. */
+    readonly toaster: Toaster;
+
+    /** The confirmation prompter. */
+    readonly confirmer: Confirmer;
+
+    /** The feature-flag adapter. */
+    readonly flags: StaticFeatureFlags;
+}
+
+/**
+ * Build a fresh set of boot collaborators.
+ */
+function createCollaborators(): BootCollaborators {
+    return {
+        definition: createConfig(),
+        storage: new MemoryStorage(),
+        toaster: createToasterStub(),
+        confirmer: createConfirmerStub(),
+        flags: new StaticFeatureFlags({ beta: true }),
+    };
+}
+
+/**
+ * Boot the core over the collaborators without a runtime document, recording
+ * each phase before any supplied phase observer runs.
+ *
+ * @param overrides - options replacing the defaults; `onPhase` runs after the
+ * recording
+ */
+function bootWith(
+    collaborators: BootCollaborators,
+    overrides: Partial<FoundationCoreOptions<FoundationConfig>> = {},
+    phases: FoundationCorePhase[] = [],
+): Promise<FoundationCore<FoundationConfig>> {
+    const { onPhase, ...rest } = overrides;
+
+    return bootFoundationCore(
+        {
+            createEnvironment: () => environmentOf(),
+            define: () => collaborators.definition,
+            storage: collaborators.storage,
+            toasts: collaborators.toaster,
+            confirm: collaborators.confirmer,
+            featureFlags: () => collaborators.flags,
+            collectHttpContributions: () => createContributions(),
+            ...rest,
+            onPhase: phase => {
+                phases.push(phase);
+                onPhase?.(phase);
+            },
+        },
+        { fetchFn: createFetchStub() },
+    );
+}
+
+/**
+ * Map each core service to the instance a successful boot installed.
+ */
+function servicesOf(core: FoundationCore<FoundationConfig>, collaborators: BootCollaborators): ResolvedServices {
+    return {
+        configuration: core.repository,
+        storage: collaborators.storage,
+        featureFlags: core.flags,
+        toasts: collaborators.toaster,
+        confirmDialogs: collaborators.confirmer,
+        reporting: core.observability.reporter,
+        analytics: core.observability.analytics,
+        logger: core.observability.logger,
+        api: core.http,
+    };
+}
+
+/**
+ * Boot again successfully and assert every core service now resolves to an
+ * instance of that boot, none left over from before it.
+ */
+async function expectCleanReboot(): Promise<void> {
+    const before = resolveServices();
+    const collaborators = createCollaborators();
+    const core = await bootWith(collaborators);
+    const after = resolveServices();
+    const expected = servicesOf(core, collaborators);
+
+    expect(Object.keys(after)).toStrictEqual(Object.keys(CORE_SERVICES));
+    expect(
+        Object.keys(expected).filter(name => after[name as CoreServiceName] !== expected[name as CoreServiceName]),
+    ).toStrictEqual([]);
+    expect(
+        Object.entries(before).filter(([name, instance]) => after[name as CoreServiceName] === instance),
+    ).toStrictEqual([]);
+}
+
+/** What module registration could reach when the bridge ran. */
 interface RegistrationObservation {
-    /** The configuration handed to the bridge. */
+    /** The phases reported before the bridge ran. */
+    readonly phases: readonly FoundationCorePhase[];
+
+    /** The core services resolvable inside the bridge. */
+    readonly services: ResolvedServices;
+
+    /** The configuration tree resolvable inside the bridge. */
     readonly config: unknown;
 
-    /** Whether storage was already installed. */
-    readonly storageOk: boolean;
-
-    /** Whether feature flags were already installed. */
-    readonly flagsOk: boolean;
+    /** What resolving the http client threw inside the bridge. */
+    readonly apiError: unknown;
 }
+
+/** One point at which a boot fails, and the state it must leave behind. */
+interface BootFailureCase {
+    /** Where the failure is raised, for the test title. */
+    readonly point: string;
+
+    /** The options that raise the given failure. */
+    readonly inject: (failure: Error) => Partial<FoundationCoreOptions<FoundationConfig>>;
+
+    /** The last phase reported before the failure. */
+    readonly lastPhase: FoundationCorePhase;
+
+    /** The core services left installed, in declaration order. */
+    readonly installed: readonly CoreServiceName[];
+}
+
+/** The services installed before the observability phase. */
+const BEFORE_OBSERVABILITY: readonly CoreServiceName[] = [
+    'configuration',
+    'storage',
+    'featureFlags',
+    'toasts',
+    'confirmDialogs',
+];
+
+/** The services installed before the HTTP client phase. */
+const BEFORE_HTTP: readonly CoreServiceName[] = [...BEFORE_OBSERVABILITY, 'reporting', 'analytics', 'logger'];
+
+/**
+ * Build a function that always throws the given failure.
+ */
+function throwing(failure: Error): () => never {
+    return () => {
+        throw failure;
+    };
+}
+
+/**
+ * Build an object whose freezing throws the given failure.
+ */
+function unfreezable(failure: Error): object {
+    return new Proxy({}, { preventExtensions: throwing(failure) });
+}
+
+const bootFailureCases: readonly BootFailureCase[] = [
+    {
+        point: 'createEnvironment',
+        inject: failure => ({ createEnvironment: throwing(failure) }),
+        lastPhase: 'configuration',
+        installed: [],
+    },
+    { point: 'define', inject: failure => ({ define: throwing(failure) }), lastPhase: 'configuration', installed: [] },
+    {
+        point: 'freezing the definition',
+        inject: failure => ({ define: () => Object.assign(createConfig(), { locked: unfreezable(failure) }) }),
+        lastPhase: 'configuration',
+        installed: [],
+    },
+    {
+        point: 'the phase observer',
+        inject: failure => ({
+            onPhase: phase => {
+                if (phase === 'storage') {
+                    throw failure;
+                }
+            },
+        }),
+        lastPhase: 'storage',
+        installed: ['configuration'],
+    },
+    {
+        point: 'the feature-flag factory',
+        inject: failure => ({ featureFlags: throwing(failure) }),
+        lastPhase: 'feature-flags',
+        installed: ['configuration', 'storage'],
+    },
+    {
+        point: 'the reporter factory',
+        inject: failure => ({ observability: { reporter: throwing(failure) } }),
+        lastPhase: 'observability',
+        installed: BEFORE_OBSERVABILITY,
+    },
+    {
+        point: 'the analytics factory',
+        inject: failure => ({ observability: { analytics: throwing(failure) } }),
+        lastPhase: 'observability',
+        installed: BEFORE_OBSERVABILITY,
+    },
+    {
+        point: 'the logger factory',
+        inject: failure => ({ observability: { logger: throwing(failure) } }),
+        lastPhase: 'observability',
+        installed: BEFORE_OBSERVABILITY,
+    },
+    {
+        point: 'module registration',
+        inject: failure => ({ collectHttpContributions: throwing(failure) }),
+        lastPhase: 'observability',
+        installed: BEFORE_HTTP,
+    },
+    {
+        point: 'the http client factory',
+        inject: failure => ({ http: { client: throwing(failure) } }),
+        lastPhase: 'http-client',
+        installed: BEFORE_HTTP,
+    },
+];
 
 /** The http options threaded into the default client. */
 interface HttpOptionsUnderTest {
@@ -317,37 +582,75 @@ describe('bootFoundationCore', () => {
         }
     });
 
-    it('runs the registration bridge once, after the core installs', async () => {
-        const environment = environmentOf();
-        const observed: RegistrationObservation[] = [];
-        const interceptor = vi.fn();
+    it('runs the registration bridge once, after every core service but the http client installs', async () => {
+        const collaborators = createCollaborators();
+        const phases: FoundationCorePhase[] = [];
+        const registrations: FoundationCoreRegistration<FoundationConfig>[] = [];
+        const seen: RegistrationObservation[] = [];
 
-        const core = await bootFoundationCore(
+        const core = await bootWith(
+            collaborators,
             {
-                createEnvironment: () => environment,
-                runtime: { url: RUNTIME_URL },
-                define: () => createConfig(),
-                storage: new MemoryStorage(),
-                toasts: createToasterStub(),
-                confirm: createConfirmerStub(),
                 collectHttpContributions: registration => {
-                    observed.push({
-                        config: registration.config,
-                        storageOk: appStorage() !== null,
-                        flagsOk: featureFlags().isEnabled('beta'),
+                    registrations.push(registration);
+                    seen.push({
+                        phases: [...phases],
+                        services: resolveServices(),
+                        config: appConfig(),
+                        apiError: errorOf(api),
                     });
 
-                    return createContributions({ requestInterceptors: [interceptor] });
+                    return createContributions();
                 },
             },
-            { fetchFn: createFetchStub() },
+            phases,
         );
 
-        expect(observed).toHaveLength(1);
-        expect(observed[0]?.config).toBe(core.repository);
-        expect(observed[0]?.storageOk).toBe(true);
-        expect(observed[0]?.flagsOk).toBe(true);
-        expect(core.http).toBe(api());
+        const expected = servicesOf(core, collaborators);
+
+        expect(registrations).toHaveLength(1);
+        expect(registrations[0]?.config).toBe(core.repository);
+        expect(registrations[0]?.environment).toBe(core.environment);
+        expect(seen[0]?.phases.at(-1)).toBe('observability');
+        expect(seen[0]?.config).toBe(core.settings);
+        expect(Object.keys(seen[0]?.services ?? {})).toStrictEqual(BEFORE_HTTP);
+        expect(BEFORE_HTTP.filter(name => seen[0]?.services[name] !== expected[name])).toStrictEqual([]);
+        expect(seen[0]?.apiError).toStrictEqual(new SupportError('http client accessed before initialisation'));
+        expect(api()).toBe(core.http);
+    });
+
+    it.each(bootFailureCases)(
+        'rejects with the original error when $point throws, keeps what it installed, and reboots cleanly',
+        async ({ inject, lastPhase, installed }) => {
+            const failure = new Error('boot step failed');
+            const phases: FoundationCorePhase[] = [];
+
+            await expect(bootWith(createCollaborators(), inject(failure), phases)).rejects.toBe(failure);
+
+            expect(phases.at(-1)).toBe(lastPhase);
+            expect(Object.keys(resolveServices())).toStrictEqual(installed);
+
+            await expectCleanReboot();
+        },
+    );
+
+    it('keeps the services of an earlier boot that a failed boot had not yet replaced', async () => {
+        const first = createCollaborators();
+        const core = await bootWith(first);
+        const second = createCollaborators();
+        const failure = new Error('reporter unavailable');
+
+        await expect(bootWith(second, { observability: { reporter: throwing(failure) } })).rejects.toBe(failure);
+
+        expect(appConfigRepository().all()).toBe(second.definition);
+        expect(appStorage()).toBe(second.storage);
+        expect(featureFlags()).toBe(second.flags);
+        expect(toasts()).toBe(second.toaster);
+        expect(confirmDialogs()).toBe(second.confirmer);
+        expect(reporting()).toBe(core.observability.reporter);
+        expect(analytics()).toBe(core.observability.analytics);
+        expect(logger()).toBe(core.observability.logger);
+        expect(api()).toBe(core.http);
     });
 
     it('honours every override and reports the core phases in order', async () => {

@@ -33,6 +33,7 @@ import {
     resetFoundationServices,
     toasts,
 } from './services';
+import * as services from './services';
 import type { Confirmer } from '../notifications/confirmer';
 import type { Toaster } from '../notifications/toaster';
 import { NullAnalyticsTracker } from '../analytics/null-analytics-tracker';
@@ -110,6 +111,9 @@ interface ServiceCase {
     /** The accessor's name, for the test title. */
     readonly accessorName: string;
 
+    /** The module's install function for this service. */
+    readonly installer: (instance: never) => void;
+
     /** The error message the accessor throws before install. */
     readonly message: string;
 
@@ -123,6 +127,7 @@ interface ServiceCase {
 const serviceCases: readonly ServiceCase[] = [
     {
         accessorName: 'appConfigRepository',
+        installer: installConfig,
         message: 'configuration accessed before initialisation',
         install: () => {
             const repository = new ConfigRepository({ app: { name: 'playground' } });
@@ -135,6 +140,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'api',
+        installer: installApi,
         message: 'http client accessed before initialisation',
         install: () => {
             const client = createHttpClientStub();
@@ -147,6 +153,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'appStorage',
+        installer: installStorage,
         message: 'application storage accessed before initialisation',
         install: () => {
             const storage = new MemoryStorage();
@@ -159,6 +166,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'toasts',
+        installer: installToasts,
         message: 'toast service accessed before initialisation',
         install: () => {
             const service = createToasterStub();
@@ -171,6 +179,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'confirmDialogs',
+        installer: installConfirm,
         message: 'confirmation dialog service accessed before initialisation',
         install: () => {
             const service = createConfirmerStub();
@@ -183,6 +192,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'reporting',
+        installer: installReporting,
         message: 'error reporter accessed before initialisation',
         install: () => {
             const reporter = new NullErrorReporter();
@@ -195,6 +205,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'analytics',
+        installer: installAnalytics,
         message: 'analytics tracker accessed before initialisation',
         install: () => {
             const tracker = new NullAnalyticsTracker();
@@ -207,6 +218,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'logger',
+        installer: installLogger,
         message: 'logger accessed before initialisation',
         install: () => {
             const instance = new NullLogger();
@@ -219,6 +231,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'featureFlags',
+        installer: installFeatureFlags,
         message: 'feature-flag adapter accessed before initialisation',
         install: () => {
             const flags = new StaticFeatureFlags({ beta: true });
@@ -231,6 +244,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'colorScheme',
+        installer: installColorScheme,
         message: 'colour scheme service accessed before initialisation',
         install: () => {
             const service = createColorSchemeStub();
@@ -243,6 +257,7 @@ const serviceCases: readonly ServiceCase[] = [
     },
     {
         accessorName: 'realtime',
+        installer: installRealtime,
         message: 'realtime connection accessed before initialisation',
         install: () => {
             const connection = createRealtimeConnectionStub();
@@ -272,8 +287,12 @@ describe('foundation services', () => {
         });
     }
 
-    it('runs the expected number of base service pairs', () => {
-        expect(serviceCases).toHaveLength(11);
+    it('covers every install function the module exports', () => {
+        const exported = Object.entries(services)
+            .filter(([name]) => name.startsWith('install'))
+            .map(([, installer]) => installer);
+
+        expect(new Set(serviceCases.map(({ installer }) => installer))).toStrictEqual(new Set(exported));
     });
 
     it('keeps every other accessor uninstalled when one service is installed', () => {
@@ -349,6 +368,7 @@ describe('foundation services', () => {
             expect(tree.app.name).toBe('playground');
             expect(tree.app.version).toBe('1.2.3');
         });
+
     });
 
     describe('appConfigRepository', () => {
@@ -358,5 +378,6 @@ describe('foundation services', () => {
             expect(appConfigRepository().get('app.name')).toBe('playground');
             expect(appConfigRepository().get('app.missing', 'fallback')).toBe('fallback');
         });
+
     });
 });
