@@ -1,11 +1,5 @@
-# ==============================================================================
-# REACT NATIVE
-# ==============================================================================
 name: React Native
 
-# ==============================================================================
-# TRIGGERS
-# ==============================================================================
 on:
     push:
         branches: [ master ]
@@ -13,34 +7,18 @@ on:
         types: [ opened, synchronize, reopened, ready_for_review ]
     workflow_dispatch:
 
-# ==============================================================================
-# CONCURRENCY
-# ==============================================================================
 concurrency:
     group: react-native-${{ github.event.pull_request.number || github.ref }}
     cancel-in-progress: true
 
-# ==============================================================================
-# PERMISSIONS
-# ==============================================================================
 permissions:
     contents: read
 
-# ==============================================================================
-# DEFAULTS
-# ==============================================================================
 defaults:
     run:
         shell: bash
 
 jobs:
-
-    # ==========================================================================
-    # JOB: SMOKE
-    # ==========================================================================
-    # Bundles the packed package with Metro for iOS and Android, compiles it to
-    # Hermes bytecode and loads every subpath, then requires each one under
-    # React Native's Jest preset.
     smoke:
         name: React Native smoke
         runs-on: ubuntu-latest

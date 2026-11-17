@@ -1,17 +1,7 @@
 /**
- * React Native smoke check for the packed package.
- *
- * Installs the packed tarball into this fixture, then for iOS and Android
- * bundles every public subpath with Metro under React Native's defaults,
- * compiles the bundle to Hermes bytecode and evaluates it in a context holding
- * only the web APIs React Native provides. Finally it requires every subpath
+ * Bundle every public subpath of the packed package with Metro for iOS and
+ * Android, compile it to Hermes bytecode and load it, then require each subpath
  * under React Native's Jest preset.
- *
- * Hermes only compiles here, since no Hermes VM is published, and the context
- * approximates React Native's globals; runtime behaviour is the unit suite's
- * job. Test-support subpaths are skipped because they need the test runner.
- *
- * Usage: `npm run smoke:react-native` from the repository root.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,7 +67,10 @@ function installPackedPackage(scratch) {
     });
 }
 
-/** The installed package's public subpaths, minus the test-support entries. */
+/**
+ * The installed package's public subpaths, minus test-support, which needs a
+ * test runner.
+ */
 function publicSubpaths() {
     const manifest = JSON.parse(readFileSync(join(FIXTURE, 'node_modules', PACKAGE, 'package.json'), 'utf8'));
     const subpaths = Object.keys(manifest.exports).map(key => `${PACKAGE}/${key.slice(2)}`);
@@ -123,7 +116,10 @@ function compile(bundlePath) {
     execFileSync(hermesc, ['-emit-binary', '-O', '-w', '-out', `${bundlePath}.hbc`, bundlePath], { stdio: 'inherit' });
 }
 
-/** Evaluate a bundle against React Native's globals and count the loaded subpaths. */
+/**
+ * Evaluate a bundle in Node against React Native's globals, since no Hermes VM
+ * is published, and return how many subpaths loaded.
+ */
 function evaluate(bundlePath) {
     const context = createContext(Object.fromEntries(REACT_NATIVE_GLOBALS.map(name => [name, globalThis[name]])));
 

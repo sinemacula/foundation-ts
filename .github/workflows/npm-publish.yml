@@ -1,51 +1,27 @@
-# ==============================================================================
-# NPM PUBLISH
-# ==============================================================================
-# Publishes the package to npm when release-please pushes a `v*` tag. The tag is
-# created with a GitHub App token (see release.yml `use-app-token`) so this
-# workflow is triggered; the automatic token would not fire it.
-#
-# Authentication is OIDC trusted publishing - no npm token. The `prepare`
-# lifecycle compiles `dist/`, which the `exports` map points at, so no build
-# step is needed here beyond installing dependencies.
-# ==============================================================================
+# release-please pushes the `v*` tag with a GitHub App token (`use-app-token` in
+# release.yml) because a tag pushed with the default token triggers nothing.
 name: npm-publish
 
-# ==============================================================================
-# TRIGGERS
-# ==============================================================================
 on:
     push:
         tags:
             -   v*
     workflow_dispatch:
 
-# ==============================================================================
-# CONCURRENCY
-# ==============================================================================
 concurrency:
     group: npm-publish-${{ github.ref }}
     cancel-in-progress: false
 
-# ==============================================================================
-# PERMISSIONS
-# ==============================================================================
+# Trusted publishing signs in through OIDC, so no npm token is needed.
 permissions:
     contents: read
     id-token: write
 
-# ==============================================================================
-# DEFAULTS
-# ==============================================================================
 defaults:
     run:
         shell: bash
 
 jobs:
-
-    # ==========================================================================
-    # JOB: PUBLISH TO NPM
-    # ==========================================================================
     publish:
         name: Publish to npm
         runs-on: ubuntu-latest
@@ -63,6 +39,7 @@ jobs:
                     registry-url: https://registry.npmjs.org/
                     cache: npm
 
+            # The `prepare` script builds `dist/`, so installing is the build.
             -   name: Install dependencies
                 run: npm ci
 
