@@ -35,7 +35,6 @@ jobs:
         with:
             release-type: node
             # Below 1.0.0 every release is a new minor, so `^0.x` never picks up
-            # a breaking change. Remove release-as once v0.1.0 is tagged.
+            # a breaking change.
             versioning-strategy: always-bump-minor
-            release-as: 0.1.0
             use-app-token: true
