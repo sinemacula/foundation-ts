@@ -1,6 +1,6 @@
 {
     "name": "@sinemacula/foundation",
-    "version": "0.1.0",
+    "version": "0.2.0",
     "description": "Platform-agnostic TypeScript foundation: the framework-free ports and logic (http, config, storage, query, realtime, authorization, logging, i18n) shared by Sine Macula's web and mobile kernels.",
     "license": "Apache-2.0",
     "author": "Ben Carey <bdmc@sinemacula.co.uk>",
