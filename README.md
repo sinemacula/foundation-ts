@@ -213,6 +213,19 @@ describeFeatureFlagsContract({
 `session/test-support/fake-auth-server` serves the session endpoints from memory, with rotation, its grace window,
 replay revocation and cookie sign-out, for integration tests of a session wiring.
 
+### Offline detection
+
+`ConfirmedConnectivityMonitor` wraps a platform `ConnectivityMonitor` and publishes a change only once a
+`ReachabilityProbe` confirms it: two or more consecutive results disagreeing with the published state, spanning
+`offlineAfter` to go offline or `onlineAfter` to come back (5 seconds each by default). One agreeing result discards the
+run, so an intermittent connection keeps its current state instead of flapping. It probes every `probeInterval` (1.5
+seconds) while confirming, every `heartbeatInterval` (30 seconds) while online so a silent loss is still found, and on a
+backoff capped at 30 seconds while offline. A probe that rejects, resolves anything but `true` or outlives
+`probeTimeout` (5 seconds) is unreachable. Platform events and `hint(reachable)` only bring the next probe forward:
+pass `http.onTransport: reachable => monitor.hint(reachable)` to `bootFoundationCore` so a failing request triggers a
+check. The initial state is the platform's, unconfirmed. Stop the monitor while the application is in the background;
+results further apart than a probe cycle never count towards one window.
+
 ### React Native
 
 Every subpath resolves under Metro and Jest through the `default` export condition, and CI loads the whole public

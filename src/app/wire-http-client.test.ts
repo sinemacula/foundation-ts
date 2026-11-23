@@ -301,7 +301,13 @@ const failingFetch: typeof fetch = () => Promise.reject(new Error('fetch must no
 type CaptureOverrides = Partial<
     Pick<
         WireHttpClientOptions<FoundationConfig>,
-        'config' | 'fetchFn' | 'interceptors' | 'contributions' | 'onResponseError' | 'unexpectedErrorToastKey'
+        | 'config'
+        | 'fetchFn'
+        | 'interceptors'
+        | 'contributions'
+        | 'onResponseError'
+        | 'onTransport'
+        | 'unexpectedErrorToastKey'
     >
 >;
 
@@ -317,6 +323,7 @@ function captureTools(overrides: CaptureOverrides = {}): WireHttpClientTools<Fou
         contributions: overrides.contributions ?? createContributions(),
         ...(overrides.interceptors === undefined ? {} : { interceptors: overrides.interceptors }),
         ...(overrides.onResponseError === undefined ? {} : { onResponseError: overrides.onResponseError }),
+        ...(overrides.onTransport === undefined ? {} : { onTransport: overrides.onTransport }),
         ...(overrides.unexpectedErrorToastKey === undefined
             ? {}
             : { unexpectedErrorToastKey: overrides.unexpectedErrorToastKey }),
@@ -415,6 +422,21 @@ describe('wireHttpClient', () => {
             expect(result).toEqual({ ok: true });
             expect(stub.urls).toEqual(['https://api.example.com/ping']);
             expect(stub.inits[0]?.signal).toBeInstanceOf(AbortSignal);
+        });
+
+        it('tells the transport observer of each attempt', async () => {
+            const stub = createFetchStub(() => jsonOk());
+            const onTransport = vi.fn();
+            const client = wireHttpClient({
+                config: createConfig(),
+                fetchFn: stub.fetchFn,
+                contributions: createContributions(),
+                onTransport,
+            });
+
+            await client.get<OkBody>('ping');
+
+            expect(onTransport.mock.calls).toStrictEqual([[true, expect.objectContaining({ method: 'GET' })]]);
         });
 
         it('runs preset interceptors before module interceptors', async () => {
@@ -666,10 +688,17 @@ describe('wireHttpClient', () => {
             expect(typeof tools.onResponseError).toBe('function');
         });
 
-        it('defaults tools.onUnauthorized to null when no module contributed one', () => {
+        it('defaults tools.onUnauthorized and tools.onTransport to null when none is wired', () => {
             const tools = captureTools();
 
             expect(tools.onUnauthorized).toBeNull();
+            expect(tools.onTransport).toBeNull();
+        });
+
+        it('hands the factory the transport observer', () => {
+            const onTransport = vi.fn();
+
+            expect(captureTools({ onTransport }).onTransport).toBe(onTransport);
         });
     });
 

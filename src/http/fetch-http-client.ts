@@ -18,6 +18,7 @@ import type {
     QueryParameters,
     RequestInterceptor,
     ResponseErrorHandler,
+    TransportObserver,
     UnauthorizedHandler,
 } from './http-client';
 import {
@@ -81,6 +82,9 @@ export interface FetchHttpClientOptions {
 
     /** Told of each final request failure; see {@link ResponseErrorHandler}. */
     readonly onResponseError?: ResponseErrorHandler;
+
+    /** Told of every attempt's transport outcome, retries included; see {@link TransportObserver}. */
+    readonly onTransport?: TransportObserver;
 
     /** Opt-in retry policy for transient failures; omit for a single attempt on every request. */
     readonly retry?: FetchHttpClientRetryOptions;
@@ -162,6 +166,9 @@ export class FetchHttpClient implements HttpClient {
     /** The response-error handler, or null when unset. */
     readonly #onResponseError: ResponseErrorHandler | null;
 
+    /** The transport observer; a no-op when unset. */
+    readonly #onTransport: TransportObserver;
+
     /** The number of transient retries after the first try. */
     readonly #retryAttempts: number;
 
@@ -189,6 +196,7 @@ export class FetchHttpClient implements HttpClient {
         this.#interceptors = options.requestInterceptors ?? [];
         this.#onUnauthorized = options.onUnauthorized ?? null;
         this.#onResponseError = options.onResponseError ?? null;
+        this.#onTransport = options.onTransport ?? (() => undefined);
         this.#retryAttempts = options.retry?.attempts ?? (options.retry === undefined ? 0 : 2);
         this.#retryBackoff = options.retry?.backoff ?? new ExponentialBackoff({ jitter: 'equal' });
     }
@@ -470,11 +478,17 @@ export class FetchHttpClient implements HttpClient {
      * Perform the fetch, mapping a rejection onto the typed transport errors.
      */
     async #dispatch(request: HttpRequest, scope: AbortScope): Promise<Response> {
+        let response: Response;
+
         try {
-            return await this.#fetchFn(request.url, buildRequestInit(request, scope.signal));
+            response = await this.#fetchFn(request.url, buildRequestInit(request, scope.signal));
         } catch (error) {
             throw this.#toTransportError(error, request, scope, 'failed without a response');
         }
+
+        this.#observeTransport(true, request);
+
+        return response;
     }
 
     /**
@@ -543,11 +557,26 @@ export class FetchHttpClient implements HttpClient {
 
         switch (scope.source()) {
             case 'timeout':
+                this.#observeTransport(false, request);
+
                 return new TimeoutError(`${target} timed out after ${String(this.#timeout)}ms.`, { cause: error });
             case 'caller':
                 return cancelledError(request, error);
             case 'none':
+                this.#observeTransport(false, request);
+
                 return new NetworkError(`${target} ${failure}.`, { cause: error });
+        }
+    }
+
+    /**
+     * Tell the transport observer of an attempt's outcome, ignoring a throw.
+     */
+    #observeTransport(reachable: boolean, request: HttpRequest): void {
+        try {
+            this.#onTransport(reachable, request);
+        } catch {
+            // An observer must never change the request's outcome.
         }
     }
 

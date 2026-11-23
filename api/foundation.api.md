@@ -63,7 +63,7 @@ import { ConfigRepository } from "../config/config-repository.js";
 import type { Environment } from "../config/environment.js";
 import type { RuntimeEnvironmentSource } from "../config/runtime-environment.js";
 import type { FeatureFlags } from "../feature-flags/feature-flags.js";
-import type { HttpClient, RequestInterceptor, ResponseErrorHandler } from "../http/http-client.js";
+import type { HttpClient, RequestInterceptor, ResponseErrorHandler, TransportObserver } from "../http/http-client.js";
 import type { ModuleHttpContributions } from "../http/module-http-contributions.js";
 import type { Logger } from "../logging/logger.js";
 import type { Confirmer } from "../notifications/confirmer.js";
@@ -97,6 +97,7 @@ export interface FoundationCoreOptions<T extends FoundationConfig> {
     readonly http?: {
         readonly interceptors?: readonly RequestInterceptor[];
         readonly onResponseError?: ResponseErrorHandler;
+        readonly onTransport?: TransportObserver;
         readonly unexpectedErrorToastKey?: string;
         readonly client?: (tools: WireHttpClientTools<T>) => HttpClient;
     };
@@ -201,7 +202,7 @@ Exported as `@sinemacula/foundation/app/wire-http-client`.
 
 ```ts
 import type { DeepReadonly } from "../config/config-repository.js";
-import type { HttpClient, RequestInterceptor, ResponseErrorHandler, UnauthorizedHandler } from "../http/http-client.js";
+import type { HttpClient, RequestInterceptor, ResponseErrorHandler, TransportObserver, UnauthorizedHandler } from "../http/http-client.js";
 import type { ModuleHttpContributions } from "../http/module-http-contributions.js";
 import type { FoundationConfig } from "./foundation-config.js";
 export interface WireHttpClientTools<T extends FoundationConfig> {
@@ -210,6 +211,7 @@ export interface WireHttpClientTools<T extends FoundationConfig> {
     readonly interceptors: readonly RequestInterceptor[];
     readonly onUnauthorized: UnauthorizedHandler | null;
     readonly onResponseError: ResponseErrorHandler;
+    readonly onTransport: TransportObserver | null;
 }
 export interface WireHttpClientOptions<T extends FoundationConfig> {
     readonly config: DeepReadonly<T>;
@@ -217,6 +219,7 @@ export interface WireHttpClientOptions<T extends FoundationConfig> {
     readonly interceptors?: readonly RequestInterceptor[];
     readonly contributions: ModuleHttpContributions;
     readonly onResponseError?: ResponseErrorHandler;
+    readonly onTransport?: TransportObserver;
     readonly unexpectedErrorToastKey?: string;
     readonly client?: (tools: WireHttpClientTools<T>) => HttpClient;
 }
@@ -360,6 +363,40 @@ export interface RuntimeEnvironmentSource {
 export declare function fetchRuntimeEnvironment(source: RuntimeEnvironmentSource, fetchFn?: typeof fetch): Promise<Record<string, string>>;
 ```
 
+## dist/connectivity/confirmed-connectivity-monitor.d.ts
+
+Exported as `@sinemacula/foundation/connectivity/confirmed-connectivity-monitor`.
+
+```ts
+import type { RetryBackoff } from "../http/fetch-http-client.js";
+import type { ConnectivityHandler, ConnectivityMonitor } from "./connectivity-monitor.js";
+export type ReachabilityProbe = (signal: AbortSignal) => Promise<boolean>;
+export interface ConnectivityHintSink {
+    hint(reachable: boolean): void;
+}
+export interface ConfirmedConnectivityMonitorOptions {
+    readonly platform: ConnectivityMonitor;
+    readonly probe: ReachabilityProbe;
+    readonly offlineAfter?: number;
+    readonly onlineAfter?: number;
+    readonly probeInterval?: number;
+    readonly probeTimeout?: number;
+    readonly heartbeatInterval?: number;
+    readonly recoveryBackoff?: RetryBackoff;
+    readonly now?: () => number;
+    readonly onError?: (error: unknown) => void;
+}
+export declare class ConfirmedConnectivityMonitor implements ConnectivityMonitor, ConnectivityHintSink {
+    #private;
+    constructor(options: ConfirmedConnectivityMonitorOptions);
+    get online(): boolean;
+    start(): void;
+    stop(): void;
+    onChange(handler: ConnectivityHandler): () => void;
+    hint(reachable: boolean): void;
+}
+```
+
 ## dist/connectivity/connectivity-monitor.d.ts
 
 Exported as `@sinemacula/foundation/connectivity/connectivity-monitor`.
@@ -386,6 +423,7 @@ export interface ConnectivityMonitorFixture {
 }
 export interface ConnectivityMonitorContractHarness {
     create(initial: boolean): ConnectivityMonitorFixture;
+    settle?(): Promise<void>;
 }
 export declare function describeConnectivityMonitorContract(harness: ConnectivityMonitorContractHarness): void;
 ```
@@ -468,7 +506,7 @@ export declare function createBearerTokenInterceptor(provider: AccessTokenProvid
 Exported as `@sinemacula/foundation/http/fetch-http-client`.
 
 ```ts
-import type { HttpClient, HttpRequestOptions, RequestInterceptor, ResponseErrorHandler, UnauthorizedHandler } from "./http-client.js";
+import type { HttpClient, HttpRequestOptions, RequestInterceptor, ResponseErrorHandler, TransportObserver, UnauthorizedHandler } from "./http-client.js";
 export interface RetryBackoff {
     delayFor(attempt: number): number;
 }
@@ -484,6 +522,7 @@ export interface FetchHttpClientOptions {
     readonly requestInterceptors?: readonly RequestInterceptor[];
     readonly onUnauthorized?: UnauthorizedHandler;
     readonly onResponseError?: ResponseErrorHandler;
+    readonly onTransport?: TransportObserver;
     readonly retry?: FetchHttpClientRetryOptions;
 }
 export declare class FetchHttpClient implements HttpClient {
@@ -524,6 +563,7 @@ export interface HttpRequest {
 export type RequestInterceptor = (request: HttpRequest) => HttpRequest | Promise<HttpRequest>;
 export type UnauthorizedHandler = (request: HttpRequest) => Promise<boolean>;
 export type ResponseErrorHandler = (error: unknown, request: HttpRequest) => void;
+export type TransportObserver = (reachable: boolean, request: HttpRequest) => void;
 export interface HttpClient {
     get<T>(path: string, options?: HttpRequestOptions): Promise<T>;
     post<T>(path: string, body?: unknown, options?: HttpRequestOptions): Promise<T>;
