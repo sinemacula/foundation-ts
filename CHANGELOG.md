@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/sinemacula/foundation-ts/compare/v0.1.0...v0.2.0) (2026-11-23)
+
+
+### Features
+
+* **connectivity:** confirm offline and recovery with reachability probes ([#65](https://github.com/sinemacula/foundation-ts/issues/65)) ([8f05fbd](https://github.com/sinemacula/foundation-ts/commit/8f05fbd547c85872d1e00b179c3bb878d74c7802))
+
 ## 0.1.0 (2026-11-17)
 
 
