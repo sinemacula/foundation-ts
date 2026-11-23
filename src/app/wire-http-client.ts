@@ -12,6 +12,7 @@ import type {
     HttpRequest,
     RequestInterceptor,
     ResponseErrorHandler,
+    TransportObserver,
     UnauthorizedHandler,
 } from '../http/http-client';
 import { HttpError, HttpValidationError } from '../http/http-error';
@@ -38,6 +39,9 @@ export interface WireHttpClientTools<T extends FoundationConfig> {
 
     /** The fully-resolved response-error handler, module handlers included. */
     readonly onResponseError: ResponseErrorHandler;
+
+    /** The observer of every attempt's transport outcome, or null when none is wired. */
+    readonly onTransport: TransportObserver | null;
 }
 
 /**
@@ -58,6 +62,9 @@ export interface WireHttpClientOptions<T extends FoundationConfig> {
 
     /** Full replacement of the preset response-error handler. */
     readonly onResponseError?: ResponseErrorHandler;
+
+    /** Told of every attempt's transport outcome, such as a connectivity monitor's hints. */
+    readonly onTransport?: TransportObserver;
 
     /** Arms the default handler's toast; the kernel ships no translations. */
     readonly unexpectedErrorToastKey?: string;
@@ -82,6 +89,7 @@ export function wireHttpClient<T extends FoundationConfig>(options: WireHttpClie
         interceptors: [...(options.interceptors ?? []), ...options.contributions.requestInterceptors],
         onUnauthorized: options.contributions.onUnauthorized,
         onResponseError: composeResponseErrorHandler(options),
+        onTransport: options.onTransport ?? null,
     };
 
     const client = options.client?.(tools) ?? buildDefaultClient(tools);
@@ -102,6 +110,7 @@ function buildDefaultClient<T extends FoundationConfig>(tools: WireHttpClientToo
         requestInterceptors: tools.interceptors,
         onResponseError: tools.onResponseError,
         ...(tools.onUnauthorized === null ? {} : { onUnauthorized: tools.onUnauthorized }),
+        ...(tools.onTransport === null ? {} : { onTransport: tools.onTransport }),
     });
 }
 

@@ -701,3 +701,114 @@ describe('FetchHttpClient - listener and timer release', () => {
         }
     });
 });
+
+describe('FetchHttpClient - transport observer', () => {
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+    });
+
+    /** A client whose observed outcomes are recorded as `[reachable, url]`. */
+    function observed(fetchFn: typeof fetch, extra: Partial<FetchHttpClientOptions> = {}) {
+        const outcomes: Array<[boolean, string]> = [];
+        const client = makeClient(fetchFn, {
+            onTransport: (reachable, request) => outcomes.push([reachable, request.url]),
+            ...extra,
+        });
+
+        return { client, outcomes };
+    }
+
+    it('observes every attempt, any status counting as reachable', async () => {
+        const fetchFn = vi
+            .fn<(...args: FetchArgs) => Promise<Response>>()
+            .mockRejectedValueOnce(new TypeError('Failed to fetch'))
+            .mockResolvedValueOnce(jsonResponse({}, 503))
+            .mockResolvedValueOnce(jsonResponse({ ok: true }));
+        const { client, outcomes } = observed(fetchFn, { retry: { attempts: 2, backoff: { delayFor: () => 0 } } });
+
+        const pending = client.get('/items', { notifyOnError: false });
+        await vi.runAllTimersAsync();
+
+        await expect(pending).resolves.toStrictEqual({ ok: true });
+        expect(outcomes).toStrictEqual([
+            [false, 'https://api.example.com/items'],
+            [true, 'https://api.example.com/items'],
+            [true, 'https://api.example.com/items'],
+        ]);
+    });
+
+    it('observes a timeout before the response as unreachable', async () => {
+        const { client, outcomes } = observed(makeFetch(hangUntilAborted), { timeout: 1_000 });
+
+        const pending = rejectionOf(client.get('/items'), TimeoutError);
+        await vi.advanceTimersByTimeAsync(1_000);
+        await pending;
+
+        expect(outcomes.map(([reachable]) => reachable)).toStrictEqual([false]);
+    });
+
+    it.each([
+        ['a stalled body', makeHangingBodyFetch, TimeoutError],
+        ['a reset body', () => makeFetch(async () => resetBodyResponse()), NetworkError],
+    ] as const)('observes the response and then %s as unreachable', async (_label, fetchFn, type) => {
+        const { client, outcomes } = observed(fetchFn(), { timeout: 1_000 });
+
+        const pending = rejectionOf(client.get('/items'), type);
+        await vi.advanceTimersByTimeAsync(1_000);
+        await pending;
+
+        expect(outcomes.map(([reachable]) => reachable)).toStrictEqual([true, false]);
+    });
+
+    it('observes nothing for a caller cancellation or an interceptor failure', async () => {
+        const caller = new AbortController();
+        const cancelled = observed(makeFetch(hangUntilAborted));
+        const pending = rejectionOf(cancelled.client.get('/items', { signal: caller.signal }), CancelledError);
+        caller.abort();
+        await pending;
+
+        const intercepted = observed(
+            makeFetch(async () => jsonResponse({})),
+            {
+                requestInterceptors: [
+                    () => {
+                        throw new Error('interceptor');
+                    },
+                ],
+            },
+        );
+        await expect(intercepted.client.get('/items')).rejects.toThrow('interceptor');
+
+        expect([...cancelled.outcomes, ...intercepted.outcomes]).toStrictEqual([]);
+    });
+
+    it('keeps the request outcome when the observer throws', async () => {
+        const client = makeClient(
+            makeFetch(async () => jsonResponse({ ok: true })),
+            {
+                onTransport: () => {
+                    throw new Error('observer');
+                },
+            },
+        );
+
+        await expect(client.get('/items')).resolves.toStrictEqual({ ok: true });
+    });
+
+    it('keeps a network failure a NetworkError when the observer throws', async () => {
+        const client = makeClient(
+            makeFetch(() => Promise.reject(new TypeError('Failed to fetch'))),
+            {
+                onTransport: () => {
+                    throw new Error('observer');
+                },
+            },
+        );
+
+        await rejectionOf(client.get('/items'), NetworkError);
+    });
+});

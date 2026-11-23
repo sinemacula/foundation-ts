@@ -94,6 +94,10 @@
             "types": "./dist/config/runtime-environment-error.d.ts",
             "default": "./dist/config/runtime-environment-error.js"
         },
+        "./connectivity/confirmed-connectivity-monitor": {
+            "types": "./dist/connectivity/confirmed-connectivity-monitor.d.ts",
+            "default": "./dist/connectivity/confirmed-connectivity-monitor.js"
+        },
         "./connectivity/connectivity-monitor": {
             "types": "./dist/connectivity/connectivity-monitor.d.ts",
             "default": "./dist/connectivity/connectivity-monitor.js"

@@ -91,6 +91,13 @@ export type UnauthorizedHandler = (request: HttpRequest) => Promise<boolean>;
 export type ResponseErrorHandler = (error: unknown, request: HttpRequest) => void;
 
 /**
+ * Told of each attempt's transport outcome: true once response headers arrive,
+ * false when the network fails or the timeout expires, before or while reading
+ * the body. A caller's cancellation is not reported, and a throw is ignored.
+ */
+export type TransportObserver = (reachable: boolean, request: HttpRequest) => void;
+
+/**
  * A typed, JSON-first HTTP client.
  */
 export interface HttpClient {

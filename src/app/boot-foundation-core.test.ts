@@ -550,6 +550,9 @@ interface HttpOptionsUnderTest {
     /** Replacement response-error handler. */
     readonly onResponseError?: (error: unknown, request: HttpRequest) => void;
 
+    /** Observer of every attempt's transport outcome. */
+    readonly onTransport?: (reachable: boolean, request: HttpRequest) => void;
+
     /** Arms the default handler's toast. */
     readonly unexpectedErrorToastKey?: string;
 }
@@ -1027,6 +1030,19 @@ describe('bootFoundationCore', () => {
 
             expect(failures).toHaveLength(1);
             expect(failures[0]?.request.url).toBe('https://api.example.com/boom');
+        });
+
+        it('tells the transport observer of requests through the built client', async () => {
+            const fetch = createSequencedFetch();
+            const onTransport = vi.fn();
+
+            const core = await bootWithHttp(fetch, { onTransport });
+
+            await core.http.get('items');
+
+            expect(onTransport.mock.calls).toStrictEqual([
+                [true, expect.objectContaining({ url: 'https://api.example.com/items' })],
+            ]);
         });
 
         it('arms the default handler with the unexpected-error toast key', async () => {

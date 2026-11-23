@@ -13,7 +13,7 @@ import type { RuntimeEnvironmentSource } from '../config/runtime-environment';
 import { fetchRuntimeEnvironment } from '../config/runtime-environment';
 import type { FeatureFlags } from '../feature-flags/feature-flags';
 import { StaticFeatureFlags } from '../feature-flags/static-feature-flags';
-import type { HttpClient, RequestInterceptor, ResponseErrorHandler } from '../http/http-client';
+import type { HttpClient, RequestInterceptor, ResponseErrorHandler, TransportObserver } from '../http/http-client';
 import type { ModuleHttpContributions } from '../http/module-http-contributions';
 import type { Logger } from '../logging/logger';
 import type { Confirmer } from '../notifications/confirmer';
@@ -109,6 +109,9 @@ export interface FoundationCoreOptions<T extends FoundationConfig> {
 
         /** Full replacement of the preset response-error handler. */
         readonly onResponseError?: ResponseErrorHandler;
+
+        /** Told of every attempt's transport outcome, such as a connectivity monitor's hints. */
+        readonly onTransport?: TransportObserver;
 
         /** Arms the default handler's toast. */
         readonly unexpectedErrorToastKey?: string;
@@ -215,6 +218,7 @@ export async function bootFoundationCore<T extends FoundationConfig>(
         contributions,
         ...(options.http?.interceptors === undefined ? {} : { interceptors: options.http.interceptors }),
         ...(options.http?.onResponseError === undefined ? {} : { onResponseError: options.http.onResponseError }),
+        ...(options.http?.onTransport === undefined ? {} : { onTransport: options.http.onTransport }),
         ...(options.http?.unexpectedErrorToastKey === undefined
             ? {}
             : { unexpectedErrorToastKey: options.http.unexpectedErrorToastKey }),
