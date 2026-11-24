@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.3.0](https://github.com/sinemacula/foundation-ts/compare/v0.2.0...v0.3.0) (2026-11-24)
+
+
+### Features
+
+* **session:** tell a refresh without its cookie apart from a refused credential ([#70](https://github.com/sinemacula/foundation-ts/issues/70)) ([ddad7c3](https://github.com/sinemacula/foundation-ts/commit/ddad7c37ea89c9da0d4f70497fa6e92650bd2fde))
+
 ## [0.2.0](https://github.com/sinemacula/foundation-ts/compare/v0.1.0...v0.2.0) (2026-11-23)
 
 
