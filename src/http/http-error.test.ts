@@ -296,6 +296,9 @@ describe('ApiErrorCode', () => {
             Locked: 10111,
             ServiceUnavailable: 10112,
             HttpError: 10113,
+            PreconditionFailed: 10114,
+            PreconditionRequired: 10115,
+            UnsupportedMediaType: 10116,
             MaintenanceMode: 10200,
             QueryTooExpensive: 10201,
         });
