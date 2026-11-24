@@ -29,6 +29,7 @@ export const ApiErrorCode = {
     UnsupportedMediaType: 10116,
     MaintenanceMode: 10200,
     QueryTooExpensive: 10201,
+    RefreshCookieMissing: 10202,
 } as const;
 
 /** One of the known {@link ApiErrorCode} values. */

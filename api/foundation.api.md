@@ -595,8 +595,12 @@ export declare const ApiErrorCode: {
     readonly Locked: 10111;
     readonly ServiceUnavailable: 10112;
     readonly HttpError: 10113;
+    readonly PreconditionFailed: 10114;
+    readonly PreconditionRequired: 10115;
+    readonly UnsupportedMediaType: 10116;
     readonly MaintenanceMode: 10200;
     readonly QueryTooExpensive: 10201;
+    readonly RefreshCookieMissing: 10202;
 };
 export type ApiErrorCode = (typeof ApiErrorCode)[keyof typeof ApiErrorCode];
 export declare class NetworkError extends Error {
@@ -1404,6 +1408,7 @@ export type RefreshOutcome = {
     readonly kind: "superseded";
 };
 export declare function classifyRefreshError(error: unknown): RefreshFailureKind;
+export declare function isRefreshCookieMissing(error: unknown): boolean;
 ```
 
 ## dist/session/session-persistence.d.ts
@@ -1532,6 +1537,7 @@ export interface FakeAuthServerOptions {
     readonly graceMs?: number;
     readonly accessTtlMs?: number;
     readonly transport?: "body" | "cookie";
+    readonly cookiesBlocked?: boolean;
     readonly password?: string;
 }
 export interface FakeAuthApiOptions {

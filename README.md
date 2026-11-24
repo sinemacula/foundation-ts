@@ -211,7 +211,7 @@ describeFeatureFlagsContract({
 ```
 
 `session/test-support/fake-auth-server` serves the session endpoints from memory, with rotation, its grace window,
-replay revocation and cookie sign-out, for integration tests of a session wiring.
+replay revocation, cookie sign-out and a browser that blocks the cookie, for integration tests of a session wiring.
 
 ### Offline detection
 
@@ -225,6 +225,13 @@ backoff capped at 30 seconds while offline. A probe that rejects, resolves anyth
 pass `http.onTransport: reachable => monitor.hint(reachable)` to `bootFoundationCore` so a failing request triggers a
 check. The initial state is the platform's, unconfirmed. Stop the monitor while the application is in the background;
 results further apart than a probe cycle never count towards one window.
+
+### Refused refresh cookies
+
+With the cookie transport, a browser that blocks the API's refresh cookie signs in, then sends its first refresh without
+the cookie. The API refuses it with `ApiErrorCode.RefreshCookieMissing`; the refresh is still `rejected` and clears the
+session, and `isRefreshCookieMissing(outcome.error)` tells it apart from an expired or revoked credential so the
+application can say why. A cookie that expired or was cleared arrives missing too.
 
 ### React Native
 

@@ -301,6 +301,7 @@ describe('ApiErrorCode', () => {
             UnsupportedMediaType: 10116,
             MaintenanceMode: 10200,
             QueryTooExpensive: 10201,
+            RefreshCookieMissing: 10202,
         });
     });
 });
