@@ -5,7 +5,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { CancelledError, HttpError, NetworkError } from '../http/http-error';
+import { ApiErrorCode, CancelledError, HttpError, NetworkError } from '../http/http-error';
 import type { SessionTokens } from './session-tokens';
 
 /**
@@ -162,4 +162,15 @@ export function classifyRefreshError(error: unknown): RefreshFailureKind {
     }
 
     return error.status === 408 || error.status === 429 || error.status >= 500 ? 'retryable' : 'failed';
+}
+
+/**
+ * Whether a refresh was refused because the request carried no refresh cookie,
+ * as when the browser blocks the API's cookie or it was cleared. The refusal is
+ * still `rejected`; only the cookie transport produces it.
+ *
+ * @param error - the failure a rejected refresh carries
+ */
+export function isRefreshCookieMissing(error: unknown): boolean {
+    return error instanceof HttpError && error.status === 401 && error.code === ApiErrorCode.RefreshCookieMissing;
 }

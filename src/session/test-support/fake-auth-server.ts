@@ -6,7 +6,7 @@
  * @copyright   2026 Sine Macula Limited
  */
 
-import { HttpError } from '../../http/http-error';
+import { ApiErrorCode, HttpError } from '../../http/http-error';
 import type { PasswordCredentials, SessionApi } from '../session-api';
 import type { RefreshResult } from '../session-outcomes';
 import { classifyRefreshError } from '../session-outcomes';
@@ -32,6 +32,9 @@ export interface FakeAuthServerOptions {
 
     /** How the refresh token travels: in the body, or in the shared cookie jar. Default 'body'. */
     readonly transport?: 'body' | 'cookie';
+
+    /** Whether the browser refuses the refresh cookie, so the jar never holds one. Default false. */
+    readonly cookiesBlocked?: boolean;
 
     /** The password every identity signs in with. Default 'secret'. */
     readonly password?: string;
@@ -114,7 +117,8 @@ const REFRESH_TOKEN = /^refresh-(s\d+)-(\d+)$/u;
 /**
  * Serve the session endpoints from memory. Sign-in, refresh and sign-out
  * responses set or delete the refresh cookie in one jar every context shares;
- * refusals are `HttpError(401)`, and a wrong password `HttpError(422)`.
+ * refusals are `HttpError(401)`, carrying the missing refresh cookie code when
+ * a cookie refresh arrives without one, and a wrong password `HttpError(422)`.
  */
 export class FakeAuthServer {
     /** Every request served, in order. */
@@ -138,6 +142,9 @@ export class FakeAuthServer {
     /** Whether the refresh token travels in the cookie jar. */
     readonly #cookie: boolean;
 
+    /** Whether the jar refuses the refresh cookie. */
+    readonly #cookiesBlocked: boolean;
+
     /** The password every identity signs in with. */
     readonly #password: string;
 
@@ -152,6 +159,7 @@ export class FakeAuthServer {
         this.#graceMs = options.graceMs ?? 30_000;
         this.#accessTtlMs = options.accessTtlMs ?? 900_000;
         this.#cookie = options.transport === 'cookie';
+        this.#cookiesBlocked = options.cookiesBlocked ?? false;
         this.#password = options.password ?? 'secret';
     }
 
@@ -296,6 +304,10 @@ export class FakeAuthServer {
      * with its current rotation.
      */
     #refresh(presented: string | null): SessionTokens {
+        if (this.#cookie && presented === null) {
+            throw new HttpError(401, 'Unauthenticated.', null, { code: ApiErrorCode.RefreshCookieMissing });
+        }
+
         const { record, current } = this.#judge(presented);
 
         if (current) {
@@ -404,7 +416,7 @@ export class FakeAuthServer {
 
         this.#grants.set(accessToken, { session: record.id, expiresAt });
 
-        if (this.#cookie) {
+        if (this.#cookie && !this.#cookiesBlocked) {
             this.#jar = refreshToken;
         }
 

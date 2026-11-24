@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { HttpError } from '../../http/http-error';
 import type { SessionApi } from '../session-api';
+import { isRefreshCookieMissing } from '../session-outcomes';
 import type { SessionTokens } from '../session-tokens';
 import type { FakeAuthServerOptions } from './fake-auth-server';
 import { FakeAuthServer } from './fake-auth-server';
@@ -282,6 +283,38 @@ describe('FakeAuthServer', () => {
             expect(server.cookie).toBeNull();
             expect(server.sessions().map(session => session.revoked)).toStrictEqual([null, 'signed_out']);
         });
+
+        it('refuses a refresh that arrives without the cookie as a missing cookie', async () => {
+            const { server, api } = harness({ transport: 'cookie' });
+
+            await api.logout(await signIn(api));
+
+            const result = await api.refresh(null);
+
+            expect(result.kind).toBe('rejected');
+            expect(result.kind === 'rejected' && isRefreshCookieMissing(result.error)).toBe(true);
+            expect(server.requests.at(-1)).toStrictEqual({ operation: 'refresh', bearer: null, refreshToken: null });
+        });
+
+        it('signs in without storing the cookie a blocking browser refuses', async () => {
+            const { server, api } = harness({ transport: 'cookie', cookiesBlocked: true });
+
+            await signIn(api);
+
+            expect(server.cookie).toBeNull();
+
+            const result = await api.refresh(null);
+
+            expect(result.kind === 'rejected' && isRefreshCookieMissing(result.error)).toBe(true);
+        });
+    });
+
+    it('refuses a body refresh without a token as an ordinary rejection', async () => {
+        const { api } = harness();
+        const result = await api.refresh(null);
+
+        expect(result.kind).toBe('rejected');
+        expect(result.kind === 'rejected' && isRefreshCookieMissing(result.error)).toBe(false);
     });
 
     it('holds a request until its gate lets it go', async () => {

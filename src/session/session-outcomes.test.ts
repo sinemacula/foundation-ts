@@ -7,13 +7,17 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { CancelledError, HttpError, NetworkError } from '../http/http-error';
+import { ApiErrorCode, CancelledError, HttpError, NetworkError } from '../http/http-error';
 import { SessionError } from './session-error';
-import { classifyRefreshError } from './session-outcomes';
+import { classifyRefreshError, isRefreshCookieMissing } from './session-outcomes';
 
 describe('classifyRefreshError', () => {
     it('treats a 401 as the server rejecting the refresh credential', () => {
         expect(classifyRefreshError(new HttpError(401, 'Unauthorized'))).toBe('rejected');
+    });
+
+    it('treats a 401 for a missing refresh cookie as a rejection', () => {
+        expect(classifyRefreshError(missingCookie())).toBe('rejected');
     });
 
     it.each([408, 429, 500, 502, 503, 599])('treats a %i as retryable', status => {
@@ -50,3 +54,29 @@ describe('classifyRefreshError', () => {
         expect(classifyRefreshError(undefined)).toBe('failed');
     });
 });
+
+describe('isRefreshCookieMissing', () => {
+    it('recognises a 401 carrying the missing refresh cookie code', () => {
+        expect(isRefreshCookieMissing(missingCookie())).toBe(true);
+    });
+
+    it.each([
+        ['another 401 code', new HttpError(401, 'Unauthorized', null, { code: ApiErrorCode.Unauthenticated })],
+        ['a 401 without a code', new HttpError(401, 'Unauthorized')],
+        [
+            'the code on another status',
+            new HttpError(403, 'Forbidden', null, { code: ApiErrorCode.RefreshCookieMissing }),
+        ],
+        ['a transport failure', new NetworkError('offline')],
+        ['a non-error', ApiErrorCode.RefreshCookieMissing],
+    ])('rejects %s', (_, error) => {
+        expect(isRefreshCookieMissing(error)).toBe(false);
+    });
+});
+
+/**
+ * Build the refusal of a refresh that carried no refresh cookie.
+ */
+function missingCookie(): HttpError {
+    return new HttpError(401, 'Unauthenticated.', null, { code: ApiErrorCode.RefreshCookieMissing });
+}
